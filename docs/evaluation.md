@@ -75,16 +75,18 @@ and cross-agent contamination failures.
 
 | Strategy | Top-5 recall | MRR | Accuracy | Wrong reuse | Duplicate creation | Max candidates | Prompt chars mean | Case-mix p95 ms |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Current full-roster proxy | 75.0% | 0.761 | 35.0% | 0.0% | 68.8% | 1,000 | 3,417.6 | 0.228 |
-| Recency-only top-five | 62.5% | 0.625 | 70.0% | 0.0% | 37.5% | 2 | 79.3 | 0.236 |
-| Hybrid directory | **100.0%** | **1.000** | **100.0%** | **0.0%** | **0.0%** | **2** | **112.8** | **3.365** |
+| Current full-roster proxy | 75.0% | 0.761 | 35.0% | 0.0% | 68.8% | 1,000 | 3,417.6 | 0.218 |
+| Recency-only top-five | 62.5% | 0.625 | 70.0% | 0.0% | 37.5% | 2 | 79.3 | 0.232 |
+| Hybrid directory | **100.0%** | **1.000** | **100.0%** | **0.0%** | **0.0%** | **2** | **112.8** | **3.375** |
 
 The table's p95 values describe a heterogeneous 20-case held-out mix and are not
 used for the scale target. The dedicated benchmark recreates the retriever on
-each run against exactly 1,000 records; after three warm-ups, 30 measured runs
-produced **7.03 ms p50** and **8.31 ms p95** locally. These are observations,
-not service-level guarantees. Immutable record features use a bounded cache,
-while changed directory records produce new features.
+each run against a temporary 1,000-record production `AgentDirectory`, including
+its lock, disk read, JSON parse, schema validation, and feature scoring. After
+three warm-ups, 30 measured runs produced **19.30 ms p50** and **28.96 ms p95**
+locally. These are observations, not service-level guarantees. Immutable record
+features use a bounded cache, while changed directory records produce new
+features.
 
 ### Depth scaling
 

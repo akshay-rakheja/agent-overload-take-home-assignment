@@ -1,6 +1,6 @@
 # Agent overload evaluation
 
-- Implementation commit: `62f022707e17589b1a2da9a193348e77a8b024e8`
+- Implementation commit: `1b1a2a173817b86fad76ba3623595cbd711fe1e3`
 - Corpus revision: `c8340d12fa35e9705aa31295eba498c05a8e5cab38738aa4cfbe742e6fef256a`
 - Corpus cases: 40 (20 development, 20 held-out)
 - Mode: deterministic offline; no credentials required
@@ -9,13 +9,13 @@
 
 | Strategy | Top-5 recall | MRR | Decision accuracy | Wrong reuse | Duplicate creation | Max candidates | Prompt chars mean | Case-mix p95 ms |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| current_full_roster_exact_name_proxy | 75.0% | 0.761 | 35.0% | 0.0% | 68.8% | 1000 | 3417.6 | 0.228 |
-| recency_only_top_five | 62.5% | 0.625 | 70.0% | 0.0% | 37.5% | 2 | 79.3 | 0.236 |
-| hybrid_directory | 100.0% | 1.000 | 100.0% | 0.0% | 0.0% | 2 | 112.8 | 3.365 |
+| current_full_roster_exact_name_proxy | 75.0% | 0.761 | 35.0% | 0.0% | 68.8% | 1000 | 3417.6 | 0.218 |
+| recency_only_top_five | 62.5% | 0.625 | 70.0% | 0.0% | 37.5% | 2 | 79.3 | 0.232 |
+| hybrid_directory | 100.0% | 1.000 | 100.0% | 0.0% | 0.0% | 2 | 112.8 | 3.375 |
 
 ## Dedicated 1,000-record latency benchmark
 
-After 3 warm-up runs, 30 measured runs produced p50 7.034 ms and p95 8.312 ms. Candidate count remained between 5 and 5.
+Using `AgentDirectory.list_records` after 3 warm-up runs, 30 measured runs produced p50 19.300 ms and p95 28.963 ms. Candidate count remained between 5 and 5.
 
 ## Held-out target assessment
 

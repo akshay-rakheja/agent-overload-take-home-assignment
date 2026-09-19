@@ -51,10 +51,12 @@ lifecycle status, creation/use timestamps, use count, optional memory summary,
 and schema version.
 
 - Legacy name-list rosters migrate deterministically and idempotently.
-- The first migrated identity for each legacy name retains an explicit pointer
-  to its old name-keyed journal; subsequent duplicate names do not inherit that
-  history. New entries use the stable UUID journal, and rehydration reads the
-  legacy journal before the UUID journal without rewriting either.
+- Each migrated identity retains an explicit pointer to its old name-keyed
+  journal unless an earlier identity resolves to the same filesystem log slug.
+  Thus `José` and `Jose` keep distinct journals, while true filename collisions
+  such as `A B` and `A-B` cannot cross-contaminate. Earlier deterministic
+  migrations are backfilled by UUID proof. New entries use the stable UUID
+  journal, and rehydration reads legacy before UUID without rewriting either.
 - Writes use a lock file plus atomic replacement; malformed data fails without
   overwriting the source.
 - Duplicate names and aliases remain distinct records. Retrieval resolves

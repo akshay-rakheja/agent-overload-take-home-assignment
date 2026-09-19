@@ -2,7 +2,7 @@
   "schema_version": 1,
   "mode": "deterministic_offline",
   "credentials_required": false,
-  "implementation_commit": "62f022707e17589b1a2da9a193348e77a8b024e8",
+  "implementation_commit": "1b1a2a173817b86fad76ba3623595cbd711fe1e3",
   "corpus_revision": "c8340d12fa35e9705aa31295eba498c05a8e5cab38738aa4cfbe742e6fef256a",
   "corpus_case_count": 40,
   "environment": {
@@ -47,8 +47,8 @@
           "prompt_characters_mean": 3417.45,
           "prompt_bytes_mean": 3417.8,
           "retrieval_latency_ms": {
-            "p50": 0.0020419247448444366,
-            "p95": 0.2118151402100922
+            "p50": 0.002354034222662449,
+            "p95": 0.20987474126741304
           },
           "failures_by_category": {
             "ambiguous_task": 2,
@@ -206,7 +206,7 @@
               "candidate_count": 1,
               "prompt_characters": 37,
               "prompt_bytes": 37,
-              "latency_ms": 0.006917165592312813
+              "latency_ms": 0.010750023648142815
             },
             {
               "case_id": "dev-paraphrase-vendor",
@@ -223,7 +223,7 @@
               "candidate_count": 2,
               "prompt_characters": 74,
               "prompt_bytes": 74,
-              "latency_ms": 0.004875008016824722
+              "latency_ms": 0.003375113010406494
             },
             {
               "case_id": "dev-context-pronoun-keith",
@@ -239,7 +239,7 @@
               "candidate_count": 1,
               "prompt_characters": 31,
               "prompt_bytes": 31,
-              "latency_ms": 0.0018330756574869156
+              "latency_ms": 0.0017909333109855652
             },
             {
               "case_id": "dev-old-relevant-renewal",
@@ -256,7 +256,7 @@
               "candidate_count": 2,
               "prompt_characters": 72,
               "prompt_bytes": 72,
-              "latency_ms": 0.0021669548004865646
+              "latency_ms": 0.0024170149117708206
             },
             {
               "case_id": "dev-recent-distractor-board",
@@ -273,7 +273,7 @@
               "candidate_count": 2,
               "prompt_characters": 72,
               "prompt_bytes": 72,
-              "latency_ms": 0.002500135451555252
+              "latency_ms": 0.0026670750230550766
             },
             {
               "case_id": "dev-similar-designers",
@@ -290,7 +290,7 @@
               "candidate_count": 2,
               "prompt_characters": 61,
               "prompt_bytes": 61,
-              "latency_ms": 0.0019168946892023087
+              "latency_ms": 0.0020421575754880905
             },
             {
               "case_id": "dev-novel-dentist",
@@ -306,7 +306,7 @@
               "candidate_count": 1,
               "prompt_characters": 28,
               "prompt_bytes": 28,
-              "latency_ms": 0.0012088567018508911
+              "latency_ms": 0.001291045919060707
             },
             {
               "case_id": "dev-ambiguous-followup",
@@ -323,7 +323,7 @@
               "candidate_count": 2,
               "prompt_characters": 64,
               "prompt_bytes": 64,
-              "latency_ms": 0.0029171351343393326
+              "latency_ms": 0.00300002284348011
             },
             {
               "case_id": "dev-archived-maya",
@@ -339,7 +339,7 @@
               "candidate_count": 1,
               "prompt_characters": 33,
               "prompt_bytes": 33,
-              "latency_ms": 0.0017499551177024841
+              "latency_ms": 0.0016670674085617065
             },
             {
               "case_id": "dev-unicode-jose",
@@ -355,7 +355,7 @@
               "candidate_count": 1,
               "prompt_characters": 37,
               "prompt_bytes": 42,
-              "latency_ms": 0.0019159633666276932
+              "latency_ms": 0.002291053533554077
             },
             {
               "case_id": "dev-scale-10",
@@ -380,7 +380,7 @@
               "candidate_count": 10,
               "prompt_characters": 422,
               "prompt_bytes": 422,
-              "latency_ms": 0.005166977643966675
+              "latency_ms": 0.005249865353107452
             },
             {
               "case_id": "dev-scale-100",
@@ -495,7 +495,7 @@
               "candidate_count": 100,
               "prompt_characters": 4192,
               "prompt_bytes": 4192,
-              "latency_ms": 0.041125109419226646
+              "latency_ms": 0.04245806485414505
             },
             {
               "case_id": "dev-scale-500",
@@ -1010,7 +1010,7 @@
               "candidate_count": 500,
               "prompt_characters": 20995,
               "prompt_bytes": 20995,
-              "latency_ms": 0.2027088776230812
+              "latency_ms": 0.200208043679595
             },
             {
               "case_id": "dev-scale-1000",
@@ -2025,7 +2025,7 @@
               "candidate_count": 1000,
               "prompt_characters": 41997,
               "prompt_bytes": 41997,
-              "latency_ms": 0.3848341293632984
+              "latency_ms": 0.39354199543595314
             },
             {
               "case_id": "dev-exact-billing",
@@ -2041,7 +2041,7 @@
               "candidate_count": 1,
               "prompt_characters": 36,
               "prompt_bytes": 36,
-              "latency_ms": 0.0029159709811210632
+              "latency_ms": 0.002959044650197029
             },
             {
               "case_id": "dev-novel-calendar",
@@ -2073,7 +2073,7 @@
               "candidate_count": 1,
               "prompt_characters": 30,
               "prompt_bytes": 30,
-              "latency_ms": 0.0012079253792762756
+              "latency_ms": 0.0012922100722789764
             },
             {
               "case_id": "dev-ambiguous-alex",
@@ -2090,7 +2090,7 @@
               "candidate_count": 2,
               "prompt_characters": 67,
               "prompt_bytes": 67,
-              "latency_ms": 0.0017080456018447876
+              "latency_ms": 0.0017920974642038345
             },
             {
               "case_id": "dev-punctuation-oconnor",
@@ -2106,7 +2106,7 @@
               "candidate_count": 1,
               "prompt_characters": 36,
               "prompt_bytes": 38,
-              "latency_ms": 0.0016659032553434372
+              "latency_ms": 0.001834006980061531
             },
             {
               "case_id": "dev-archived-audit",
@@ -2141,8 +2141,8 @@
           "prompt_characters_mean": 72.15,
           "prompt_bytes_mean": 72.75,
           "retrieval_latency_ms": {
-            "p50": 0.09693752508610487,
-            "p95": 0.4668604698963464
+            "p50": 0.09631249122321606,
+            "p95": 0.4923125030472875
           },
           "failures_by_category": {
             "archived_identity_recovery": 2,
@@ -2215,7 +2215,7 @@
               "candidate_count": 1,
               "prompt_characters": 99,
               "prompt_bytes": 99,
-              "latency_ms": 0.1759999431669712
+              "latency_ms": 0.1984999980777502
             },
             {
               "case_id": "dev-paraphrase-vendor",
@@ -2231,7 +2231,7 @@
               "candidate_count": 1,
               "prompt_characters": 98,
               "prompt_bytes": 98,
-              "latency_ms": 0.1610000617802143
+              "latency_ms": 0.16116583719849586
             },
             {
               "case_id": "dev-context-pronoun-keith",
@@ -2247,7 +2247,7 @@
               "candidate_count": 1,
               "prompt_characters": 90,
               "prompt_bytes": 90,
-              "latency_ms": 0.08054100908339024
+              "latency_ms": 0.08087488822638988
             },
             {
               "case_id": "dev-old-relevant-renewal",
@@ -2261,7 +2261,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.05691614933311939
+              "latency_ms": 0.056499848142266273
             },
             {
               "case_id": "dev-recent-distractor-board",
@@ -2277,7 +2277,7 @@
               "candidate_count": 1,
               "prompt_characters": 118,
               "prompt_bytes": 118,
-              "latency_ms": 0.11895899660885334
+              "latency_ms": 0.11983281001448631
             },
             {
               "case_id": "dev-similar-designers",
@@ -2294,7 +2294,7 @@
               "candidate_count": 2,
               "prompt_characters": 190,
               "prompt_bytes": 190,
-              "latency_ms": 0.12337509542703629
+              "latency_ms": 0.1241669524461031
             },
             {
               "case_id": "dev-novel-dentist",
@@ -2308,7 +2308,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.05833292379975319
+              "latency_ms": 0.05670799873769283
             },
             {
               "case_id": "dev-ambiguous-followup",
@@ -2325,7 +2325,7 @@
               "candidate_count": 2,
               "prompt_characters": 181,
               "prompt_bytes": 181,
-              "latency_ms": 0.1165410503745079
+              "latency_ms": 0.11516595259308815
             },
             {
               "case_id": "dev-archived-maya",
@@ -2339,7 +2339,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.023709144443273544
+              "latency_ms": 0.02337503246963024
             },
             {
               "case_id": "dev-unicode-jose",
@@ -2355,7 +2355,7 @@
               "candidate_count": 1,
               "prompt_characters": 96,
               "prompt_bytes": 104,
-              "latency_ms": 0.0863748136907816
+              "latency_ms": 0.08612498641014099
             },
             {
               "case_id": "dev-scale-10",
@@ -2371,7 +2371,7 @@
               "candidate_count": 1,
               "prompt_characters": 101,
               "prompt_bytes": 101,
-              "latency_ms": 0.39183301851153374
+              "latency_ms": 0.3903331235051155
             },
             {
               "case_id": "dev-scale-100",
@@ -2385,7 +2385,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.44875009916722775
+              "latency_ms": 0.4871250130236149
             },
             {
               "case_id": "dev-scale-500",
@@ -2399,7 +2399,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.5734579171985388
+              "latency_ms": 0.5908748134970665
             },
             {
               "case_id": "dev-scale-1000",
@@ -2413,7 +2413,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.46125007793307304
+              "latency_ms": 0.4662920255213976
             },
             {
               "case_id": "dev-exact-billing",
@@ -2429,7 +2429,7 @@
               "candidate_count": 1,
               "prompt_characters": 106,
               "prompt_bytes": 106,
-              "latency_ms": 0.07354095578193665
+              "latency_ms": 0.07362500764429569
             },
             {
               "case_id": "dev-novel-calendar",
@@ -2443,7 +2443,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.06225006654858589
+              "latency_ms": 0.06258301436901093
             },
             {
               "case_id": "dev-context-pronoun-draft",
@@ -2459,7 +2459,7 @@
               "candidate_count": 1,
               "prompt_characters": 94,
               "prompt_bytes": 94,
-              "latency_ms": 0.0744168646633625
+              "latency_ms": 0.0741670373827219
             },
             {
               "case_id": "dev-ambiguous-alex",
@@ -2476,7 +2476,7 @@
               "candidate_count": 2,
               "prompt_characters": 179,
               "prompt_bytes": 179,
-              "latency_ms": 0.10458310134708881
+              "latency_ms": 0.10349997319281101
             },
             {
               "case_id": "dev-punctuation-oconnor",
@@ -2492,7 +2492,7 @@
               "candidate_count": 1,
               "prompt_characters": 91,
               "prompt_bytes": 95,
-              "latency_ms": 0.08929194882512093
+              "latency_ms": 0.0891250092536211
             },
             {
               "case_id": "dev-archived-audit",
@@ -2506,7 +2506,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.019624829292297363
+              "latency_ms": 0.01987488940358162
             }
           ]
         },
@@ -2525,8 +2525,8 @@
           "prompt_characters_mean": 102.9,
           "prompt_bytes_mean": 103.5,
           "retrieval_latency_ms": {
-            "p50": 0.037270947359502316,
-            "p95": 32.50473093939946
+            "p50": 0.034270924516022205,
+            "p95": 31.518379144836224
           },
           "failures_by_category": {},
           "failed_cases": [],
@@ -2545,7 +2545,7 @@
               "candidate_count": 1,
               "prompt_characters": 99,
               "prompt_bytes": 99,
-              "latency_ms": 0.028999987989664078
+              "latency_ms": 0.028416048735380173
             },
             {
               "case_id": "dev-paraphrase-vendor",
@@ -2561,7 +2561,7 @@
               "candidate_count": 1,
               "prompt_characters": 98,
               "prompt_bytes": 98,
-              "latency_ms": 0.051416922360658646
+              "latency_ms": 0.05095801316201687
             },
             {
               "case_id": "dev-context-pronoun-keith",
@@ -2577,7 +2577,7 @@
               "candidate_count": 1,
               "prompt_characters": 90,
               "prompt_bytes": 90,
-              "latency_ms": 0.036125071346759796
+              "latency_ms": 0.03566686064004898
             },
             {
               "case_id": "dev-old-relevant-renewal",
@@ -2593,7 +2593,7 @@
               "candidate_count": 1,
               "prompt_characters": 103,
               "prompt_bytes": 103,
-              "latency_ms": 0.07933308370411396
+              "latency_ms": 0.07850001566112041
             },
             {
               "case_id": "dev-recent-distractor-board",
@@ -2609,7 +2609,7 @@
               "candidate_count": 1,
               "prompt_characters": 118,
               "prompt_bytes": 118,
-              "latency_ms": 0.0310409814119339
+              "latency_ms": 0.030542025342583656
             },
             {
               "case_id": "dev-similar-designers",
@@ -2626,7 +2626,7 @@
               "candidate_count": 2,
               "prompt_characters": 190,
               "prompt_bytes": 190,
-              "latency_ms": 0.03300001844763756
+              "latency_ms": 0.03287498839199543
             },
             {
               "case_id": "dev-novel-dentist",
@@ -2640,7 +2640,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.02587493509054184
+              "latency_ms": 0.02574990503489971
             },
             {
               "case_id": "dev-ambiguous-followup",
@@ -2657,7 +2657,7 @@
               "candidate_count": 2,
               "prompt_characters": 181,
               "prompt_bytes": 181,
-              "latency_ms": 0.029084039852023125
+              "latency_ms": 0.029167160391807556
             },
             {
               "case_id": "dev-archived-maya",
@@ -2673,7 +2673,7 @@
               "candidate_count": 1,
               "prompt_characters": 101,
               "prompt_bytes": 101,
-              "latency_ms": 0.06787502206861973
+              "latency_ms": 0.067457789555192
             },
             {
               "case_id": "dev-unicode-jose",
@@ -2689,7 +2689,7 @@
               "candidate_count": 1,
               "prompt_characters": 96,
               "prompt_bytes": 104,
-              "latency_ms": 0.02537504769861698
+              "latency_ms": 0.025541987270116806
             },
             {
               "case_id": "dev-scale-10",
@@ -2705,7 +2705,7 @@
               "candidate_count": 1,
               "prompt_characters": 101,
               "prompt_bytes": 101,
-              "latency_ms": 0.42562512680888176
+              "latency_ms": 0.4249999765306711
             },
             {
               "case_id": "dev-scale-100",
@@ -2721,7 +2721,7 @@
               "candidate_count": 1,
               "prompt_characters": 112,
               "prompt_bytes": 112,
-              "latency_ms": 6.621957989409566
+              "latency_ms": 6.657666992396116
             },
             {
               "case_id": "dev-scale-500",
@@ -2737,7 +2737,7 @@
               "candidate_count": 1,
               "prompt_characters": 108,
               "prompt_bytes": 108,
-              "latency_ms": 31.947707990184426
+              "latency_ms": 31.00187494419515
             },
             {
               "case_id": "dev-scale-1000",
@@ -2753,7 +2753,7 @@
               "candidate_count": 1,
               "prompt_characters": 97,
               "prompt_bytes": 97,
-              "latency_ms": 43.08816697448492
+              "latency_ms": 41.33195895701647
             },
             {
               "case_id": "dev-exact-billing",
@@ -2769,7 +2769,7 @@
               "candidate_count": 1,
               "prompt_characters": 106,
               "prompt_bytes": 106,
-              "latency_ms": 0.04124990664422512
+              "latency_ms": 0.03191595897078514
             },
             {
               "case_id": "dev-novel-calendar",
@@ -2783,7 +2783,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.02887495793402195
+              "latency_ms": 0.02650008536875248
             },
             {
               "case_id": "dev-context-pronoun-draft",
@@ -2799,7 +2799,7 @@
               "candidate_count": 1,
               "prompt_characters": 94,
               "prompt_bytes": 94,
-              "latency_ms": 0.038416823372244835
+              "latency_ms": 0.037416815757751465
             },
             {
               "case_id": "dev-ambiguous-alex",
@@ -2816,7 +2816,7 @@
               "candidate_count": 2,
               "prompt_characters": 179,
               "prompt_bytes": 179,
-              "latency_ms": 0.03245798870921135
+              "latency_ms": 0.03008311614394188
             },
             {
               "case_id": "dev-punctuation-oconnor",
@@ -2832,7 +2832,7 @@
               "candidate_count": 1,
               "prompt_characters": 91,
               "prompt_bytes": 95,
-              "latency_ms": 0.02870894968509674
+              "latency_ms": 0.026582973077893257
             },
             {
               "case_id": "dev-archived-audit",
@@ -2848,7 +2848,7 @@
               "candidate_count": 1,
               "prompt_characters": 94,
               "prompt_bytes": 94,
-              "latency_ms": 0.0708338338881731
+              "latency_ms": 0.06924988701939583
             }
           ]
         }
@@ -2869,8 +2869,8 @@
           "prompt_characters_mean": 3417.6,
           "prompt_bytes_mean": 3417.85,
           "retrieval_latency_ms": {
-            "p50": 0.001978944055736065,
-            "p95": 0.22808561334386482
+            "p50": 0.0018954742699861526,
+            "p95": 0.21768758306279792
           },
           "failures_by_category": {
             "ambiguous_task": 2,
@@ -3003,7 +3003,7 @@
               "candidate_count": 1,
               "prompt_characters": 36,
               "prompt_bytes": 36,
-              "latency_ms": 0.003708992153406143
+              "latency_ms": 0.0030838418751955032
             },
             {
               "case_id": "test-paraphrase-recruiting",
@@ -3019,7 +3019,7 @@
               "candidate_count": 1,
               "prompt_characters": 45,
               "prompt_bytes": 45,
-              "latency_ms": 0.0015830155462026596
+              "latency_ms": 0.0016249250620603561
             },
             {
               "case_id": "test-context-pronoun-board",
@@ -3035,7 +3035,7 @@
               "candidate_count": 1,
               "prompt_characters": 39,
               "prompt_bytes": 39,
-              "latency_ms": 0.0013329554349184036
+              "latency_ms": 0.0014998950064182281
             },
             {
               "case_id": "test-old-relevant-insurance",
@@ -3052,7 +3052,7 @@
               "candidate_count": 2,
               "prompt_characters": 75,
               "prompt_bytes": 75,
-              "latency_ms": 0.002083834260702133
+              "latency_ms": 0.002084067091345787
             },
             {
               "case_id": "test-recent-distractor-legal",
@@ -3069,7 +3069,7 @@
               "candidate_count": 2,
               "prompt_characters": 78,
               "prompt_bytes": 78,
-              "latency_ms": 0.002125045284628868
+              "latency_ms": 0.0020831357687711716
             },
             {
               "case_id": "test-similar-expenses",
@@ -3086,7 +3086,7 @@
               "candidate_count": 2,
               "prompt_characters": 69,
               "prompt_bytes": 69,
-              "latency_ms": 0.0017499551177024841
+              "latency_ms": 0.0018749851733446121
             },
             {
               "case_id": "test-novel-travel",
@@ -3102,7 +3102,7 @@
               "candidate_count": 1,
               "prompt_characters": 30,
               "prompt_bytes": 30,
-              "latency_ms": 0.0012088567018508911
+              "latency_ms": 0.001250067725777626
             },
             {
               "case_id": "test-ambiguous-jordan",
@@ -3119,7 +3119,7 @@
               "candidate_count": 2,
               "prompt_characters": 72,
               "prompt_bytes": 72,
-              "latency_ms": 0.0020419247448444366
+              "latency_ms": 0.0018749851733446121
             },
             {
               "case_id": "test-archived-tax",
@@ -3135,7 +3135,7 @@
               "candidate_count": 1,
               "prompt_characters": 33,
               "prompt_bytes": 33,
-              "latency_ms": 0.0018749851733446121
+              "latency_ms": 0.0019168946892023087
             },
             {
               "case_id": "test-unicode-zoe",
@@ -3151,7 +3151,7 @@
               "candidate_count": 1,
               "prompt_characters": 35,
               "prompt_bytes": 40,
-              "latency_ms": 0.001666136085987091
+              "latency_ms": 0.0015420373529195786
             },
             {
               "case_id": "test-scale-10",
@@ -3176,7 +3176,7 @@
               "candidate_count": 10,
               "prompt_characters": 412,
               "prompt_bytes": 412,
-              "latency_ms": 0.006666872650384903
+              "latency_ms": 0.006166985258460045
             },
             {
               "case_id": "test-scale-100",
@@ -3291,7 +3291,7 @@
               "candidate_count": 100,
               "prompt_characters": 4197,
               "prompt_bytes": 4197,
-              "latency_ms": 0.0435409601777792
+              "latency_ms": 0.04291697405278683
             },
             {
               "case_id": "test-scale-500",
@@ -3806,7 +3806,7 @@
               "candidate_count": 500,
               "prompt_characters": 21002,
               "prompt_bytes": 21002,
-              "latency_ms": 0.21891691721975803
+              "latency_ms": 0.20762509666383266
             },
             {
               "case_id": "test-scale-1000",
@@ -4821,7 +4821,7 @@
               "candidate_count": 1000,
               "prompt_characters": 41998,
               "prompt_bytes": 41998,
-              "latency_ms": 0.40229083970189095
+              "latency_ms": 0.40887482464313507
             },
             {
               "case_id": "test-exact-vendor",
@@ -4837,7 +4837,7 @@
               "candidate_count": 1,
               "prompt_characters": 36,
               "prompt_bytes": 36,
-              "latency_ms": 0.0034170225262641907
+              "latency_ms": 0.0024579931050539017
             },
             {
               "case_id": "test-novel-pet",
@@ -4853,7 +4853,7 @@
               "candidate_count": 1,
               "prompt_characters": 32,
               "prompt_bytes": 32,
-              "latency_ms": 0.001209089532494545
+              "latency_ms": 0.0014170072972774506
             },
             {
               "case_id": "test-context-pronoun-landlord",
@@ -4869,7 +4869,7 @@
               "candidate_count": 1,
               "prompt_characters": 37,
               "prompt_bytes": 37,
-              "latency_ms": 0.0012079253792762756
+              "latency_ms": 0.001291045919060707
             },
             {
               "case_id": "test-ambiguous-account",
@@ -4886,7 +4886,7 @@
               "candidate_count": 2,
               "prompt_characters": 60,
               "prompt_bytes": 60,
-              "latency_ms": 0.0022498425096273422
+              "latency_ms": 0.0019159633666276932
             },
             {
               "case_id": "test-punctuation-acme",
@@ -4902,7 +4902,7 @@
               "candidate_count": 1,
               "prompt_characters": 27,
               "prompt_bytes": 27,
-              "latency_ms": 0.0011669471859931946
+              "latency_ms": 0.0012919772416353226
             },
             {
               "case_id": "test-archived-orchid",
@@ -4918,7 +4918,7 @@
               "candidate_count": 1,
               "prompt_characters": 39,
               "prompt_bytes": 39,
-              "latency_ms": 0.0019159633666276932
+              "latency_ms": 0.0017078127712011337
             }
           ]
         },
@@ -4937,8 +4937,8 @@
           "prompt_characters_mean": 79.35,
           "prompt_bytes_mean": 79.75,
           "retrieval_latency_ms": {
-            "p50": 0.08906249422580004,
-            "p95": 0.23598052794113766
+            "p50": 0.08977041579782963,
+            "p95": 0.2324915025383235
           },
           "failures_by_category": {
             "archived_identity_recovery": 2,
@@ -5011,7 +5011,7 @@
               "candidate_count": 1,
               "prompt_characters": 92,
               "prompt_bytes": 92,
-              "latency_ms": 0.07916614413261414
+              "latency_ms": 0.0849161297082901
             },
             {
               "case_id": "test-paraphrase-recruiting",
@@ -5027,7 +5027,7 @@
               "candidate_count": 1,
               "prompt_characters": 123,
               "prompt_bytes": 123,
-              "latency_ms": 0.10087504051625729
+              "latency_ms": 0.10583293624222279
             },
             {
               "case_id": "test-context-pronoun-board",
@@ -5043,7 +5043,7 @@
               "candidate_count": 1,
               "prompt_characters": 117,
               "prompt_bytes": 117,
-              "latency_ms": 0.08908403106033802
+              "latency_ms": 0.0887908972799778
             },
             {
               "case_id": "test-old-relevant-insurance",
@@ -5057,7 +5057,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.05691591650247574
+              "latency_ms": 0.054999953135848045
             },
             {
               "case_id": "test-recent-distractor-legal",
@@ -5074,7 +5074,7 @@
               "candidate_count": 2,
               "prompt_characters": 207,
               "prompt_bytes": 207,
-              "latency_ms": 0.12983405031263828
+              "latency_ms": 0.12854207307100296
             },
             {
               "case_id": "test-similar-expenses",
@@ -5091,7 +5091,7 @@
               "candidate_count": 2,
               "prompt_characters": 190,
               "prompt_bytes": 190,
-              "latency_ms": 0.12562517076730728
+              "latency_ms": 0.12591690756380558
             },
             {
               "case_id": "test-novel-travel",
@@ -5105,7 +5105,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.05420902743935585
+              "latency_ms": 0.05349982529878616
             },
             {
               "case_id": "test-ambiguous-jordan",
@@ -5122,7 +5122,7 @@
               "candidate_count": 2,
               "prompt_characters": 204,
               "prompt_bytes": 204,
-              "latency_ms": 0.11574989184737206
+              "latency_ms": 0.11629215441644192
             },
             {
               "case_id": "test-archived-tax",
@@ -5136,7 +5136,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.019834144040942192
+              "latency_ms": 0.02050003968179226
             },
             {
               "case_id": "test-unicode-zoe",
@@ -5152,7 +5152,7 @@
               "candidate_count": 1,
               "prompt_characters": 102,
               "prompt_bytes": 110,
-              "latency_ms": 0.08741696365177631
+              "latency_ms": 0.08649984374642372
             },
             {
               "case_id": "test-scale-10",
@@ -5168,7 +5168,7 @@
               "candidate_count": 1,
               "prompt_characters": 93,
               "prompt_bytes": 93,
-              "latency_ms": 0.10195886716246605
+              "latency_ms": 0.0990831758826971
             },
             {
               "case_id": "test-scale-100",
@@ -5182,7 +5182,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.10133301839232445
+              "latency_ms": 0.10145804844796658
             },
             {
               "case_id": "test-scale-500",
@@ -5196,7 +5196,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.22741593420505524
+              "latency_ms": 0.22399984300136566
             },
             {
               "case_id": "test-scale-1000",
@@ -5210,7 +5210,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.39870780892670155
+              "latency_ms": 0.3938330337405205
             },
             {
               "case_id": "test-exact-vendor",
@@ -5226,7 +5226,7 @@
               "candidate_count": 1,
               "prompt_characters": 97,
               "prompt_bytes": 97,
-              "latency_ms": 0.06899982690811157
+              "latency_ms": 0.0677919015288353
             },
             {
               "case_id": "test-novel-pet",
@@ -5240,7 +5240,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.05458318628370762
+              "latency_ms": 0.0527501106262207
             },
             {
               "case_id": "test-context-pronoun-landlord",
@@ -5256,7 +5256,7 @@
               "candidate_count": 1,
               "prompt_characters": 102,
               "prompt_bytes": 102,
-              "latency_ms": 0.08904095739126205
+              "latency_ms": 0.09074993431568146
             },
             {
               "case_id": "test-ambiguous-account",
@@ -5273,7 +5273,7 @@
               "candidate_count": 2,
               "prompt_characters": 175,
               "prompt_bytes": 175,
-              "latency_ms": 0.1016249880194664
+              "latency_ms": 0.10866601951420307
             },
             {
               "case_id": "test-punctuation-acme",
@@ -5289,7 +5289,7 @@
               "candidate_count": 1,
               "prompt_characters": 85,
               "prompt_bytes": 85,
-              "latency_ms": 0.06354204379022121
+              "latency_ms": 0.06479211151599884
             },
             {
               "case_id": "test-archived-orchid",
@@ -5303,7 +5303,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.019290950149297714
+              "latency_ms": 0.01974985934793949
             }
           ]
         },
@@ -5322,8 +5322,8 @@
           "prompt_characters_mean": 112.85,
           "prompt_bytes_mean": 113.25,
           "retrieval_latency_ms": {
-            "p50": 0.03666686825454235,
-            "p95": 3.3654434955678902
+            "p50": 0.03664602991193533,
+            "p95": 3.3750859322026394
           },
           "failures_by_category": {},
           "failed_cases": [],
@@ -5342,7 +5342,7 @@
               "candidate_count": 1,
               "prompt_characters": 92,
               "prompt_bytes": 92,
-              "latency_ms": 0.02891593612730503
+              "latency_ms": 0.028624897822737694
             },
             {
               "case_id": "test-paraphrase-recruiting",
@@ -5358,7 +5358,7 @@
               "candidate_count": 1,
               "prompt_characters": 123,
               "prompt_bytes": 123,
-              "latency_ms": 0.04120916128158569
+              "latency_ms": 0.041499966755509377
             },
             {
               "case_id": "test-context-pronoun-board",
@@ -5374,7 +5374,7 @@
               "candidate_count": 1,
               "prompt_characters": 117,
               "prompt_bytes": 117,
-              "latency_ms": 0.035999808460474014
+              "latency_ms": 0.03641704097390175
             },
             {
               "case_id": "test-old-relevant-insurance",
@@ -5390,7 +5390,7 @@
               "candidate_count": 1,
               "prompt_characters": 101,
               "prompt_bytes": 101,
-              "latency_ms": 0.07495912723243237
+              "latency_ms": 0.0779579859226942
             },
             {
               "case_id": "test-recent-distractor-legal",
@@ -5407,7 +5407,7 @@
               "candidate_count": 2,
               "prompt_characters": 207,
               "prompt_bytes": 207,
-              "latency_ms": 0.03733392804861069
+              "latency_ms": 0.03687501884996891
             },
             {
               "case_id": "test-similar-expenses",
@@ -5424,7 +5424,7 @@
               "candidate_count": 2,
               "prompt_characters": 190,
               "prompt_bytes": 190,
-              "latency_ms": 0.03041699528694153
+              "latency_ms": 0.033207936212420464
             },
             {
               "case_id": "test-novel-travel",
@@ -5438,7 +5438,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.021665822714567184
+              "latency_ms": 0.022292137145996094
             },
             {
               "case_id": "test-ambiguous-jordan",
@@ -5455,7 +5455,7 @@
               "candidate_count": 2,
               "prompt_characters": 204,
               "prompt_bytes": 204,
-              "latency_ms": 0.02770894207060337
+              "latency_ms": 0.027999980375170708
             },
             {
               "case_id": "test-archived-tax",
@@ -5471,7 +5471,7 @@
               "candidate_count": 1,
               "prompt_characters": 114,
               "prompt_bytes": 114,
-              "latency_ms": 0.07337494753301144
+              "latency_ms": 0.07379194721579552
             },
             {
               "case_id": "test-unicode-zoe",
@@ -5487,7 +5487,7 @@
               "candidate_count": 1,
               "prompt_characters": 102,
               "prompt_bytes": 110,
-              "latency_ms": 0.022625084966421127
+              "latency_ms": 0.02300017513334751
             },
             {
               "case_id": "test-scale-10",
@@ -5503,7 +5503,7 @@
               "candidate_count": 1,
               "prompt_characters": 93,
               "prompt_bytes": 93,
-              "latency_ms": 0.08012517355382442
+              "latency_ms": 0.08262507617473602
             },
             {
               "case_id": "test-scale-100",
@@ -5519,7 +5519,7 @@
               "candidate_count": 1,
               "prompt_characters": 117,
               "prompt_bytes": 117,
-              "latency_ms": 0.7079159840941429
+              "latency_ms": 0.7251249626278877
             },
             {
               "case_id": "test-scale-500",
@@ -5535,7 +5535,7 @@
               "candidate_count": 1,
               "prompt_characters": 117,
               "prompt_bytes": 117,
-              "latency_ms": 3.2207081094384193
+              "latency_ms": 3.228667192161083
             },
             {
               "case_id": "test-scale-1000",
@@ -5551,7 +5551,7 @@
               "candidate_count": 1,
               "prompt_characters": 108,
               "prompt_bytes": 108,
-              "latency_ms": 6.115415832027793
+              "latency_ms": 6.157041992992163
             },
             {
               "case_id": "test-exact-vendor",
@@ -5567,7 +5567,7 @@
               "candidate_count": 1,
               "prompt_characters": 97,
               "prompt_bytes": 97,
-              "latency_ms": 0.025833025574684143
+              "latency_ms": 0.026333145797252655
             },
             {
               "case_id": "test-novel-pet",
@@ -5581,7 +5581,7 @@
               "candidate_count": 0,
               "prompt_characters": 0,
               "prompt_bytes": 0,
-              "latency_ms": 0.023667002096772194
+              "latency_ms": 0.023999949917197227
             },
             {
               "case_id": "test-context-pronoun-landlord",
@@ -5597,7 +5597,7 @@
               "candidate_count": 1,
               "prompt_characters": 102,
               "prompt_bytes": 102,
-              "latency_ms": 0.039041973650455475
+              "latency_ms": 0.03937492147088051
             },
             {
               "case_id": "test-ambiguous-account",
@@ -5614,7 +5614,7 @@
               "candidate_count": 2,
               "prompt_characters": 175,
               "prompt_bytes": 175,
-              "latency_ms": 0.029124785214662552
+              "latency_ms": 0.029416056349873543
             },
             {
               "case_id": "test-punctuation-acme",
@@ -5630,7 +5630,7 @@
               "candidate_count": 1,
               "prompt_characters": 85,
               "prompt_bytes": 85,
-              "latency_ms": 0.021625077351927757
+              "latency_ms": 0.021875137463212013
             },
             {
               "case_id": "test-archived-orchid",
@@ -5646,7 +5646,7 @@
               "candidate_count": 1,
               "prompt_characters": 113,
               "prompt_bytes": 113,
-              "latency_ms": 0.07362500764429569
+              "latency_ms": 0.07304083555936813
             }
           ]
         }
@@ -5655,6 +5655,7 @@
     "scale_benchmarks": {
       "roster_1000": {
         "roster_size": 1000,
+        "source": "AgentDirectory.list_records",
         "warmup_runs": 3,
         "measured_runs": 30,
         "candidate_count_max": 5,
@@ -5668,8 +5669,8 @@
         },
         "correct_reuse_rate": 1.0,
         "latency_ms": {
-          "p50": 7.033624569885433,
-          "p95": 8.311925223097205
+          "p50": 19.299979088827968,
+          "p95": 28.962607972789527
         }
       }
     },
@@ -5700,7 +5701,7 @@
           "prompt_characters": 1315,
           "prompt_bytes": 1315,
           "included_entry_count": 10,
-          "latency_ms": 0.005958834663033485
+          "latency_ms": 0.005833106115460396
         },
         "bounded": {
           "prompt_characters": 1388,
@@ -5709,7 +5710,7 @@
           "omitted_entry_count": 0,
           "truncated_entry_count": 0,
           "summary_used": true,
-          "latency_ms": 0.053999945521354675
+          "latency_ms": 0.05566701292991638
         },
         "raw_log_unchanged": true,
         "cross_agent_contamination_failures": 0
@@ -5722,7 +5723,7 @@
           "prompt_characters": 13224,
           "prompt_bytes": 13224,
           "included_entry_count": 100,
-          "latency_ms": 0.031125033274292946
+          "latency_ms": 0.03374996595084667
         },
         "bounded": {
           "prompt_characters": 4374,
@@ -5731,7 +5732,7 @@
           "omitted_entry_count": 68,
           "truncated_entry_count": 0,
           "summary_used": true,
-          "latency_ms": 0.06858399137854576
+          "latency_ms": 0.07062498480081558
         },
         "raw_log_unchanged": true,
         "cross_agent_contamination_failures": 0
@@ -5744,7 +5745,7 @@
           "prompt_characters": 132249,
           "prompt_bytes": 132249,
           "included_entry_count": 1000,
-          "latency_ms": 0.2794580068439245
+          "latency_ms": 0.3139160107821226
         },
         "bounded": {
           "prompt_characters": 4375,
@@ -5753,7 +5754,7 @@
           "omitted_entry_count": 968,
           "truncated_entry_count": 0,
           "summary_used": true,
-          "latency_ms": 0.3796669188886881
+          "latency_ms": 0.3809579648077488
         },
         "raw_log_unchanged": true,
         "cross_agent_contamination_failures": 0
@@ -5766,7 +5767,7 @@
           "prompt_characters": 1322499,
           "prompt_bytes": 1322499,
           "included_entry_count": 10000,
-          "latency_ms": 3.181499894708395
+          "latency_ms": 2.8010420501232147
         },
         "bounded": {
           "prompt_characters": 4376,
@@ -5775,19 +5776,19 @@
           "omitted_entry_count": 9968,
           "truncated_entry_count": 0,
           "summary_used": true,
-          "latency_ms": 3.712208941578865
+          "latency_ms": 3.4629160072654486
         },
         "raw_log_unchanged": true,
         "cross_agent_contamination_failures": 0
       }
     ],
     "full_history_latency_ms": {
-      "p50": 0.15529152005910873,
-      "p95": 2.7461936115287235
+      "p50": 0.17383298836648464,
+      "p95": 2.42797314422205
     },
     "bounded_context_latency_ms": {
-      "p50": 0.22412545513361692,
-      "p95": 3.212327638175337
+      "p50": 0.2257914748042822,
+      "p95": 3.0006223008967927
     }
   },
   "limitations": [
