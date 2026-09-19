@@ -50,3 +50,9 @@ def get_agent_roster() -> AgentRoster:
     """Get the singleton compatibility roster."""
 
     return _agent_roster
+
+
+def get_agent_directory() -> AgentDirectory:
+    """Get the persistent directory behind the compatibility roster."""
+
+    return _agent_roster.directory

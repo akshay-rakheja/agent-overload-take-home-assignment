@@ -2,12 +2,20 @@
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
+from uuid import UUID
 
 from ...logging_config import logger
 from ...services.conversation import get_conversation_log
-from ...services.execution import get_agent_roster, get_execution_agent_logs
+from ...services.execution import (
+    AgentDirectory,
+    ExecutionAgentLogStore,
+    UnknownAgentError,
+    get_agent_directory,
+    get_execution_agent_logs,
+    normalize_agent_text,
+)
 from ..execution_agent.batch_manager import ExecutionBatchManager
 
 
@@ -20,23 +28,42 @@ class ToolResult:
     user_message: Optional[str] = None
     recorded_reply: bool = False
 
+
+@dataclass
+class DispatchContext:
+    """Per-interaction idempotency state for newly created identities."""
+
+    created_agent_ids: dict[tuple[str, str], UUID] = field(default_factory=dict)
+
 # Tool schemas for OpenRouter
 TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
             "name": "send_message_to_agent",
-            "description": "Deliver instructions to a specific execution agent. Creates a new agent if the name doesn't exist in the roster, or reuses an existing one.",
+            "description": "Reuse a listed execution agent by stable ID, or create a new one with a name and purpose.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Stable ID from agent_candidates. Required when reusing an existing agent."
+                    },
                     "agent_name": {
                         "type": "string",
-                        "description": "Human-readable agent name describing its purpose (e.g., 'Vercel Job Offer', 'Email to Sharanjeet'). This name will be used to identify and potentially reuse the agent."
+                        "description": "Human-readable name for a new agent. Do not send this when reusing by ID."
+                    },
+                    "agent_purpose": {
+                        "type": "string",
+                        "description": "Concise routing purpose for a new agent. Required with agent_name."
                     },
                     "instructions": {"type": "string", "description": "Instructions for the agent to execute."},
                 },
-                "required": ["agent_name", "instructions"],
+                "required": ["instructions"],
+                "oneOf": [
+                    {"required": ["agent_id"]},
+                    {"required": ["agent_name", "agent_purpose"]}
+                ],
                 "additionalProperties": False,
             },
         },
@@ -109,28 +136,88 @@ _EXECUTION_BATCH_MANAGER = ExecutionBatchManager()
 
 
 # Create or reuse execution agent and dispatch instructions asynchronously
-def send_message_to_agent(agent_name: str, instructions: str) -> ToolResult:
-    """Send instructions to an execution agent."""
-    roster = get_agent_roster()
-    roster.load()
-    existing_agents = set(roster.get_agents())
-    is_new = agent_name not in existing_agents
+def send_message_to_agent(
+    instructions: str,
+    agent_id: str | None = None,
+    agent_name: str | None = None,
+    agent_purpose: str | None = None,
+    *,
+    dispatch_context: DispatchContext | None = None,
+    directory: AgentDirectory | None = None,
+    log_store: ExecutionAgentLogStore | None = None,
+    batch_manager: ExecutionBatchManager | None = None,
+) -> ToolResult:
+    """Dispatch by stable ID, or idempotently create a new identity for this turn."""
 
-    if is_new:
-        roster.add_agent(agent_name)
+    resolved_directory = directory or get_agent_directory()
+    resolved_logs = log_store or get_execution_agent_logs()
+    resolved_batch_manager = batch_manager or _EXECUTION_BATCH_MANAGER
+    context = dispatch_context or DispatchContext()
 
-    get_execution_agent_logs().record_request(agent_name, instructions)
+    if agent_id and (agent_name or agent_purpose):
+        return ToolResult(
+            success=False,
+            payload={
+                "code": "invalid_agent_reference",
+                "message": "Provide agent_id for reuse or agent_name and agent_purpose for creation, not both.",
+            },
+        )
+
+    is_new = False
+    if agent_id:
+        try:
+            record = resolved_directory.require(agent_id)
+        except UnknownAgentError:
+            return ToolResult(
+                success=False,
+                payload={
+                    "code": "unknown_agent_id",
+                    "message": "The selected execution agent no longer exists. Refresh candidates.",
+                },
+            )
+    else:
+        if not agent_name or not agent_purpose:
+            return ToolResult(
+                success=False,
+                payload={
+                    "code": "missing_new_agent_metadata",
+                    "message": "Creating an execution agent requires both agent_name and agent_purpose.",
+                },
+            )
+        creation_key = (
+            normalize_agent_text(agent_name),
+            normalize_agent_text(agent_purpose),
+        )
+        existing_id = context.created_agent_ids.get(creation_key)
+        if existing_id is not None:
+            record = resolved_directory.require(existing_id)
+        else:
+            record = resolved_directory.create(
+                name=agent_name,
+                purpose=agent_purpose,
+                aliases=(agent_name,),
+            )
+            context.created_agent_ids[creation_key] = record.agent_id
+            is_new = True
+
+    record = resolved_directory.mark_used(record.agent_id)
+    stable_id = str(record.agent_id)
+    resolved_logs.record_request(stable_id, instructions)
 
     action = "Created" if is_new else "Reused"
-    logger.info(f"{action} agent: {agent_name}")
+    logger.info(f"{action} agent: {record.name} ({stable_id})")
 
     async def _execute_async() -> None:
         try:
-            result = await _EXECUTION_BATCH_MANAGER.execute_agent(agent_name, instructions)
+            result = await resolved_batch_manager.execute_agent(
+                record.name,
+                instructions,
+                agent_id=stable_id,
+            )
             status = "SUCCESS" if result.success else "FAILED"
-            logger.info(f"Agent '{agent_name}' completed: {status}")
+            logger.info(f"Agent '{record.name}' completed: {status}")
         except Exception as exc:  # pragma: no cover - defensive
-            logger.error(f"Agent '{agent_name}' failed: {str(exc)}")
+            logger.error(f"Agent '{record.name}' failed: {str(exc)}")
 
     try:
         loop = asyncio.get_running_loop()
@@ -144,7 +231,8 @@ def send_message_to_agent(agent_name: str, instructions: str) -> ToolResult:
         success=True,
         payload={
             "status": "submitted",
-            "agent_name": agent_name,
+            "agent_id": stable_id,
+            "agent_name": record.name,
             "new_agent_created": is_new,
         },
     )
@@ -215,7 +303,12 @@ def get_tool_schemas():
 
 
 # Route tool calls to appropriate handlers with argument validation and error handling
-def handle_tool_call(name: str, arguments: Any) -> ToolResult:
+def handle_tool_call(
+    name: str,
+    arguments: Any,
+    *,
+    dispatch_context: DispatchContext | None = None,
+) -> ToolResult:
     """Handle tool calls from interaction agent."""
     try:
         if isinstance(arguments, str):
@@ -226,7 +319,7 @@ def handle_tool_call(name: str, arguments: Any) -> ToolResult:
             return ToolResult(success=False, payload={"error": "Invalid arguments format"})
 
         if name == "send_message_to_agent":
-            return send_message_to_agent(**args)
+            return send_message_to_agent(**args, dispatch_context=dispatch_context)
         if name == "send_message_to_user":
             return send_message_to_user(**args)
         if name == "send_draft":

@@ -1,13 +1,30 @@
 """Interaction agent helpers for prompt construction."""
 
+from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 from typing import Dict, List
 
-from ...services.execution import get_agent_roster
+from ...services.execution import (
+    AgentCandidate,
+    AgentDirectory,
+    AgentRetriever,
+    AgentRouter,
+    RetrievalQuery,
+    RoutingDecision,
+    get_agent_directory,
+)
 
 _prompt_path = Path(__file__).parent / "system_prompt.md"
 SYSTEM_PROMPT = _prompt_path.read_text(encoding="utf-8").strip()
+
+
+@dataclass(frozen=True)
+class CandidateContext:
+    """Bounded candidate set and the deterministic policy recommendation."""
+
+    candidates: tuple[AgentCandidate, ...]
+    decision: RoutingDecision
 
 
 # Load and return the pre-defined system prompt from markdown file
@@ -21,12 +38,19 @@ def prepare_message_with_history(
     latest_text: str,
     transcript: str,
     message_type: str = "user",
+    *,
+    directory: AgentDirectory | None = None,
 ) -> List[Dict[str, str]]:
-    """Compose a message that bundles history, roster, and the latest turn."""
+    """Compose a message with history, a bounded candidate set, and the latest turn."""
     sections: List[str] = []
+    candidate_context = build_candidate_context(
+        latest_text,
+        transcript,
+        directory=directory,
+    )
 
     sections.append(_render_conversation_history(transcript))
-    sections.append(f"<active_agents>\n{_render_active_agents()}\n</active_agents>")
+    sections.append(_render_agent_candidates(candidate_context))
     sections.append(_render_current_turn(latest_text, message_type))
 
     content = "\n\n".join(sections)
@@ -41,20 +65,41 @@ def _render_conversation_history(transcript: str) -> str:
     return f"<conversation_history>\n{history}\n</conversation_history>"
 
 
-# Format currently active execution agents into XML tags for LLM awareness
-def _render_active_agents() -> str:
-    roster = get_agent_roster()
-    roster.load()
-    agents = roster.get_agents()
+def build_candidate_context(
+    latest_text: str,
+    transcript: str,
+    *,
+    directory: AgentDirectory | None = None,
+) -> CandidateContext:
+    """Retrieve and route using only the current turn and bounded working context."""
 
-    if not agents:
-        return "None"
+    resolved_directory = directory or get_agent_directory()
+    query = RetrievalQuery(text=latest_text, conversation_context=transcript)
+    candidates = AgentRetriever(resolved_directory.list_records).retrieve(query)
+    decision = AgentRouter().route(query, candidates)
+    return CandidateContext(candidates=tuple(candidates), decision=decision)
 
-    rendered: List[str] = []
-    for agent_name in agents:
-        name = escape(agent_name or "agent", quote=True)
-        rendered.append(f'<agent name="{name}" />')
 
+def _render_agent_candidates(context: CandidateContext) -> str:
+    """Render stable IDs and concise evidence without numeric certainty claims."""
+
+    action = escape(context.decision.action.value, quote=True)
+    rendered = [f'<agent_candidates routing_action="{action}">']
+    if not context.candidates:
+        rendered.append("None")
+    else:
+        for candidate in context.candidates:
+            identifier = escape(str(candidate.agent_id), quote=True)
+            name = escape(candidate.name or "agent", quote=True)
+            purpose = escape(candidate.purpose, quote=True)
+            status = escape(candidate.status.value, quote=True)
+            hints = escape("; ".join(candidate.reasons), quote=False)
+            rendered.append(
+                f'<agent_candidate id="{identifier}" name="{name}" '
+                f'purpose="{purpose}" status="{status}">'
+                f"{hints}</agent_candidate>"
+            )
+    rendered.append("</agent_candidates>")
     return "\n".join(rendered)
 
 

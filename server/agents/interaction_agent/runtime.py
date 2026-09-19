@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from .agent import build_system_prompt, prepare_message_with_history
-from .tools import ToolResult, get_tool_schemas, handle_tool_call
+from .tools import DispatchContext, ToolResult, get_tool_schemas, handle_tool_call
 from ...config import get_settings
 from ...services.conversation import get_conversation_log, get_working_memory_log
 from ...openrouter_client import request_chat_completion
@@ -55,6 +55,7 @@ class InteractionAgentRuntime:
         self.conversation_log = get_conversation_log()
         self.working_memory_log = get_working_memory_log()
         self.tool_schemas = get_tool_schemas()
+        self.dispatch_context = DispatchContext()
 
         if not self.api_key:
             raise ValueError(
@@ -66,6 +67,7 @@ class InteractionAgentRuntime:
         """Handle a user-authored message."""
 
         try:
+            self.dispatch_context = DispatchContext()
             transcript_before = self._load_conversation_transcript()
             self.conversation_log.record_user_message(user_message)
 
@@ -101,6 +103,7 @@ class InteractionAgentRuntime:
         """Process a status update emitted by an execution agent."""
 
         try:
+            self.dispatch_context = DispatchContext()
             transcript_before = self._load_conversation_transcript()
             self.conversation_log.record_agent_message(agent_message)
 
@@ -167,9 +170,12 @@ class InteractionAgentRuntime:
                 summary.tool_names.append(tool_call.name)
 
                 if tool_call.name == "send_message_to_agent":
-                    agent_name = tool_call.arguments.get("agent_name")
-                    if isinstance(agent_name, str) and agent_name:
-                        summary.execution_agents.add(agent_name)
+                    agent_reference = (
+                        tool_call.arguments.get("agent_id")
+                        or tool_call.arguments.get("agent_name")
+                    )
+                    if isinstance(agent_reference, str) and agent_reference:
+                        summary.execution_agents.add(agent_reference)
 
                 result = self._execute_tool(tool_call)
 
@@ -294,7 +300,11 @@ class InteractionAgentRuntime:
 
         try:
             self._log_tool_invocation(tool_call, stage="start")
-            result = handle_tool_call(tool_call.name, tool_call.arguments)
+            result = handle_tool_call(
+                tool_call.name,
+                tool_call.arguments,
+                dispatch_context=self.dispatch_context,
+            )
         except Exception as exc:  # pragma: no cover - defensive
             logger.error(
                 "Tool execution crashed",
