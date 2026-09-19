@@ -39,6 +39,13 @@ def _env_int(name: str, fallback: int) -> int:
         return fallback
 
 
+def _env_float(name: str, fallback: float) -> float:
+    try:
+        return float(os.getenv(name, str(fallback)))
+    except (TypeError, ValueError):
+        return fallback
+
+
 class Settings(BaseModel):
     """Application settings with lightweight env fallbacks."""
 
@@ -70,6 +77,28 @@ class Settings(BaseModel):
     # Summarisation controls
     conversation_summary_threshold: int = Field(default=100)
     conversation_summary_tail_size: int = Field(default=10)
+
+    # Bounded execution-agent retrieval and routing
+    agent_retrieval_top_k: int = Field(
+        default=_env_int("OPENPOKE_AGENT_RETRIEVAL_TOP_K", 5),
+        ge=1,
+        le=20,
+    )
+    agent_retrieval_min_score: float = Field(
+        default=_env_float("OPENPOKE_AGENT_RETRIEVAL_MIN_SCORE", 0.08),
+        ge=0,
+        le=1,
+    )
+    agent_route_reuse_threshold: float = Field(
+        default=_env_float("OPENPOKE_AGENT_ROUTE_REUSE_THRESHOLD", 0.34),
+        gt=0,
+        le=1,
+    )
+    agent_route_ambiguity_margin: float = Field(
+        default=_env_float("OPENPOKE_AGENT_ROUTE_AMBIGUITY_MARGIN", 0.12),
+        gt=0,
+        le=1,
+    )
 
     @property
     def cors_allow_origins(self) -> List[str]:

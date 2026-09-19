@@ -82,6 +82,7 @@ def test_alias_normalization_preserves_display_text_without_merging_duplicates(t
     )
 
     assert normalize_agent_text("José") == normalize_agent_text("Jose")
+    assert normalize_agent_text("Maya's answer") == "maya answer"
     assert normalize_agent_text("Alice-correspondence") == "alice correspondence"
     assert normalize_agent_text("O’Connor & Sons") == "oconnor and sons"
     assert first.aliases == ("José", "O’Connor & Sons")
@@ -133,4 +134,3 @@ def test_concurrent_creates_leave_complete_valid_json(tmp_path) -> None:
     assert len(payload["agents"]) == 40
     assert len(records) == 40
     assert len({record.agent_id for record in records}) == 40
-

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from datetime import datetime
 from enum import Enum
@@ -25,6 +26,7 @@ def normalize_agent_text(value: str) -> str:
     """Normalize human text for matching while retaining display text elsewhere."""
 
     decomposed = unicodedata.normalize("NFKD", value).casefold()
+    decomposed = re.sub(r"(?<=\w)['’]s\b", "", decomposed)
     without_marks = "".join(char for char in decomposed if not unicodedata.combining(char))
     expanded = without_marks.replace("&", " and ")
 
@@ -89,4 +91,3 @@ class AgentRecord(BaseModel):
     @property
     def normalized_aliases(self) -> tuple[str, ...]:
         return tuple(normalize_agent_text(alias) for alias in self.aliases)
-
