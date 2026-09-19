@@ -315,7 +315,7 @@ def render_report(results: dict[str, Any]) -> str:
             "",
             "## Dedicated 1,000-record latency benchmark",
             "",
-            f"After {benchmark['warmup_runs']} warm-up runs, "
+            f"Using `{benchmark['source']}` after {benchmark['warmup_runs']} warm-up runs, "
             f"{benchmark['measured_runs']} measured runs produced p50 "
             f"{benchmark['latency_ms']['p50']:.3f} ms and p95 "
             f"{benchmark['latency_ms']['p95']:.3f} ms. Candidate count remained "
