@@ -6,6 +6,12 @@ Run the credential-free comparison from the repository root:
 .venv/bin/python -m evals.runner
 ```
 
+Run the concise reviewer demo with:
+
+```bash
+.venv/bin/python -m evals.demo
+```
+
 The runner evaluates three breadth strategies on the same 20-case development
 and 20-case held-out splits:
 

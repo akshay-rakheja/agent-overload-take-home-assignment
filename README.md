@@ -1,111 +1,152 @@
-# OpenPoke 🌴
+# OpenPoke agent overload take-home
 
-OpenPoke is a simplified, open-source take on [Interaction Company’s](https://interaction.co/about) [Poke](https://poke.com/) assistant—built to show how a multi-agent orchestration stack can feel genuinely useful. It keeps the handful of things Poke is great at (email triage, reminders, and persistent agents) while staying easy to spin up locally.
+This repository extends [Shlok Khemani's OpenPoke](https://github.com/shlokkhemani/openpoke),
+an open-source personal assistant with one interaction agent and persistent
+execution-agent identities. The take-home solves two compounding forms of agent
+overload while preserving that continuity:
 
-- Multi-agent FastAPI backend that mirrors Poke's interaction/execution split, powered by [OpenRouter](https://openrouter.ai/).
-- Gmail tooling via [Composio](https://composio.dev/) for drafting/replying/forwarding without leaving chat.
-- Trigger scheduler and background watchers for reminders and "important email" alerts.
-- Next.js web UI that proxies everything through the shared `.env`, so plugging in API keys is the only setup.
+| Dimension | Current behavior | Bounded solution |
+| --- | --- | --- |
+| **Roster breadth** | Every execution-agent name is injected into every interaction turn. | A lifecycle-aware directory retrieves at most five candidates, then explicitly chooses reuse, create-new, or abstain. |
+| **History depth** | A reused execution agent loads its complete lifetime log by default. | The selected identity receives an optional durable summary plus a bounded suffix of recent complete episodes. |
 
-## Requirements
-- Python 3.10+
-- Node.js 18+
-- npm 9+
+Persistent identity remains durable. Execution runtimes remain ephemeral. Raw
+logs are never deleted or rewritten by the context policy.
 
-## Deterministic tests and baseline
+## Measured outcome
 
-The take-home includes a credential-free test and evaluation path. From the
-repository root:
+The committed credential-free evaluation uses 40 labeled cases (20 development,
+20 held-out) and deterministic scale fixtures.
+
+- Held-out hybrid routing: **100% top-5 recall**, **100% decision accuracy**,
+  **0% wrong reuse**, and **0% duplicate creation** on this corpus revision.
+- A 1,000-identity directory exposes at most five candidates; measured local
+  p95 retrieval was **37.14 ms** on the recorded run.
+- At 10,000 raw history entries, full rehydration renders **1,299,999
+  characters** versus **4,304 characters** for the bounded policy, with eight
+  recent episodes and the raw log unchanged.
+
+These numbers do not prove live-model or Gmail task success. The current-system
+routing comparison is explicitly an exact-name proxy; an unpinned live model is
+not reproducible offline. See [the evaluation methodology](docs/evaluation.md)
+and [the generated report](evals/results/report.md).
+
+## Architecture
+
+```text
+User turn + bounded conversation context
+                 │
+                 ▼
+        deterministic retrieval
+     (directory of arbitrary size)
+                 │
+                 ▼
+       ≤ 5 explainable candidates
+                 │
+                 ▼
+        reuse / create / abstain
+                 │
+        stable-ID dispatch only
+                 │
+                 ▼
+ summary + recent complete episodes
+     (raw append-only log retained)
+```
+
+The implementation boundaries and failure behavior are documented in
+[architecture.md](docs/architecture.md). The decision record explains why the
+solution keeps persistent identities rather than replacing every agent with an
+ephemeral task worker.
+
+## Reproduce without credentials
+
+Requirements: Python 3.10+.
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -r server/requirements-dev.txt
-.venv/bin/python -m pytest
+.venv/bin/python -m pytest -q
+.venv/bin/python -m evals.runner
+.venv/bin/python -m evals.demo
 ```
 
-Regenerate the unchanged OpenPoke baseline with:
+The test suite, evaluator, and demo require no OpenRouter, Gmail, or Composio
+credentials. The evaluator rewrites:
+
+- `evals/results/hybrid_directory.json` — complete machine-readable metrics,
+  observations, commit, corpus revision, configuration, and environment.
+- `evals/results/report.md` — reviewer-readable breadth/depth comparison and
+  failure analysis.
+
+The original behavior baseline can be regenerated separately:
 
 ```bash
 .venv/bin/python -m evals.baseline
 ```
 
-This writes machine-readable JSON and reviewer-readable Markdown under
-`evals/results/`. The baseline measures two independent growth curves:
+## Five-minute review
 
-- **Roster breadth:** the current interaction-agent prompt injects every
-  execution-agent name—1,000 identities render as 41,999 characters in the
-  deterministic fixture.
-- **History depth:** the current execution agent loads its full log by default—
-  10,000 entries render as 1,299,999 characters in the deterministic fixture.
+Run `.venv/bin/python -m evals.demo`, then open the generated report. The exact
+talk track is in [demo-script.md](docs/demo-script.md). It covers:
 
-These are direct prompt-size measurements, not claims about live-model routing
-quality. No OpenRouter, Gmail, or Composio credentials are required.
+1. current all-roster prompt growth;
+2. retrieval from 1,000 identities;
+3. paraphrased reuse, novel creation, and ambiguous abstention;
+4. the hard five-candidate cap;
+5. bounded context from 10,000 raw entries; and
+6. an honest baseline routing and abstention failure.
 
-## Quickstart
-1. **Clone and enter the repo.**
-   ```bash
-   git clone https://github.com/shlokkhemani/OpenPoke
-   cd OpenPoke
-   ```
-2. **Create a shared env file.** Copy the template and open it in your editor:
-   ```bash
-   cp .env.example .env
-   ```
-3. **Get your API keys and add them to `.env`:**
-   
-   **OpenRouter (Required)**
-   - Create an account at [openrouter.ai](https://openrouter.ai/)
-   - Generate an API key
-   - Replace `your_openrouter_api_key_here` with your actual key in `.env`
-   
-   **Composio (Required for Gmail)**
-   - Sign in at [composio.dev](https://composio.dev/)
-   - Create an API key
-   - Set up Gmail integration and get your auth config ID
-   - Replace `your_composio_api_key_here` and `your_gmail_auth_config_id_here` in `.env`
-4. **(Required) Create and activate a Python 3.10+ virtualenv:**
-   ```bash
-   # Ensure you're using Python 3.10+
-   python3.10 -m venv .venv
-   source .venv/bin/activate
-   
-   # Verify Python version (should show 3.10+)
-   python --version
-   ```
-   On Windows (PowerShell):
-   ```powershell
-   # Use Python 3.10+ (adjust path as needed)
-   python3.10 -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-   
-   # Verify Python version
-   python --version
-   ```
+## Project map
 
-5. **Install backend dependencies:**
-   ```bash
-   pip install -r server/requirements.txt
-   ```
-6. **Install frontend dependencies:**
-   ```bash
-   npm install --prefix web
-   ```
-7. **Start the FastAPI server:**
-   ```bash
-   python -m server.server --reload
-   ```
-8. **Start the Next.js app (new terminal):**
-   ```bash
-   npm run dev --prefix web
-   ```
-9. **Connect Gmail for email workflows.** With both services running, open [http://localhost:3000](http://localhost:3000), head to *Settings → Gmail*, and complete the Composio OAuth flow. This step is required for email drafting, replies, and the important-email monitor.
+- `server/services/execution/directory.py` — atomic identity persistence,
+  legacy migration, lifecycle, and stable IDs.
+- `server/services/execution/retrieval.py` — deterministic hybrid candidate
+  scoring and hard top-K bound.
+- `server/services/execution/routing.py` — explicit reuse/create/abstain policy.
+- `server/services/execution/context_policy.py` — bounded history rendering and
+  measurements.
+- `server/agents/interaction_agent/` — bounded prompt integration and stable-ID
+  dispatch.
+- `evals/` — corpus, fixtures, baselines, strategies, metrics, runner, demo,
+  and committed results.
+- `server/tests/` — credential-free unit, integration, scale, and regression
+  coverage.
+- `docs/` — architecture, evaluation, decision record, and demo guide.
 
-The web app proxies API calls to the Python server using the values in `.env`, so keeping both processes running is required for end-to-end flows.
+## Run the original application
 
-## Project Layout
-- `server/` – FastAPI application and agents
-- `web/` – Next.js app
-- `server/data/` – runtime data (ignored by git)
+The original OpenPoke web application still requires Node.js 18+, npm 9+, an
+OpenRouter key, and Composio credentials for Gmail:
+
+```bash
+cp .env.example .env
+.venv/bin/python -m pip install -r server/requirements.txt
+npm install --prefix web
+.venv/bin/python -m server.server --reload
+npm run dev --prefix web
+```
+
+Open `http://localhost:3000` and connect Gmail from Settings. Optional routing
+and context budgets are listed in `.env.example`; the default offline path does
+not require a `.env` file.
+
+## Known limitations and future work
+
+- The offline corpus is intentionally small and synthetic; production data will
+  contain harder aliases, stale metadata, multilingual text, and adversarial
+  ambiguity.
+- Lexical retrieval is deterministic and dependency-light but not semantic.
+  Embeddings or a probabilistic classifier such as Jev can be added behind the
+  existing interfaces and compared with the same held-out harness.
+- This implementation consumes a durable memory summary but deliberately does
+  not build an LLM summarization pipeline or semantic search over old logs.
+- The longer-term abstraction may be a durable task/entity ledger plus a small
+  fixed set of capability workers. That redesign is out of scope for this
+  five-day vertical slice.
+- Cross-turn batch isolation and concurrency budgets remain an optional issue;
+  they are adjacent to, but distinct from, the two measured overload axes.
 
 ## License
-MIT — see [LICENSE](LICENSE).
+
+MIT — see [LICENSE](LICENSE). Upstream OpenPoke authorship is preserved in the
+repository history.
