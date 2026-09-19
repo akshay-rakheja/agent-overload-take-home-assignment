@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from evals.baseline import build_baseline_report, render_full_history
-from evals.fixtures import make_history
+from evals.baseline import build_baseline_report
 from evals.materialize import materialize_case
 from evals.schema import load_routing_corpus
 from evals.strategies import HybridDirectoryStrategy
 from server.config import Settings
-from server.services.execution.context_policy import ExecutionContextPolicy
 
 
 CORPUS_PATH = Path(__file__).with_name("agent_routing_cases.jsonl")
+RESULTS_PATH = Path(__file__).with_name("results") / "hybrid_directory.json"
 
 
 def render_demo() -> str:
@@ -28,12 +28,8 @@ def render_demo() -> str:
 
     settings = Settings()
     baseline = build_baseline_report()
-    history = make_history(10_000)
-    full_history = render_full_history(history)
-    bounded = ExecutionContextPolicy(
-        max_recent_episodes=settings.execution_context_max_recent_episodes,
-        max_characters=settings.execution_context_max_characters,
-    ).render(history, memory_summary="Durable synthetic relationship summary.")
+    results = json.loads(RESULTS_PATH.read_text(encoding="utf-8"))
+    depth_point = results["depth"]["scale"][-1]
 
     lines = [
         "OpenPoke agent overload demo",
@@ -54,11 +50,13 @@ def render_demo() -> str:
         [
             "",
             "Depth: one selected agent retains raw history but receives bounded prompt context.",
-            f"10,000 raw history entries: {len(full_history):,} full characters",
-            f"bounded prompt characters: {bounded.metrics.rendered_characters:,}",
-            f"included recent episodes: {bounded.metrics.included_episode_count}",
-            f"omitted older entries: {bounded.metrics.omitted_entry_count:,}",
-            "raw history mutation: none",
+            f"10,000 raw history entries: {depth_point['full_history']['prompt_characters']:,} full characters",
+            f"bounded prompt characters: {depth_point['bounded']['prompt_characters']:,}",
+            f"included recent episodes: {depth_point['bounded']['included_episode_count']}",
+            f"omitted older entries: {depth_point['bounded']['omitted_entry_count']:,}",
+            "raw history mutation: none"
+            if depth_point["raw_log_unchanged"]
+            else "raw history mutation: detected",
             "",
             "honest baseline failure: current exact-name proxy creates new on test-exact-sam",
             "full details: evals/results/report.md",
