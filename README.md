@@ -12,6 +12,35 @@ OpenPoke is a simplified, open-source take on [Interaction Company’s](https://
 - Node.js 18+
 - npm 9+
 
+## Deterministic tests and baseline
+
+The take-home includes a credential-free test and evaluation path. From the
+repository root:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r server/requirements-dev.txt
+.venv/bin/python -m pytest
+```
+
+Regenerate the unchanged OpenPoke baseline with:
+
+```bash
+.venv/bin/python -m evals.baseline
+```
+
+This writes machine-readable JSON and reviewer-readable Markdown under
+`evals/results/`. The baseline measures two independent growth curves:
+
+- **Roster breadth:** the current interaction-agent prompt injects every
+  execution-agent name—1,000 identities render as 41,999 characters in the
+  deterministic fixture.
+- **History depth:** the current execution agent loads its full log by default—
+  10,000 entries render as 1,299,999 characters in the deterministic fixture.
+
+These are direct prompt-size measurements, not claims about live-model routing
+quality. No OpenRouter, Gmail, or Composio credentials are required.
+
 ## Quickstart
 1. **Clone and enter the repo.**
    ```bash
