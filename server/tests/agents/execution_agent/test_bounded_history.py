@@ -99,3 +99,37 @@ def test_migrated_identity_rehydrates_legacy_name_log_then_stable_log(tmp_path) 
     assert "STABLE-CONTEXT" in first_prompt
     assert "LEGACY-CONTEXT" not in duplicate_prompt
     assert logs.read_raw_bytes("Alice")
+
+
+def test_normalization_equivalent_names_keep_distinct_legacy_journals(tmp_path) -> None:
+    execution_dir = tmp_path / "execution_agents"
+    execution_dir.mkdir()
+    roster_path = execution_dir / "roster.json"
+    roster_path.write_text(json.dumps(["José", "Jose"], ensure_ascii=False), encoding="utf-8")
+    logs = ExecutionAgentLogStore(execution_dir)
+    logs.record_request("José", "ACCENTED-CONTEXT")
+    logs.record_request("Jose", "PLAIN-CONTEXT")
+    directory = AgentDirectory(roster_path)
+    accented, plain = directory.list_records()
+
+    def prompt_for(record):
+        return ExecutionAgent(
+            record.name,
+            storage_key=str(record.agent_id),
+            agent_id=str(record.agent_id),
+            legacy_storage_key=record.legacy_storage_key,
+            log_store=logs,
+            directory=directory,
+            context_policy=ExecutionContextPolicy(
+                max_recent_episodes=4,
+                max_characters=2_000,
+            ),
+        ).build_system_prompt_with_history()
+
+    accented_prompt = prompt_for(accented)
+    plain_prompt = prompt_for(plain)
+
+    assert "ACCENTED-CONTEXT" in accented_prompt
+    assert "PLAIN-CONTEXT" not in accented_prompt
+    assert "PLAIN-CONTEXT" in plain_prompt
+    assert "ACCENTED-CONTEXT" not in plain_prompt

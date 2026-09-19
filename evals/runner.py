@@ -20,6 +20,7 @@ from evals.metrics import percentile, summarize_routing
 from evals.schema import load_routing_corpus
 from evals.strategies import default_breadth_strategies
 from server.config import Settings
+from server.services.execution.directory import AgentDirectory
 from server.services.execution.context_policy import ExecutionContextPolicy
 from server.services.execution.log_store import ExecutionAgentLogStore
 from server.services.execution.retrieval import AgentRetriever, RetrievalQuery
@@ -137,25 +138,44 @@ def _benchmark_roster_1000(settings: Settings) -> dict[str, Any]:
     warmup_runs = 3
     measured_runs = 30
 
-    def run_once() -> tuple[float, int, int, bool]:
-        started = perf_counter()
-        retriever = AgentRetriever(records, now=lambda: EVALUATION_NOW, settings=settings)
-        candidates = retriever.retrieve(query)
-        decision = router.route(query, candidates)
-        prompt = "\n".join(
-            f"{candidate.agent_id}|{candidate.name}|{candidate.purpose}|{candidate.status.value}"
-            for candidate in candidates
+    with tempfile.TemporaryDirectory(prefix="openpoke-breadth-eval-") as temporary_dir:
+        directory_path = Path(temporary_dir) / "roster.json"
+        directory_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "agents": [record.model_dump(mode="json") for record in records],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
         )
-        elapsed_ms = (perf_counter() - started) * 1_000
-        correct = decision.action is RoutingAction.REUSE and decision.agent_id == expected_id
-        return elapsed_ms, len(candidates), len(prompt), correct
+        directory = AgentDirectory(directory_path)
 
-    for _ in range(warmup_runs):
-        run_once()
-    observations = [run_once() for _ in range(measured_runs)]
+        def run_once() -> tuple[float, int, int, bool]:
+            started = perf_counter()
+            retriever = AgentRetriever(
+                directory.list_records,
+                now=lambda: EVALUATION_NOW,
+                settings=settings,
+            )
+            candidates = retriever.retrieve(query)
+            decision = router.route(query, candidates)
+            prompt = "\n".join(
+                f"{candidate.agent_id}|{candidate.name}|{candidate.purpose}|{candidate.status.value}"
+                for candidate in candidates
+            )
+            elapsed_ms = (perf_counter() - started) * 1_000
+            correct = decision.action is RoutingAction.REUSE and decision.agent_id == expected_id
+            return elapsed_ms, len(candidates), len(prompt), correct
+
+        for _ in range(warmup_runs):
+            run_once()
+        observations = [run_once() for _ in range(measured_runs)]
     latencies = [observation[0] for observation in observations]
     return {
         "roster_size": len(records),
+        "source": "AgentDirectory.list_records",
         "warmup_runs": warmup_runs,
         "measured_runs": measured_runs,
         "candidate_count_max": max(observation[1] for observation in observations),

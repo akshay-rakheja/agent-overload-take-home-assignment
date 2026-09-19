@@ -25,6 +25,7 @@ def test_runner_compares_all_required_strategies_and_both_axes() -> None:
     assert results["breadth"]["splits"]["test"]["hybrid_directory"]["max_candidate_count"] <= 5
     benchmark = results["breadth"]["scale_benchmarks"]["roster_1000"]
     assert benchmark["roster_size"] == 1_000
+    assert benchmark["source"] == "AgentDirectory.list_records"
     assert benchmark["measured_runs"] >= 20
     assert benchmark["candidate_count_max"] <= 5
     assert benchmark["latency_ms"]["p95"] >= 0

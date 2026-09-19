@@ -16,6 +16,7 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import ValidationError
 
+from .log_store import execution_log_slug
 from .models import AGENT_SCHEMA_VERSION, AgentRecord, AgentStatus, normalize_agent_text
 
 
@@ -97,13 +98,53 @@ class AgentDirectory:
         if not isinstance(agents, list):
             raise DirectoryCorruptError("Agent directory field 'agents' must be a list")
         try:
-            return [AgentRecord.model_validate(item) for item in agents], False
+            records = [AgentRecord.model_validate(item) for item in agents]
         except ValidationError as exc:
             raise DirectoryCorruptError(f"Invalid agent directory record: {exc}") from exc
+        return self._backfill_legacy_storage_keys(agents, records)
+
+    def _backfill_legacy_storage_keys(
+        self,
+        raw_agents: list[Any],
+        records: list[AgentRecord],
+    ) -> tuple[list[AgentRecord], bool]:
+        """Upgrade records emitted by the earlier deterministic list migration."""
+
+        normalized_occurrences: dict[str, int] = {}
+        claimed_log_slugs: set[str] = set()
+        upgraded: list[AgentRecord] = []
+        changed = False
+
+        for raw_agent, record in zip(raw_agents, records):
+            normalized = normalize_agent_text(record.name)
+            occurrence = normalized_occurrences.get(normalized, 0)
+            normalized_occurrences[normalized] = occurrence + 1
+
+            if record.legacy_storage_key:
+                claimed_log_slugs.add(execution_log_slug(record.legacy_storage_key))
+
+            field_present = isinstance(raw_agent, dict) and "legacy_storage_key" in raw_agent
+            expected_legacy_id = uuid5(
+                NAMESPACE_URL,
+                f"openpoke-legacy:{normalized}:{occurrence}",
+            )
+            if field_present or record.agent_id != expected_legacy_id:
+                upgraded.append(record)
+                continue
+
+            log_slug = execution_log_slug(record.name)
+            legacy_key = record.name if log_slug not in claimed_log_slugs else None
+            if legacy_key is not None:
+                claimed_log_slugs.add(log_slug)
+            upgraded.append(record.model_copy(update={"legacy_storage_key": legacy_key}))
+            changed = True
+
+        return upgraded, changed
 
     def _migrate_legacy_names(self, payload: list[Any]) -> list[AgentRecord]:
         now = self._now()
         seen: dict[str, int] = {}
+        claimed_log_slugs: set[str] = set()
         migrated: list[AgentRecord] = []
         for raw_name in payload:
             name = str(raw_name).strip() or "agent"
@@ -111,6 +152,10 @@ class AgentDirectory:
             occurrence = seen.get(normalized, 0)
             seen[normalized] = occurrence + 1
             stable_id = uuid5(NAMESPACE_URL, f"openpoke-legacy:{normalized}:{occurrence}")
+            log_slug = execution_log_slug(name)
+            legacy_key = name if log_slug not in claimed_log_slugs else None
+            if legacy_key is not None:
+                claimed_log_slugs.add(log_slug)
             migrated.append(
                 AgentRecord(
                     agent_id=stable_id,
@@ -120,7 +165,7 @@ class AgentDirectory:
                     status=AgentStatus.HOT,
                     created_at=now,
                     last_used_at=now,
-                    legacy_storage_key=name if occurrence == 0 else None,
+                    legacy_storage_key=legacy_key,
                 )
             )
         return migrated

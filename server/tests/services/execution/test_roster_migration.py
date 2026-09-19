@@ -30,6 +30,40 @@ def test_legacy_name_list_migrates_without_loss_and_is_idempotent(tmp_path) -> N
     assert log_path.read_bytes() == original_log
 
 
+def test_legacy_log_ownership_uses_actual_filesystem_slug(tmp_path) -> None:
+    path = tmp_path / "roster.json"
+    path.write_text(
+        json.dumps(["José", "Jose", "A B", "A-B"], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    records = AgentDirectory(path).list_records()
+
+    assert [record.legacy_storage_key for record in records] == [
+        "José",
+        "Jose",
+        "A B",
+        None,
+    ]
+
+
+def test_previous_structured_migration_backfills_only_deterministic_legacy_ids(tmp_path) -> None:
+    path = tmp_path / "roster.json"
+    path.write_text(json.dumps(["Alice", "Alice"]), encoding="utf-8")
+    AgentDirectory(path)
+    migrated_payload = json.loads(path.read_text(encoding="utf-8"))
+    for item in migrated_payload["agents"]:
+        item.pop("legacy_storage_key")
+    path.write_text(json.dumps(migrated_payload), encoding="utf-8")
+
+    records = AgentDirectory(path).list_records()
+
+    assert records[0].legacy_storage_key == "Alice"
+    assert records[1].legacy_storage_key is None
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert all("legacy_storage_key" in item for item in persisted["agents"])
+
+
 def test_compatibility_roster_preserves_existing_name_api(tmp_path) -> None:
     path = tmp_path / "roster.json"
     roster = AgentRoster(path)
