@@ -180,3 +180,15 @@ def test_thousand_record_retrieval_is_bounded_and_records_duration() -> None:
     assert len(candidates) <= 5
     assert candidates[0].agent_id == records[942].agent_id
     assert duration_ms >= 0
+
+
+def test_callable_directory_provider_rebuilds_features_after_metadata_changes() -> None:
+    records = [make_record("alice", name="Alice", purpose="Track Alice", aliases=("Alice",))]
+    retriever = AgentRetriever(lambda: records, now=lambda: NOW)
+
+    assert retriever.retrieve(RetrievalQuery("Alice"))[0].name == "Alice"
+
+    records[:] = [make_record("bob", name="Bob", purpose="Track Bob", aliases=("Bob",))]
+
+    candidates = retriever.retrieve(RetrievalQuery("Bob"))
+    assert candidates[0].name == "Bob"

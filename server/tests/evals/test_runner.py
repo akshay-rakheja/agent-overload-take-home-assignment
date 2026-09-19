@@ -23,6 +23,15 @@ def test_runner_compares_all_required_strategies_and_both_axes() -> None:
     }
     assert set(results["breadth"]["splits"]) == {"development", "test"}
     assert results["breadth"]["splits"]["test"]["hybrid_directory"]["max_candidate_count"] <= 5
+    benchmark = results["breadth"]["scale_benchmarks"]["roster_1000"]
+    assert benchmark["roster_size"] == 1_000
+    assert benchmark["measured_runs"] >= 20
+    assert benchmark["candidate_count_max"] <= 5
+    assert benchmark["latency_ms"]["p95"] >= 0
+    assert (
+        results["breadth"]["held_out_target_assessment"]["latency_source"]
+        == "scale_benchmarks.roster_1000.latency_ms.p95"
+    )
     assert [point["history_entries"] for point in results["depth"]["scale"]] == [
         10,
         100,
@@ -31,6 +40,11 @@ def test_runner_compares_all_required_strategies_and_both_axes() -> None:
     ]
     assert results["depth"]["scale"][-1]["bounded"]["prompt_characters"] <= 12_000
     assert results["depth"]["scale"][-1]["full_history"]["prompt_characters"] > 1_000_000
+    assert all(point["raw_log_unchanged"] for point in results["depth"]["scale"])
+    assert all(
+        point["cross_agent_contamination_failures"] == 0
+        for point in results["depth"]["scale"]
+    )
 
 
 def test_results_write_as_json_and_honest_markdown(tmp_path) -> None:

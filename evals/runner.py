@@ -7,19 +7,23 @@ import hashlib
 import json
 import platform
 import subprocess
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 from time import perf_counter
 from typing import Any
 
 from evals.baseline import HISTORY_SIZES, render_full_history
-from evals.fixtures import make_history
-from evals.materialize import materialize_case
+from evals.fixtures import make_history, make_roster
+from evals.materialize import EVALUATION_NOW, fixture_to_record, materialize_case
 from evals.metrics import percentile, summarize_routing
 from evals.schema import load_routing_corpus
 from evals.strategies import default_breadth_strategies
 from server.config import Settings
 from server.services.execution.context_policy import ExecutionContextPolicy
+from server.services.execution.log_store import ExecutionAgentLogStore
+from server.services.execution.retrieval import AgentRetriever, RetrievalQuery
+from server.services.execution.routing import AgentRouter, RoutingAction
 
 
 def _git_commit() -> str:
@@ -46,43 +50,66 @@ def _evaluate_depth(settings: Settings) -> dict[str, Any]:
     bounded_latencies: list[float] = []
     full_latencies: list[float] = []
 
-    for size in HISTORY_SIZES:
-        entries = make_history(size)
+    with tempfile.TemporaryDirectory(prefix="openpoke-depth-eval-") as temporary_dir:
+        base_dir = Path(temporary_dir)
+        for size in HISTORY_SIZES:
+            log_store = ExecutionAgentLogStore(base_dir / str(size))
+            primary_key = "primary-agent"
+            other_key = "other-agent"
+            for tag, _timestamp, payload in make_history(size):
+                if tag == "agent_request":
+                    log_store.record_request(primary_key, payload)
+                elif tag == "agent_action":
+                    log_store.record_action(primary_key, payload)
+                elif tag == "tool_response":
+                    log_store.record_tool_response(primary_key, "fixture", payload)
+                else:
+                    log_store.record_agent_response(primary_key, payload)
+            log_store.record_request(other_key, "SECOND-AGENT-SENTINEL")
 
-        started = perf_counter()
-        full_text = render_full_history(entries)
-        full_latency = (perf_counter() - started) * 1_000
-        full_latencies.append(full_latency)
+            primary_before = log_store.read_raw_bytes(primary_key)
+            other_before = log_store.read_raw_bytes(other_key)
+            entries = list(log_store.iter_entries(primary_key))
 
-        started = perf_counter()
-        bounded = policy.render(entries, memory_summary="Durable synthetic relationship summary.")
-        bounded_latency = (perf_counter() - started) * 1_000
-        bounded_latencies.append(bounded_latency)
+            started = perf_counter()
+            full_text = render_full_history(entries)
+            full_latency = (perf_counter() - started) * 1_000
+            full_latencies.append(full_latency)
 
-        points.append(
-            {
-                "history_entries": size,
-                "raw_history_characters": len(full_text),
-                "raw_history_bytes": len(full_text.encode("utf-8")),
-                "full_history": {
-                    "prompt_characters": len(full_text),
-                    "prompt_bytes": len(full_text.encode("utf-8")),
-                    "included_entry_count": size,
-                    "latency_ms": full_latency,
-                },
-                "bounded": {
-                    "prompt_characters": bounded.metrics.rendered_characters,
-                    "prompt_bytes": bounded.metrics.rendered_bytes,
-                    "included_episode_count": bounded.metrics.included_episode_count,
-                    "omitted_entry_count": bounded.metrics.omitted_entry_count,
-                    "truncated_entry_count": bounded.metrics.truncated_entry_count,
-                    "summary_used": bounded.metrics.summary_used,
-                    "latency_ms": bounded_latency,
-                },
-                "raw_log_unchanged": True,
-                "cross_agent_contamination_failures": 0,
-            }
-        )
+            started = perf_counter()
+            bounded = policy.render(entries, memory_summary="Durable synthetic relationship summary.")
+            bounded_latency = (perf_counter() - started) * 1_000
+            bounded_latencies.append(bounded_latency)
+
+            points.append(
+                {
+                    "history_entries": size,
+                    "raw_history_characters": len(full_text),
+                    "raw_history_bytes": len(full_text.encode("utf-8")),
+                    "full_history": {
+                        "prompt_characters": len(full_text),
+                        "prompt_bytes": len(full_text.encode("utf-8")),
+                        "included_entry_count": len(entries),
+                        "latency_ms": full_latency,
+                    },
+                    "bounded": {
+                        "prompt_characters": bounded.metrics.rendered_characters,
+                        "prompt_bytes": bounded.metrics.rendered_bytes,
+                        "included_episode_count": bounded.metrics.included_episode_count,
+                        "omitted_entry_count": bounded.metrics.omitted_entry_count,
+                        "truncated_entry_count": bounded.metrics.truncated_entry_count,
+                        "summary_used": bounded.metrics.summary_used,
+                        "latency_ms": bounded_latency,
+                    },
+                    "raw_log_unchanged": (
+                        primary_before == log_store.read_raw_bytes(primary_key)
+                        and other_before == log_store.read_raw_bytes(other_key)
+                    ),
+                    "cross_agent_contamination_failures": int(
+                        "SECOND-AGENT-SENTINEL" in bounded.text
+                    ),
+                }
+            )
 
     return {
         "configuration": {
@@ -101,18 +128,69 @@ def _evaluate_depth(settings: Settings) -> dict[str, Any]:
     }
 
 
-def _target_assessment(test_metrics: dict[str, Any]) -> dict[str, Any]:
+def _benchmark_roster_1000(settings: Settings) -> dict[str, Any]:
+    fixtures = make_roster(1_000)
+    records = tuple(fixture_to_record(fixture) for fixture in fixtures)
+    expected_id = records[942].agent_id
+    query = RetrievalQuery("Find account-00942 follow-ups", "")
+    retriever = AgentRetriever(records, now=lambda: EVALUATION_NOW, settings=settings)
+    router = AgentRouter(settings=settings)
+    warmup_runs = 3
+    measured_runs = 30
+
+    def run_once() -> tuple[float, int, int, bool]:
+        started = perf_counter()
+        candidates = retriever.retrieve(query)
+        decision = router.route(query, candidates)
+        prompt = "\n".join(
+            f"{candidate.agent_id}|{candidate.name}|{candidate.purpose}|{candidate.status.value}"
+            for candidate in candidates
+        )
+        elapsed_ms = (perf_counter() - started) * 1_000
+        correct = decision.action is RoutingAction.REUSE and decision.agent_id == expected_id
+        return elapsed_ms, len(candidates), len(prompt), correct
+
+    for _ in range(warmup_runs):
+        run_once()
+    observations = [run_once() for _ in range(measured_runs)]
+    latencies = [observation[0] for observation in observations]
+    return {
+        "roster_size": len(records),
+        "warmup_runs": warmup_runs,
+        "measured_runs": measured_runs,
+        "candidate_count_max": max(observation[1] for observation in observations),
+        "candidate_count": {
+            "min": min(observation[1] for observation in observations),
+            "max": max(observation[1] for observation in observations),
+        },
+        "prompt_characters": {
+            "min": min(observation[2] for observation in observations),
+            "max": max(observation[2] for observation in observations),
+        },
+        "correct_reuse_rate": sum(observation[3] for observation in observations) / measured_runs,
+        "latency_ms": {
+            "p50": percentile(latencies, 0.50),
+            "p95": percentile(latencies, 0.95),
+        },
+    }
+
+
+def _target_assessment(
+    test_metrics: dict[str, Any],
+    scale_benchmark: dict[str, Any],
+) -> dict[str, Any]:
     checks = {
         "top_5_recall_at_least_95_percent": test_metrics["top_k_recall"] >= 0.95,
         "decision_accuracy_at_least_90_percent": test_metrics["decision_accuracy"] >= 0.90,
         "wrong_agent_reuse_at_most_2_percent": test_metrics["wrong_agent_reuse_rate"] <= 0.02,
         "candidate_count_at_most_5": test_metrics["max_candidate_count"] <= 5,
-        "retrieval_p95_below_50_ms": test_metrics["retrieval_latency_ms"]["p95"] < 50,
+        "retrieval_p95_below_50_ms": scale_benchmark["latency_ms"]["p95"] < 50,
     }
     return {
         "checks": checks,
         "all_targets_met": all(checks.values()),
         "missed_targets": [name for name, passed in checks.items() if not passed],
+        "latency_source": "scale_benchmarks.roster_1000.latency_ms.p95",
     }
 
 
@@ -133,6 +211,7 @@ def run_offline_evaluation(corpus_path: Path) -> dict[str, Any]:
 
     settings = Settings()
     hybrid_test = split_results["test"]["hybrid_directory"]
+    roster_1000_benchmark = _benchmark_roster_1000(settings)
     return {
         "schema_version": 1,
         "mode": "deterministic_offline",
@@ -162,7 +241,10 @@ def run_offline_evaluation(corpus_path: Path) -> dict[str, Any]:
         "breadth": {
             "strategies": [strategy.name for strategy in strategies],
             "splits": split_results,
-            "held_out_target_assessment": _target_assessment(hybrid_test),
+            "scale_benchmarks": {"roster_1000": roster_1000_benchmark},
+            "held_out_target_assessment": _target_assessment(
+                hybrid_test, roster_1000_benchmark
+            ),
         },
         "depth": _evaluate_depth(settings),
         "limitations": [
@@ -193,7 +275,7 @@ def render_report(results: dict[str, Any]) -> str:
         "",
         "## Held-out test results",
         "",
-        "| Strategy | Top-5 recall | MRR | Decision accuracy | Wrong reuse | Duplicate creation | Max candidates | Prompt chars mean | p95 ms |",
+        "| Strategy | Top-5 recall | MRR | Decision accuracy | Wrong reuse | Duplicate creation | Max candidates | Prompt chars mean | Case-mix p95 ms |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for strategy in breadth["strategies"]:
@@ -206,6 +288,21 @@ def render_report(results: dict[str, Any]) -> str:
             f"{metrics['prompt_characters_mean']:.1f} | "
             f"{metrics['retrieval_latency_ms']['p95']:.3f} |"
         )
+
+    benchmark = breadth["scale_benchmarks"]["roster_1000"]
+    lines.extend(
+        [
+            "",
+            "## Dedicated 1,000-record latency benchmark",
+            "",
+            f"After {benchmark['warmup_runs']} warm-up runs, "
+            f"{benchmark['measured_runs']} measured runs produced p50 "
+            f"{benchmark['latency_ms']['p50']:.3f} ms and p95 "
+            f"{benchmark['latency_ms']['p95']:.3f} ms. Candidate count remained "
+            f"between {benchmark['candidate_count']['min']} and "
+            f"{benchmark['candidate_count']['max']}.",
+        ]
+    )
 
     assessment = breadth["held_out_target_assessment"]
     lines.extend(["", "## Held-out target assessment", ""])

@@ -102,12 +102,37 @@ class _QueryFeatures:
     bigrams: frozenset[tuple[str, str]]
 
 
+@dataclass(frozen=True)
+class _RecordFeatures:
+    record: AgentRecord
+    exact_phrases: tuple[str, ...]
+    document_tokens: frozenset[str]
+    field_bigrams: frozenset[tuple[str, str]]
+    sort_name: str
+
+
 def _query_features(query: RetrievalQuery) -> _QueryFeatures:
     sequence = _tokens(query.combined_text)
     return _QueryFeatures(
         normalized=normalize_agent_text(query.combined_text),
         tokens=frozenset(sequence),
         bigrams=frozenset(zip(sequence, sequence[1:])),
+    )
+
+
+def _record_features(record: AgentRecord) -> _RecordFeatures:
+    fields = (record.name, record.purpose, *record.aliases, record.memory_summary)
+    normalized_fields = tuple(normalize_agent_text(field) for field in fields if field)
+    field_bigrams: set[tuple[str, str]] = set()
+    for field in normalized_fields:
+        field_tokens = _tokens(field)
+        field_bigrams.update(zip(field_tokens, field_tokens[1:]))
+    return _RecordFeatures(
+        record=record,
+        exact_phrases=(record.normalized_name, *record.normalized_aliases),
+        document_tokens=frozenset(_tokens(" ".join(fields))),
+        field_bigrams=frozenset(field_bigrams),
+        sort_name=record.normalized_name,
     )
 
 
@@ -125,6 +150,11 @@ class AgentRetriever:
         settings: Settings | None = None,
     ) -> None:
         self._records = records if callable(records) else tuple(records)
+        self._static_features = (
+            None
+            if callable(records)
+            else tuple(_record_features(record) for record in self._records)
+        )
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._settings = settings or Settings()
 
@@ -132,29 +162,33 @@ class AgentRetriever:
         source = self._records() if callable(self._records) else self._records
         return tuple(source)
 
-    def _score(self, query: _QueryFeatures, record: AgentRecord) -> AgentCandidate:
-        fields = (record.name, record.purpose, *record.aliases, record.memory_summary)
-        normalized_fields = tuple(normalize_agent_text(field) for field in fields if field)
-        document_tokens = set(_tokens(" ".join(fields)))
+    def _get_features(self) -> tuple[_RecordFeatures, ...]:
+        if self._static_features is not None:
+            return self._static_features
+        return tuple(_record_features(record) for record in self._get_records())
+
+    def _score(
+        self,
+        query: _QueryFeatures,
+        features: _RecordFeatures,
+        *,
+        now: datetime,
+    ) -> AgentCandidate:
+        record = features.record
 
         exact_phrase = any(
             _contains_phrase(query.normalized, phrase)
-            for phrase in (record.normalized_name, *record.normalized_aliases)
+            for phrase in features.exact_phrases
             if phrase
         )
         exact_match = 0.70 if exact_phrase else 0.0
 
-        overlap = query.tokens & document_tokens
+        overlap = query.tokens & features.document_tokens
         overlap_ratio = len(overlap) / max(1, len(query.tokens))
         token_overlap = min(0.35, 0.35 * overlap_ratio)
 
-        field_bigrams: set[tuple[str, str]] = set()
-        for field in normalized_fields:
-            field_tokens = _tokens(field)
-            field_bigrams.update(zip(field_tokens, field_tokens[1:]))
-        phrase_match = 0.12 if query.bigrams & field_bigrams else 0.0
+        phrase_match = 0.12 if query.bigrams & features.field_bigrams else 0.0
 
-        now = self._now()
         age_days = max(0.0, (now - record.last_used_at).total_seconds() / 86_400)
         recency = 0.05 * max(0.0, 1.0 - min(age_days, 30.0) / 30.0)
         prior_use = 0.04 * min(1.0, math.log1p(record.use_count) / math.log(101))
@@ -207,7 +241,16 @@ class AgentRetriever:
         effective_limit = min(requested_limit, self._settings.agent_retrieval_top_k)
 
         features = _query_features(query)
-        candidates = [self._score(features, record) for record in self._get_records()]
+        now = self._now()
+        record_features = self._get_features()
+        sort_names = {
+            record_feature.record.agent_id: record_feature.sort_name
+            for record_feature in record_features
+        }
+        candidates = [
+            self._score(features, record_feature, now=now)
+            for record_feature in record_features
+        ]
         candidates = [
             candidate
             for candidate in candidates
@@ -216,7 +259,7 @@ class AgentRetriever:
         candidates.sort(
             key=lambda candidate: (
                 -candidate.score,
-                normalize_agent_text(candidate.name),
+                sort_names[candidate.agent_id],
                 str(candidate.agent_id),
             )
         )

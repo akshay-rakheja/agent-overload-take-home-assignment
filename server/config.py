@@ -99,6 +99,10 @@ class Settings(BaseModel):
         gt=0,
         le=1,
     )
+    agent_routing_context_max_characters: int = Field(
+        default=_env_int("OPENPOKE_AGENT_ROUTING_CONTEXT_MAX_CHARACTERS", 4_000),
+        ge=200,
+    )
     execution_context_max_recent_episodes: int = Field(
         default=_env_int("OPENPOKE_EXECUTION_CONTEXT_MAX_RECENT_EPISODES", 8),
         ge=1,

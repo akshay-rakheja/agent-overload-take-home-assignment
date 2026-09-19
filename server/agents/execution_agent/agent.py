@@ -1,6 +1,7 @@
 """Execution Agent implementation."""
 
 from pathlib import Path
+from itertools import chain
 from typing import List, Optional, Dict, Any
 
 from ...config import get_settings
@@ -48,6 +49,7 @@ class ExecutionAgent:
         conversation_limit: Optional[int] = None,
         storage_key: Optional[str] = None,
         agent_id: Optional[str] = None,
+        legacy_storage_key: Optional[str] = None,
         log_store: Optional[ExecutionAgentLogStore] = None,
         directory: Optional[AgentDirectory] = None,
         context_policy: Optional[ExecutionContextPolicy] = None,
@@ -62,6 +64,7 @@ class ExecutionAgent:
         self.name = name
         self.storage_key = storage_key or name
         self.agent_id = agent_id
+        self.legacy_storage_key = legacy_storage_key
         self.conversation_limit = conversation_limit
         self._log_store = log_store or get_execution_agent_logs()
         self._directory = directory or (get_agent_directory() if agent_id else None)
@@ -110,8 +113,12 @@ class ExecutionAgent:
             except UnknownAgentError:
                 memory_summary = ""
 
+        entry_sources = []
+        if self.legacy_storage_key and self.legacy_storage_key != self.storage_key:
+            entry_sources.append(self._log_store.iter_entries(self.legacy_storage_key))
+        entry_sources.append(self._log_store.iter_entries(self.storage_key))
         context = self._context_policy.render(
-            self._log_store.iter_entries(self.storage_key),
+            chain.from_iterable(entry_sources),
             memory_summary=memory_summary,
         )
         self.last_context_metrics = context.metrics

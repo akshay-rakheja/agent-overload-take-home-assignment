@@ -120,6 +120,7 @@ class AgentDirectory:
                     status=AgentStatus.HOT,
                     created_at=now,
                     last_used_at=now,
+                    legacy_storage_key=name if occurrence == 0 else None,
                 )
             )
         return migrated
@@ -277,4 +278,3 @@ class AgentDirectory:
         with self._exclusive_lock():
             self._write_locked([])
             self._records = []
-

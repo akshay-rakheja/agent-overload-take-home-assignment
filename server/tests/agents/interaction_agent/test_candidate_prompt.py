@@ -9,6 +9,8 @@ from server.agents.interaction_agent.agent import (
     build_candidate_context,
     prepare_message_with_history,
 )
+from server.agents.interaction_agent.runtime import InteractionAgentRuntime
+from server.agents.interaction_agent.tools import DispatchContext
 from server.services.execution.models import AgentRecord, AgentStatus
 from server.services.execution.routing import RoutingAction
 
@@ -102,3 +104,34 @@ def test_candidate_context_exposes_safe_routing_guidance() -> None:
     assert context.decision.agent_id is None
     assert len(context.candidates) == 2
 
+
+def test_routing_query_uses_only_bounded_recent_transcript_context() -> None:
+    alice = record(1, name="Alice", purpose="Track Alice", aliases=("Alice",))
+    bob = record(2, name="Bob", purpose="Track Bob", aliases=("Bob",))
+    transcript = "Alice " + ("old-noise " * 1_000) + "Bob asked for the latest update."
+
+    context = build_candidate_context(
+        "Did he reply?",
+        transcript,
+        directory=StubDirectory([alice, bob]),
+    )
+
+    assert context.decision.action is RoutingAction.REUSE
+    assert context.decision.agent_id == bob.agent_id
+
+
+def test_runtime_binds_recommended_identity_to_dispatch_context() -> None:
+    alice = record(1, name="Alice", purpose="Track Alice", aliases=("Alice",))
+    runtime = InteractionAgentRuntime.__new__(InteractionAgentRuntime)
+    runtime.agent_directory = StubDirectory([alice])
+    runtime.dispatch_context = DispatchContext()
+
+    messages = runtime._prepare_turn_messages(
+        "Did Alice reply?",
+        "",
+        message_type="user",
+    )
+
+    assert messages[0]["content"]
+    assert runtime.dispatch_context.routing_action is RoutingAction.REUSE
+    assert runtime.dispatch_context.allowed_agent_ids == frozenset({alice.agent_id})

@@ -21,6 +21,7 @@ class PendingExecution:
     instructions: str
     batch_id: str
     agent_id: Optional[str] = None
+    legacy_storage_key: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
 
 
@@ -51,6 +52,7 @@ class ExecutionBatchManager:
         instructions: str,
         request_id: Optional[str] = None,
         agent_id: Optional[str] = None,
+        legacy_storage_key: Optional[str] = None,
     ) -> ExecutionResult:
         """Execute an agent asynchronously and buffer the result for batch dispatch."""
 
@@ -62,11 +64,16 @@ class ExecutionBatchManager:
             instructions,
             request_id,
             agent_id=agent_id,
+            legacy_storage_key=legacy_storage_key,
         )
 
         try:
             logger.info(f"[{agent_name}] Execution started")
-            runtime = ExecutionAgentRuntime(agent_name=agent_name, agent_id=agent_id)
+            runtime = ExecutionAgentRuntime(
+                agent_name=agent_name,
+                agent_id=agent_id,
+                legacy_storage_key=legacy_storage_key,
+            )
             result = await asyncio.wait_for(
                 runtime.execute(instructions),
                 timeout=self.timeout_seconds,
@@ -102,6 +109,7 @@ class ExecutionBatchManager:
         instructions: str,
         request_id: str,
         agent_id: Optional[str] = None,
+        legacy_storage_key: Optional[str] = None,
     ) -> str:
         """Attach a new execution to the active batch, opening one when required."""
 
@@ -119,6 +127,7 @@ class ExecutionBatchManager:
                 instructions=instructions,
                 batch_id=batch_id,
                 agent_id=agent_id,
+                legacy_storage_key=legacy_storage_key,
             )
 
             return batch_id

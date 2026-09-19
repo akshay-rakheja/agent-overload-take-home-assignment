@@ -57,10 +57,7 @@ class AgentRouter:
         if len(candidates) > 1:
             runner_up = candidates[1]
             gap = top.score - runner_up.score
-            if (
-                runner_up.score >= self._settings.agent_route_reuse_threshold
-                and gap < self._settings.agent_route_ambiguity_margin
-            ):
+            if gap < self._settings.agent_route_ambiguity_margin:
                 return RoutingDecision(
                     action=RoutingAction.ABSTAIN,
                     agent_id=None,

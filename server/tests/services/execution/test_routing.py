@@ -7,6 +7,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from server.services.execution.models import AgentRecord, AgentStatus
 from server.services.execution.retrieval import AgentRetriever, RetrievalQuery
+from server.services.execution.retrieval import AgentCandidate
 from server.services.execution.routing import AgentRouter, RoutingAction
 
 
@@ -109,3 +110,32 @@ def test_router_never_returns_an_id_outside_candidates() -> None:
     assert decision.agent_id is None or decision.agent_id in {
         candidate.agent_id for candidate in candidates
     }
+
+
+def test_ambiguity_margin_applies_when_runner_up_is_just_below_reuse_threshold() -> None:
+    first = record("first", "First", "First candidate")
+    second = record("second", "Second", "Second candidate")
+    candidates = [
+        AgentCandidate(
+            agent_id=first.agent_id,
+            name=first.name,
+            purpose=first.purpose,
+            status=first.status,
+            score=0.340,
+            score_components={"token_overlap": 0.340},
+            reasons=("first",),
+        ),
+        AgentCandidate(
+            agent_id=second.agent_id,
+            name=second.name,
+            purpose=second.purpose,
+            status=second.status,
+            score=0.339,
+            score_components={"token_overlap": 0.339},
+            reasons=("second",),
+        ),
+    ]
+
+    decision = AgentRouter().route(RetrievalQuery("ambiguous", ""), candidates)
+
+    assert decision.action is RoutingAction.ABSTAIN

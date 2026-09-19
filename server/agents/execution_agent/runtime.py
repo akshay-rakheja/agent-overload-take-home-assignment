@@ -28,13 +28,19 @@ class ExecutionAgentRuntime:
     MAX_TOOL_ITERATIONS = 8
 
     # Initialize execution agent runtime with settings, tools, and agent instance
-    def __init__(self, agent_name: str, agent_id: Optional[str] = None):
+    def __init__(
+        self,
+        agent_name: str,
+        agent_id: Optional[str] = None,
+        legacy_storage_key: Optional[str] = None,
+    ):
         settings = get_settings()
         storage_key = agent_id or agent_name
         self.agent = ExecutionAgent(
             agent_name,
             storage_key=storage_key,
             agent_id=agent_id,
+            legacy_storage_key=legacy_storage_key,
         )
         self.api_key = settings.openrouter_api_key
         self.model = settings.execution_agent_model

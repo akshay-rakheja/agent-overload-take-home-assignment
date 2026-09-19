@@ -11,6 +11,7 @@ from server.agents.interaction_agent.tools import DispatchContext, send_message_
 from server.services.execution.directory import AgentDirectory
 from server.services.execution.log_store import ExecutionAgentLogStore
 from server.services.execution.models import AgentStatus
+from server.services.execution.routing import RoutingAction
 
 
 @dataclass
@@ -137,3 +138,95 @@ def test_stable_log_keys_isolate_names_that_share_the_same_slug(tmp_path) -> Non
     assert "second request" not in logs.load_transcript(str(first.agent_id))
     assert "second request" in logs.load_transcript(str(second.agent_id))
 
+
+def test_abstain_context_rejects_all_dispatch(tmp_path) -> None:
+    directory = AgentDirectory(tmp_path / "roster.json")
+    record = directory.create(name="Jordan", purpose="Ambiguous Jordan")
+    logs = ExecutionAgentLogStore(tmp_path / "logs")
+    batch = FakeBatchManager()
+    context = DispatchContext(routing_action=RoutingAction.ABSTAIN)
+
+    reuse = dispatch_and_drain(
+        agent_id=str(record.agent_id),
+        instructions="Do not run",
+        dispatch_context=context,
+        directory=directory,
+        log_store=logs,
+        batch_manager=batch,
+    )
+    create = dispatch_and_drain(
+        agent_name="New Jordan",
+        agent_purpose="Still ambiguous",
+        instructions="Do not run",
+        dispatch_context=context,
+        directory=directory,
+        log_store=logs,
+        batch_manager=batch,
+    )
+
+    assert reuse.payload["code"] == "routing_not_authorized"
+    assert create.payload["code"] == "routing_not_authorized"
+    assert batch.submitted == []
+
+
+def test_reuse_context_allows_only_recommended_candidate(tmp_path) -> None:
+    directory = AgentDirectory(tmp_path / "roster.json")
+    allowed = directory.create(name="Alice", purpose="Alice messages")
+    unseen = directory.create(name="Bob", purpose="Bob messages")
+    logs = ExecutionAgentLogStore(tmp_path / "logs")
+    batch = FakeBatchManager()
+    context = DispatchContext(
+        routing_action=RoutingAction.REUSE,
+        allowed_agent_ids=frozenset({allowed.agent_id}),
+    )
+
+    rejected = dispatch_and_drain(
+        agent_id=str(unseen.agent_id),
+        instructions="Do not run",
+        dispatch_context=context,
+        directory=directory,
+        log_store=logs,
+        batch_manager=batch,
+    )
+    accepted = dispatch_and_drain(
+        agent_id=str(allowed.agent_id),
+        instructions="Run this",
+        dispatch_context=context,
+        directory=directory,
+        log_store=logs,
+        batch_manager=batch,
+    )
+
+    assert rejected.payload["code"] == "routing_not_authorized"
+    assert accepted.success is True
+    assert [item.agent_id for item in batch.submitted] == [str(allowed.agent_id)]
+
+
+def test_create_context_rejects_reuse_but_allows_one_new_identity(tmp_path) -> None:
+    directory = AgentDirectory(tmp_path / "roster.json")
+    existing = directory.create(name="Alice", purpose="Alice messages")
+    logs = ExecutionAgentLogStore(tmp_path / "logs")
+    batch = FakeBatchManager()
+    context = DispatchContext(routing_action=RoutingAction.CREATE_NEW)
+
+    rejected = dispatch_and_drain(
+        agent_id=str(existing.agent_id),
+        instructions="Do not run",
+        dispatch_context=context,
+        directory=directory,
+        log_store=logs,
+        batch_manager=batch,
+    )
+    accepted = dispatch_and_drain(
+        agent_name="Bob invoices",
+        agent_purpose="Track Bob invoices",
+        instructions="Run this",
+        dispatch_context=context,
+        directory=directory,
+        log_store=logs,
+        batch_manager=batch,
+    )
+
+    assert rejected.payload["code"] == "routing_not_authorized"
+    assert accepted.success is True
+    assert accepted.payload["new_agent_created"] is True

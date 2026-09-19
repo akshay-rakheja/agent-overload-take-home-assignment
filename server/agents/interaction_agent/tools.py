@@ -15,6 +15,7 @@ from ...services.execution import (
     get_agent_directory,
     get_execution_agent_logs,
     normalize_agent_text,
+    RoutingAction,
 )
 from ..execution_agent.batch_manager import ExecutionBatchManager
 
@@ -31,8 +32,10 @@ class ToolResult:
 
 @dataclass
 class DispatchContext:
-    """Per-interaction idempotency state for newly created identities."""
+    """Per-interaction routing authorization and creation idempotency state."""
 
+    routing_action: RoutingAction | None = None
+    allowed_agent_ids: frozenset[UUID] = frozenset()
     created_agent_ids: dict[tuple[str, str], UUID] = field(default_factory=dict)
 
 # Tool schemas for OpenRouter
@@ -154,6 +157,12 @@ def send_message_to_agent(
     resolved_batch_manager = batch_manager or _EXECUTION_BATCH_MANAGER
     context = dispatch_context or DispatchContext()
 
+    def routing_rejection(message: str) -> ToolResult:
+        return ToolResult(
+            success=False,
+            payload={"code": "routing_not_authorized", "message": message},
+        )
+
     if agent_id and (agent_name or agent_purpose):
         return ToolResult(
             success=False,
@@ -165,6 +174,17 @@ def send_message_to_agent(
 
     is_new = False
     if agent_id:
+        if context.routing_action is not None and context.routing_action is not RoutingAction.REUSE:
+            return routing_rejection("The routing policy did not authorize agent reuse for this turn.")
+        try:
+            parsed_agent_id = UUID(agent_id)
+        except (TypeError, ValueError, AttributeError):
+            parsed_agent_id = None
+        if (
+            context.routing_action is RoutingAction.REUSE
+            and parsed_agent_id not in context.allowed_agent_ids
+        ):
+            return routing_rejection("Only the recommended execution agent may be reused for this turn.")
         try:
             record = resolved_directory.require(agent_id)
         except UnknownAgentError:
@@ -176,6 +196,8 @@ def send_message_to_agent(
                 },
             )
     else:
+        if context.routing_action is not None and context.routing_action is not RoutingAction.CREATE_NEW:
+            return routing_rejection("The routing policy did not authorize agent creation for this turn.")
         if not agent_name or not agent_purpose:
             return ToolResult(
                 success=False,
@@ -209,10 +231,13 @@ def send_message_to_agent(
 
     async def _execute_async() -> None:
         try:
+            execution_kwargs: dict[str, Any] = {"agent_id": stable_id}
+            if record.legacy_storage_key:
+                execution_kwargs["legacy_storage_key"] = record.legacy_storage_key
             result = await resolved_batch_manager.execute_agent(
                 record.name,
                 instructions,
-                agent_id=stable_id,
+                **execution_kwargs,
             )
             status = "SUCCESS" if result.success else "FAILED"
             logger.info(f"Agent '{record.name}' completed: {status}")

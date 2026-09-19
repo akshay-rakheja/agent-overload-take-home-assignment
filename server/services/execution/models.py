@@ -55,6 +55,7 @@ class AgentRecord(BaseModel):
     last_used_at: datetime
     use_count: int = Field(default=0, ge=0)
     memory_summary: str = ""
+    legacy_storage_key: str | None = None
     schema_version: int = AGENT_SCHEMA_VERSION
 
     @field_validator("name", "purpose")

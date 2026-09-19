@@ -4,10 +4,11 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
-from .agent import build_system_prompt, prepare_message_with_history
+from .agent import build_candidate_context, build_system_prompt, prepare_message_with_history
 from .tools import DispatchContext, ToolResult, get_tool_schemas, handle_tool_call
 from ...config import get_settings
 from ...services.conversation import get_conversation_log, get_working_memory_log
+from ...services.execution import AgentDirectory, RoutingAction, get_agent_directory
 from ...openrouter_client import request_chat_completion
 from ...logging_config import logger
 
@@ -47,7 +48,7 @@ class InteractionAgentRuntime:
     MAX_TOOL_ITERATIONS = 8
 
     # Initialize interaction agent runtime with settings and service dependencies
-    def __init__(self) -> None:
+    def __init__(self, *, directory: AgentDirectory | None = None) -> None:
         settings = get_settings()
         self.api_key = settings.openrouter_api_key
         self.model = settings.interaction_agent_model
@@ -55,6 +56,7 @@ class InteractionAgentRuntime:
         self.conversation_log = get_conversation_log()
         self.working_memory_log = get_working_memory_log()
         self.tool_schemas = get_tool_schemas()
+        self.agent_directory = directory or get_agent_directory()
         self.dispatch_context = DispatchContext()
 
         if not self.api_key:
@@ -67,12 +69,11 @@ class InteractionAgentRuntime:
         """Handle a user-authored message."""
 
         try:
-            self.dispatch_context = DispatchContext()
             transcript_before = self._load_conversation_transcript()
             self.conversation_log.record_user_message(user_message)
 
             system_prompt = build_system_prompt()
-            messages = prepare_message_with_history(
+            messages = self._prepare_turn_messages(
                 user_message, transcript_before, message_type="user"
             )
 
@@ -103,12 +104,11 @@ class InteractionAgentRuntime:
         """Process a status update emitted by an execution agent."""
 
         try:
-            self.dispatch_context = DispatchContext()
             transcript_before = self._load_conversation_transcript()
             self.conversation_log.record_agent_message(agent_message)
 
             system_prompt = build_system_prompt()
-            messages = prepare_message_with_history(
+            messages = self._prepare_turn_messages(
                 agent_message, transcript_before, message_type="agent"
             )
 
@@ -133,6 +133,38 @@ class InteractionAgentRuntime:
                 response="",
                 error=str(exc),
             )
+
+    def _prepare_turn_messages(
+        self,
+        latest_text: str,
+        transcript: str,
+        *,
+        message_type: str,
+    ) -> List[Dict[str, str]]:
+        """Bind the deterministic routing decision to this turn's tool permissions."""
+
+        candidate_context = build_candidate_context(
+            latest_text,
+            transcript,
+            directory=self.agent_directory,
+        )
+        allowed_ids = (
+            frozenset({candidate_context.decision.agent_id})
+            if candidate_context.decision.action is RoutingAction.REUSE
+            and candidate_context.decision.agent_id is not None
+            else frozenset()
+        )
+        self.dispatch_context = DispatchContext(
+            routing_action=candidate_context.decision.action,
+            allowed_agent_ids=allowed_ids,
+        )
+        return prepare_message_with_history(
+            latest_text,
+            transcript,
+            message_type=message_type,
+            directory=self.agent_directory,
+            candidate_context=candidate_context,
+        )
 
     # Core interaction loop that handles LLM calls and tool executions until completion
     async def _run_interaction_loop(

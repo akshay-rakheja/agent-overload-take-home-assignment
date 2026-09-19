@@ -22,6 +22,9 @@ def test_legacy_name_list_migrates_without_loss_and_is_idempotent(tmp_path) -> N
 
     assert [record.name for record in first] == names
     assert len({record.agent_id for record in first}) == 3
+    assert first[0].legacy_storage_key == "Alice correspondence"
+    assert first[1].legacy_storage_key is None
+    assert first[2].legacy_storage_key == "José — résumé review"
     assert first == second
     assert path.read_bytes() == migrated_bytes
     assert log_path.read_bytes() == original_log

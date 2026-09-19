@@ -5,6 +5,7 @@ from html import escape
 from pathlib import Path
 from typing import Dict, List
 
+from ...config import get_settings
 from ...services.execution import (
     AgentCandidate,
     AgentDirectory,
@@ -40,13 +41,12 @@ def prepare_message_with_history(
     message_type: str = "user",
     *,
     directory: AgentDirectory | None = None,
+    candidate_context: CandidateContext | None = None,
 ) -> List[Dict[str, str]]:
     """Compose a message with history, a bounded candidate set, and the latest turn."""
     sections: List[str] = []
-    candidate_context = build_candidate_context(
-        latest_text,
-        transcript,
-        directory=directory,
+    candidate_context = candidate_context or build_candidate_context(
+        latest_text, transcript, directory=directory
     )
 
     sections.append(_render_conversation_history(transcript))
@@ -74,7 +74,9 @@ def build_candidate_context(
     """Retrieve and route using only the current turn and bounded working context."""
 
     resolved_directory = directory or get_agent_directory()
-    query = RetrievalQuery(text=latest_text, conversation_context=transcript)
+    context_limit = get_settings().agent_routing_context_max_characters
+    bounded_transcript = transcript[-context_limit:]
+    query = RetrievalQuery(text=latest_text, conversation_context=bounded_transcript)
     candidates = AgentRetriever(resolved_directory.list_records).retrieve(query)
     decision = AgentRouter().route(query, candidates)
     return CandidateContext(candidates=tuple(candidates), decision=decision)

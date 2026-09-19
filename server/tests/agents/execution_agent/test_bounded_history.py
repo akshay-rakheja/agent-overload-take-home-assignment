@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from server.agents.execution_agent.agent import ExecutionAgent
 from server.services.execution.context_policy import ExecutionContextPolicy
 from server.services.execution.directory import AgentDirectory
@@ -59,3 +61,41 @@ def test_agent_histories_are_isolated_by_stable_identity(tmp_path) -> None:
 
     assert "FIRST-ONLY-CONTEXT" in prompt
     assert "SECOND-ONLY-CONTEXT" not in prompt
+
+
+def test_migrated_identity_rehydrates_legacy_name_log_then_stable_log(tmp_path) -> None:
+    execution_dir = tmp_path / "execution_agents"
+    execution_dir.mkdir()
+    roster_path = execution_dir / "roster.json"
+    roster_path.write_text(json.dumps(["Alice", "Alice"]), encoding="utf-8")
+    logs = ExecutionAgentLogStore(execution_dir)
+    logs.record_request("Alice", "LEGACY-CONTEXT")
+    directory = AgentDirectory(roster_path)
+    first, duplicate = directory.list_records()
+    logs.record_request(str(first.agent_id), "STABLE-CONTEXT")
+
+    first_agent = ExecutionAgent(
+        first.name,
+        storage_key=str(first.agent_id),
+        agent_id=str(first.agent_id),
+        legacy_storage_key=first.legacy_storage_key,
+        log_store=logs,
+        directory=directory,
+        context_policy=ExecutionContextPolicy(max_recent_episodes=4, max_characters=2_000),
+    )
+    duplicate_agent = ExecutionAgent(
+        duplicate.name,
+        storage_key=str(duplicate.agent_id),
+        agent_id=str(duplicate.agent_id),
+        legacy_storage_key=duplicate.legacy_storage_key,
+        log_store=logs,
+        directory=directory,
+        context_policy=ExecutionContextPolicy(max_recent_episodes=4, max_characters=2_000),
+    )
+
+    first_prompt = first_agent.build_system_prompt_with_history()
+    duplicate_prompt = duplicate_agent.build_system_prompt_with_history()
+    assert "LEGACY-CONTEXT" in first_prompt
+    assert "STABLE-CONTEXT" in first_prompt
+    assert "LEGACY-CONTEXT" not in duplicate_prompt
+    assert logs.read_raw_bytes("Alice")
