@@ -1,84 +1,43 @@
-"""Simple agent roster management - just a list of agent names."""
+"""Backward-compatible name roster backed by the Agent Directory."""
 
-import json
-import fcntl
-import time
+from __future__ import annotations
+
 from pathlib import Path
 
-from ...logging_config import logger
+from .directory import AgentDirectory
 
 
 class AgentRoster:
-    """Simple roster that stores agent names in a JSON file."""
+    """Compatibility adapter for callers that still consume display names."""
 
     def __init__(self, roster_path: Path):
-        self._roster_path = roster_path
-        self._agents: list[str] = []
-        self.load()
+        self._directory = AgentDirectory(roster_path)
+
+    @property
+    def directory(self) -> AgentDirectory:
+        return self._directory
 
     def load(self) -> None:
-        """Load agent names from roster.json."""
-        if self._roster_path.exists():
-            try:
-                with open(self._roster_path, 'r') as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        self._agents = [str(name) for name in data]
-            except Exception as exc:
-                logger.warning(f"Failed to load roster.json: {exc}")
-                self._agents = []
-        else:
-            self._agents = []
-            self.save()
+        self._directory.load()
 
     def save(self) -> None:
-        """Save agent names to roster.json with file locking."""
-        max_retries = 5
-        retry_delay = 0.1
-
-        for attempt in range(max_retries):
-            try:
-                self._roster_path.parent.mkdir(parents=True, exist_ok=True)
-
-                # Open file and acquire exclusive lock
-                with open(self._roster_path, 'w') as f:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    try:
-                        json.dump(self._agents, f, indent=2)
-                        return
-                    finally:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-
-            except BlockingIOError:
-                # Lock is held by another process
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                else:
-                    logger.warning("Failed to acquire lock on roster.json after retries")
-            except Exception as exc:
-                logger.warning(f"Failed to save roster.json: {exc}")
-                break
+        self._directory.save()
 
     def add_agent(self, agent_name: str) -> None:
-        """Add an agent to the roster if not already present."""
-        if agent_name not in self._agents:
-            self._agents.append(agent_name)
-            self.save()
+        """Preserve legacy exact-name deduplication while creating a full record."""
+
+        if agent_name not in self.get_agents():
+            self._directory.create(
+                name=agent_name,
+                purpose=f"Handle tasks related to: {agent_name}",
+                aliases=(agent_name,),
+            )
 
     def get_agents(self) -> list[str]:
-        """Get list of all agent names."""
-        return list(self._agents)
+        return [record.name for record in self._directory.list_records()]
 
     def clear(self) -> None:
-        """Clear the agent roster."""
-        self._agents = []
-        try:
-            if self._roster_path.exists():
-                self._roster_path.unlink()
-            logger.info("Cleared agent roster")
-        except Exception as exc:
-            logger.warning(f"Failed to clear roster.json: {exc}")
+        self._directory.clear()
 
 
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
@@ -88,5 +47,6 @@ _agent_roster = AgentRoster(_ROSTER_PATH)
 
 
 def get_agent_roster() -> AgentRoster:
-    """Get the singleton roster instance."""
+    """Get the singleton compatibility roster."""
+
     return _agent_roster
