@@ -133,13 +133,13 @@ def _benchmark_roster_1000(settings: Settings) -> dict[str, Any]:
     records = tuple(fixture_to_record(fixture) for fixture in fixtures)
     expected_id = records[942].agent_id
     query = RetrievalQuery("Find account-00942 follow-ups", "")
-    retriever = AgentRetriever(records, now=lambda: EVALUATION_NOW, settings=settings)
     router = AgentRouter(settings=settings)
     warmup_runs = 3
     measured_runs = 30
 
     def run_once() -> tuple[float, int, int, bool]:
         started = perf_counter()
+        retriever = AgentRetriever(records, now=lambda: EVALUATION_NOW, settings=settings)
         candidates = retriever.retrieve(query)
         decision = router.route(query, candidates)
         prompt = "\n".join(

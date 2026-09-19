@@ -6,6 +6,7 @@ import math
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from uuid import UUID
 
 from ...config import Settings
@@ -120,6 +121,7 @@ def _query_features(query: RetrievalQuery) -> _QueryFeatures:
     )
 
 
+@lru_cache(maxsize=50_000)
 def _record_features(record: AgentRecord) -> _RecordFeatures:
     fields = (record.name, record.purpose, *record.aliases, record.memory_summary)
     normalized_fields = tuple(normalize_agent_text(field) for field in fields if field)
