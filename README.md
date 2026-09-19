@@ -21,9 +21,9 @@ The committed credential-free evaluation uses 40 labeled cases (20 development,
 - Held-out hybrid routing: **100% top-5 recall**, **100% decision accuracy**,
   **0% wrong reuse**, and **0% duplicate creation** on this corpus revision.
 - A 1,000-identity directory exposes at most five candidates; measured local
-  p95 retrieval was **37.14 ms** on the recorded run.
-- At 10,000 raw history entries, full rehydration renders **1,299,999
-  characters** versus **4,304 characters** for the bounded policy, with eight
+  p95 retrieval was **8.31 ms** across 30 dedicated runs after three warm-ups.
+- At 10,000 raw history entries, full rehydration renders **1,322,499
+  characters** versus **4,376 characters** for the bounded policy, with eight
   recent episodes and the raw log unchanged.
 
 These numbers do not prove live-model or Gmail task success. The current-system
@@ -140,6 +140,9 @@ not require a `.env` file.
   existing interfaces and compared with the same held-out harness.
 - This implementation consumes a durable memory summary but deliberately does
   not build an LLM summarization pipeline or semantic search over old logs.
+- The prompt is bounded, but the selected agent's append-only journal is still
+  read and parsed linearly before the recent-episode window is selected. A
+  production-scale follow-up should add episode offsets or a backward index.
 - The longer-term abstraction may be a durable task/entity ledger plus a small
   fixed set of capability workers. That redesign is out of scope for this
   five-day vertical slice.

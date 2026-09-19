@@ -21,7 +21,7 @@ Point out:
 - a 1,000-record query returns one relevant candidate under the hard cap of
   five;
 - paraphrased work reuses, novel work creates, and ambiguous work abstains; and
-- the 10,000-entry history drops from 1,299,999 to 4,304 prompt characters
+- the 10,000-entry history drops from 1,322,499 to 4,376 prompt characters
   while raw history remains unchanged.
 
 ## 1:20–2:10 — Show the directory and bounded prompt
@@ -77,4 +77,3 @@ embedding retrieval, no new summary generator, and no live Gmail/model eval.
 Mention the longer-term task/entity ledger as a deeper architectural direction
 and Jev as an optional second-stage router over the already bounded candidate
 set.
-

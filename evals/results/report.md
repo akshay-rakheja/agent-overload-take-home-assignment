@@ -1,17 +1,21 @@
 # Agent overload evaluation
 
-- Implementation commit: `84d837230a7a864b56568c57eac65df681066e07`
+- Implementation commit: `62f022707e17589b1a2da9a193348e77a8b024e8`
 - Corpus revision: `c8340d12fa35e9705aa31295eba498c05a8e5cab38738aa4cfbe742e6fef256a`
 - Corpus cases: 40 (20 development, 20 held-out)
 - Mode: deterministic offline; no credentials required
 
 ## Held-out test results
 
-| Strategy | Top-5 recall | MRR | Decision accuracy | Wrong reuse | Duplicate creation | Max candidates | Prompt chars mean | p95 ms |
+| Strategy | Top-5 recall | MRR | Decision accuracy | Wrong reuse | Duplicate creation | Max candidates | Prompt chars mean | Case-mix p95 ms |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| current_full_roster_exact_name_proxy | 75.0% | 0.761 | 35.0% | 0.0% | 68.8% | 1000 | 3417.6 | 0.196 |
-| recency_only_top_five | 62.5% | 0.625 | 70.0% | 0.0% | 37.5% | 2 | 79.3 | 0.560 |
-| hybrid_directory | 100.0% | 1.000 | 100.0% | 0.0% | 0.0% | 2 | 112.8 | 37.138 |
+| current_full_roster_exact_name_proxy | 75.0% | 0.761 | 35.0% | 0.0% | 68.8% | 1000 | 3417.6 | 0.228 |
+| recency_only_top_five | 62.5% | 0.625 | 70.0% | 0.0% | 37.5% | 2 | 79.3 | 0.236 |
+| hybrid_directory | 100.0% | 1.000 | 100.0% | 0.0% | 0.0% | 2 | 112.8 | 3.365 |
+
+## Dedicated 1,000-record latency benchmark
+
+After 3 warm-up runs, 30 measured runs produced p50 7.034 ms and p95 8.312 ms. Candidate count remained between 5 and 5.
 
 ## Held-out target assessment
 
@@ -25,10 +29,10 @@
 
 | Raw entries | Full prompt chars | Bounded prompt chars | Included episodes | Omitted entries | Raw log unchanged |
 | ---: | ---: | ---: | ---: | ---: | :---: |
-| 10 | 1297 | 1370 | 3 | 0 | yes |
-| 100 | 12999 | 4302 | 8 | 68 | yes |
-| 1000 | 129999 | 4303 | 8 | 968 | yes |
-| 10000 | 1299999 | 4304 | 8 | 9968 | yes |
+| 10 | 1315 | 1388 | 3 | 0 | yes |
+| 100 | 13224 | 4374 | 8 | 68 | yes |
+| 1000 | 132249 | 4375 | 8 | 968 | yes |
+| 10000 | 1322499 | 4376 | 8 | 9968 | yes |
 
 ## Failure analysis
 

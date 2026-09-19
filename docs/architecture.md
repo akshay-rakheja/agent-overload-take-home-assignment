@@ -51,6 +51,10 @@ lifecycle status, creation/use timestamps, use count, optional memory summary,
 and schema version.
 
 - Legacy name-list rosters migrate deterministically and idempotently.
+- The first migrated identity for each legacy name retains an explicit pointer
+  to its old name-keyed journal; subsequent duplicate names do not inherit that
+  history. New entries use the stable UUID journal, and rehydration reads the
+  legacy journal before the UUID journal without rewriting either.
 - Writes use a lock file plus atomic replacement; malformed data fails without
   overwriting the source.
 - Duplicate names and aliases remain distinct records. Retrieval resolves
@@ -98,6 +102,11 @@ closed before logging or dispatch. Creating a new identity requires both name
 and purpose, and repeated creation calls within one interaction turn resolve to
 the same ID.
 
+The routing decision is also an authorization boundary. A reuse turn permits
+only the recommended UUID, a create-new turn permits only creation, and an
+abstain turn permits neither. This prevents a model tool call from bypassing the
+deterministic router even if another valid UUID exists in storage.
+
 Stable IDs are also execution-log and tool-registry keys, preventing display
 names such as `A B` and `A-B` from colliding. Name-owned legacy scheduled work
 continues through the optional-ID runtime compatibility path.
@@ -117,6 +126,11 @@ omitted entries, truncation, and summary use.
 
 The policy only reads `ExecutionAgentLogStore`; raw bytes are unchanged. Missing
 or malformed summaries fall back to recent raw episodes.
+
+The current store still reads and parses the selected journal linearly before
+the policy chooses its recent suffix. Prompt size is bounded, but local I/O is
+not yet sublinear in history depth; episode offsets or a backward journal index
+are the natural production follow-up.
 
 ## Failure handling
 
@@ -156,4 +170,3 @@ or abstain, but passing every identity to it simply moves overload downstream.
 It is therefore an optional routing adapter after deterministic retrieval, not
 a required dependency. The default path remains reproducible for reviewers who
 have no provider access.
-

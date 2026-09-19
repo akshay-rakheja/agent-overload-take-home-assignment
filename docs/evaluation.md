@@ -45,7 +45,8 @@ Retrieval and routing are reported independently:
 - wrong-agent reuse and duplicate creation rates;
 - abstention precision;
 - candidate count and rendered prompt characters/bytes;
-- local retrieval p50/p95; and
+- held-out case-mix retrieval p50/p95 plus a dedicated 30-run, 1,000-record
+  latency benchmark after three warm-ups; and
 - failures grouped by category with per-case observations.
 
 Depth reports raw versus prompt-visible characters/bytes, included episodes,
@@ -72,28 +73,36 @@ and cross-agent contamination failures.
 
 ## Actual held-out results
 
-| Strategy | Top-5 recall | MRR | Accuracy | Wrong reuse | Duplicate creation | Max candidates | Prompt chars mean | p95 ms |
+| Strategy | Top-5 recall | MRR | Accuracy | Wrong reuse | Duplicate creation | Max candidates | Prompt chars mean | Case-mix p95 ms |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Current full-roster proxy | 75.0% | 0.761 | 35.0% | 0.0% | 68.8% | 1,000 | 3,417.6 | 0.196 |
-| Recency-only top-five | 62.5% | 0.625 | 70.0% | 0.0% | 37.5% | 2 | 79.3 | 0.560 |
-| Hybrid directory | **100.0%** | **1.000** | **100.0%** | **0.0%** | **0.0%** | **2** | **112.8** | **37.138** |
+| Current full-roster proxy | 75.0% | 0.761 | 35.0% | 0.0% | 68.8% | 1,000 | 3,417.6 | 0.228 |
+| Recency-only top-five | 62.5% | 0.625 | 70.0% | 0.0% | 37.5% | 2 | 79.3 | 0.236 |
+| Hybrid directory | **100.0%** | **1.000** | **100.0%** | **0.0%** | **0.0%** | **2** | **112.8** | **3.365** |
 
-The p95 values are local observations, not service-level guarantees. The hybrid
-path scans and scores every local record while bounding the downstream prompt;
-the cheaper baselines do less relevance work.
+The table's p95 values describe a heterogeneous 20-case held-out mix and are not
+used for the scale target. The dedicated benchmark recreates the retriever on
+each run against exactly 1,000 records; after three warm-ups, 30 measured runs
+produced **7.03 ms p50** and **8.31 ms p95** locally. These are observations,
+not service-level guarantees. Immutable record features use a bounded cache,
+while changed directory records produce new features.
 
 ### Depth scaling
 
 | Raw entries | Full prompt chars | Bounded prompt chars | Included episodes | Omitted entries | Raw log unchanged |
 | ---: | ---: | ---: | ---: | ---: | :---: |
-| 10 | 1,297 | 1,370 | 3 | 0 | yes |
-| 100 | 12,999 | 4,302 | 8 | 68 | yes |
-| 1,000 | 129,999 | 4,303 | 8 | 968 | yes |
-| 10,000 | 1,299,999 | 4,304 | 8 | 9,968 | yes |
+| 10 | 1,315 | 1,388 | 3 | 0 | yes |
+| 100 | 13,224 | 4,374 | 8 | 68 | yes |
+| 1,000 | 132,249 | 4,375 | 8 | 968 | yes |
+| 10,000 | 1,322,499 | 4,376 | 8 | 9,968 | yes |
 
 The 10-entry bounded form is slightly larger because it adds the durable
 summary; its value is the ceiling as history grows, not compression of already
 small histories.
+
+Each depth point is written through the production append-only log store. The
+evaluator snapshots both the selected agent's journal and a second sentinel
+agent's journal before rendering, then verifies byte-for-byte preservation and
+checks that the second agent's sentinel never appears in the selected context.
 
 ## Targets and failure analysis
 
@@ -132,4 +141,3 @@ slightly between runs.
 A live extension must pin model/provider/configuration, repeat cases, report
 variance, and retain deterministic identity labels rather than using an LLM
 judge as the only ground truth.
-
