@@ -10,6 +10,7 @@ from typing import Dict, Iterator, List, Tuple
 
 from ...logging_config import logger
 from ...utils.timezones import now_in_user_timezone
+from .context_policy import render_log_entries
 
 
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
@@ -144,14 +145,17 @@ class ExecutionAgentLogStore:
 
     def load_transcript(self, agent_name: str) -> str:
         """Load the full transcript for inclusion in system prompt."""
-        parts: List[str] = []
-        for tag, timestamp, payload in self.iter_entries(agent_name):
-            escaped = escape(payload, quote=False)
-            if timestamp:
-                parts.append(f"<{tag} timestamp=\"{timestamp}\">{escaped}</{tag}>")
-            else:
-                parts.append(f"<{tag}>{escaped}</{tag}>")
-        return "\n".join(parts)
+        return render_log_entries(self.iter_entries(agent_name))
+
+    def read_raw_bytes(self, agent_name: str) -> bytes:
+        """Return the stored journal bytes for preservation checks and audit."""
+
+        path = self._log_path(agent_name)
+        with self._lock_for(agent_name):
+            try:
+                return path.read_bytes()
+            except FileNotFoundError:
+                return b""
 
     def load_recent(self, agent_name: str, limit: int = 10) -> list[tuple[str, str, str]]:
         """Load recent log entries."""

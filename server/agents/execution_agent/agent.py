@@ -3,7 +3,16 @@
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
-from ...services.execution import get_execution_agent_logs
+from ...config import get_settings
+from ...services.execution import (
+    AgentDirectory,
+    ContextMetrics,
+    ExecutionAgentLogStore,
+    ExecutionContextPolicy,
+    UnknownAgentError,
+    get_agent_directory,
+    get_execution_agent_logs,
+)
 from ...logging_config import logger
 
 
@@ -38,6 +47,10 @@ class ExecutionAgent:
         name: str,
         conversation_limit: Optional[int] = None,
         storage_key: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        log_store: Optional[ExecutionAgentLogStore] = None,
+        directory: Optional[AgentDirectory] = None,
+        context_policy: Optional[ExecutionContextPolicy] = None,
     ):
         """
         Initialize an execution agent.
@@ -48,8 +61,27 @@ class ExecutionAgent:
         """
         self.name = name
         self.storage_key = storage_key or name
+        self.agent_id = agent_id
         self.conversation_limit = conversation_limit
-        self._log_store = get_execution_agent_logs()
+        self._log_store = log_store or get_execution_agent_logs()
+        self._directory = directory or (get_agent_directory() if agent_id else None)
+        settings = get_settings()
+        recent_episode_limit = conversation_limit or settings.execution_context_max_recent_episodes
+        self._context_policy = context_policy or ExecutionContextPolicy(
+            max_recent_episodes=recent_episode_limit,
+            max_characters=settings.execution_context_max_characters,
+        )
+        self.last_context_metrics = ContextMetrics(
+            raw_entry_count=0,
+            raw_history_characters=0,
+            raw_history_bytes=0,
+            rendered_characters=0,
+            rendered_bytes=0,
+            included_episode_count=0,
+            omitted_entry_count=0,
+            truncated_entry_count=0,
+            summary_used=False,
+        )
 
     # Generate system prompt template with agent name and purpose derived from name
     def build_system_prompt(self) -> str:
@@ -71,29 +103,21 @@ class ExecutionAgent:
         """
         base_prompt = self.build_system_prompt()
 
-        # Load history transcript
-        transcript = self._log_store.load_transcript(self.storage_key)
+        memory_summary = ""
+        if self.agent_id and self._directory is not None:
+            try:
+                memory_summary = self._directory.require(self.agent_id).memory_summary
+            except UnknownAgentError:
+                memory_summary = ""
 
-        if transcript:
-            # Apply conversation limit if needed
-            if self.conversation_limit and self.conversation_limit > 0:
-                # Parse entries and limit them
-                lines = transcript.split('\n')
-                request_count = sum(1 for line in lines if '<agent_request' in line)
+        context = self._context_policy.render(
+            self._log_store.iter_entries(self.storage_key),
+            memory_summary=memory_summary,
+        )
+        self.last_context_metrics = context.metrics
 
-                if request_count > self.conversation_limit:
-                    # Find where to cut
-                    kept_requests = 0
-                    cutoff_index = len(lines)
-                    for i in range(len(lines) - 1, -1, -1):
-                        if '<agent_request' in lines[i]:
-                            kept_requests += 1
-                            if kept_requests == self.conversation_limit:
-                                cutoff_index = i
-                                break
-                    transcript = '\n'.join(lines[cutoff_index:])
-
-            return f"{base_prompt}\n\n# Execution History\n\n{transcript}"
+        if context.text:
+            return f"{base_prompt}\n\n# Execution History\n\n{context.text}"
 
         return base_prompt
 

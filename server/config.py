@@ -99,6 +99,15 @@ class Settings(BaseModel):
         gt=0,
         le=1,
     )
+    execution_context_max_recent_episodes: int = Field(
+        default=_env_int("OPENPOKE_EXECUTION_CONTEXT_MAX_RECENT_EPISODES", 8),
+        ge=1,
+        le=100,
+    )
+    execution_context_max_characters: int = Field(
+        default=_env_int("OPENPOKE_EXECUTION_CONTEXT_MAX_CHARACTERS", 12_000),
+        ge=200,
+    )
 
     @property
     def cors_allow_origins(self) -> List[str]:
