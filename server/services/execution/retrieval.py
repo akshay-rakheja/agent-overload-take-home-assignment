@@ -95,6 +95,22 @@ class AgentCandidate:
     reasons: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class _QueryFeatures:
+    normalized: str
+    tokens: frozenset[str]
+    bigrams: frozenset[tuple[str, str]]
+
+
+def _query_features(query: RetrievalQuery) -> _QueryFeatures:
+    sequence = _tokens(query.combined_text)
+    return _QueryFeatures(
+        normalized=normalize_agent_text(query.combined_text),
+        tokens=frozenset(sequence),
+        bigrams=frozenset(zip(sequence, sequence[1:])),
+    )
+
+
 RecordProvider = Iterable[AgentRecord] | Callable[[], Iterable[AgentRecord]]
 
 
@@ -116,31 +132,27 @@ class AgentRetriever:
         source = self._records() if callable(self._records) else self._records
         return tuple(source)
 
-    def _score(self, query: RetrievalQuery, record: AgentRecord) -> AgentCandidate:
-        combined = normalize_agent_text(query.combined_text)
-        query_tokens = set(_tokens(query.combined_text))
+    def _score(self, query: _QueryFeatures, record: AgentRecord) -> AgentCandidate:
         fields = (record.name, record.purpose, *record.aliases, record.memory_summary)
         normalized_fields = tuple(normalize_agent_text(field) for field in fields if field)
         document_tokens = set(_tokens(" ".join(fields)))
 
         exact_phrase = any(
-            _contains_phrase(combined, phrase)
+            _contains_phrase(query.normalized, phrase)
             for phrase in (record.normalized_name, *record.normalized_aliases)
             if phrase
         )
         exact_match = 0.70 if exact_phrase else 0.0
 
-        overlap = query_tokens & document_tokens
-        overlap_ratio = len(overlap) / max(1, len(query_tokens))
+        overlap = query.tokens & document_tokens
+        overlap_ratio = len(overlap) / max(1, len(query.tokens))
         token_overlap = min(0.35, 0.35 * overlap_ratio)
 
-        query_sequence = _tokens(query.combined_text)
-        query_bigrams = set(zip(query_sequence, query_sequence[1:]))
         field_bigrams: set[tuple[str, str]] = set()
         for field in normalized_fields:
             field_tokens = _tokens(field)
             field_bigrams.update(zip(field_tokens, field_tokens[1:]))
-        phrase_match = 0.12 if query_bigrams & field_bigrams else 0.0
+        phrase_match = 0.12 if query.bigrams & field_bigrams else 0.0
 
         now = self._now()
         age_days = max(0.0, (now - record.last_used_at).total_seconds() / 86_400)
@@ -194,7 +206,8 @@ class AgentRetriever:
             raise ValueError("retrieval limit must be positive")
         effective_limit = min(requested_limit, self._settings.agent_retrieval_top_k)
 
-        candidates = [self._score(query, record) for record in self._get_records()]
+        features = _query_features(query)
+        candidates = [self._score(features, record) for record in self._get_records()]
         candidates = [
             candidate
             for candidate in candidates
@@ -208,4 +221,3 @@ class AgentRetriever:
             )
         )
         return candidates[:effective_limit]
-
