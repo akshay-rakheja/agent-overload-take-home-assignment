@@ -15,7 +15,7 @@ class RoutingObservation:
     expected_agent_id: str | None
     action: str
     agent_id: str | None
-    ranked_agent_ids: tuple[str, ...]
+    ranked_agent_ids: tuple[str, ...] | None
     candidate_count: int
     prompt_characters: int
     prompt_bytes: int
@@ -57,9 +57,12 @@ def summarize_routing(
     """Summarize retrieval and final routing without conflating the two."""
 
     reuse = [item for item in observations if item.expected_action == "reuse"]
+    ranked_reuse = [item for item in reuse if item.ranked_agent_ids is not None]
+    retrieval_metrics_applicable = bool(reuse) and len(ranked_reuse) == len(reuse)
     top_k_hits = 0
     reciprocal_rank_total = 0.0
-    for item in reuse:
+    for item in ranked_reuse:
+        assert item.ranked_agent_ids is not None
         if item.expected_agent_id in item.ranked_agent_ids[:top_k]:
             top_k_hits += 1
         if item.expected_agent_id in item.ranked_agent_ids:
@@ -88,9 +91,18 @@ def summarize_routing(
     return {
         "case_count": len(observations),
         "reuse_case_count": len(reuse),
+        "retrieval_metrics_applicable": retrieval_metrics_applicable,
         "top_k": top_k,
-        "top_k_recall": _safe_rate(top_k_hits, len(reuse)),
-        "mean_reciprocal_rank": _safe_rate(reciprocal_rank_total, len(reuse)),
+        "top_k_recall": (
+            _safe_rate(top_k_hits, len(ranked_reuse))
+            if retrieval_metrics_applicable
+            else None
+        ),
+        "mean_reciprocal_rank": (
+            _safe_rate(reciprocal_rank_total, len(ranked_reuse))
+            if retrieval_metrics_applicable
+            else None
+        ),
         "decision_accuracy": _safe_rate(correct, len(observations)),
         "wrong_agent_reuse_rate": _safe_rate(wrong_reuse, len(unambiguous)),
         "duplicate_creation_rate": _safe_rate(duplicate_creation, len(reuse)),
@@ -105,7 +117,7 @@ def summarize_routing(
         "prompt_bytes_mean": _safe_rate(
             sum(item.prompt_bytes for item in observations), len(observations)
         ),
-        "retrieval_latency_ms": {
+        "strategy_latency_ms": {
             "p50": percentile(latencies, 0.50),
             "p95": percentile(latencies, 0.95),
         },
@@ -123,4 +135,3 @@ def summarize_routing(
         ],
         "observations": [asdict(item) for item in observations],
     }
-

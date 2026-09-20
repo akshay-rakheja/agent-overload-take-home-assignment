@@ -117,6 +117,110 @@ def test_new_agent_creation_is_idempotent_within_one_turn(tmp_path) -> None:
     assert second.payload["new_agent_created"] is False
 
 
+def test_create_retry_reuses_identity_across_name_and_purpose_paraphrases(tmp_path) -> None:
+    directory = AgentDirectory(tmp_path / "roster.json")
+    logs = ExecutionAgentLogStore(tmp_path / "logs")
+    batch = FakeBatchManager()
+    context = DispatchContext()
+
+    first = dispatch_and_drain(
+        agent_name="  Bob   Invoices ",
+        agent_purpose="Track and resolve Bob's invoices",
+        instructions="Find the latest invoice",
+        dispatch_context=context,
+        directory=directory,
+        log_store=logs,
+        batch_manager=batch,
+    )
+    second = dispatch_and_drain(
+        agent_name="bob invoices",
+        agent_purpose="Manage invoice follow-ups for Bob",
+        instructions="Check again",
+        dispatch_context=context,
+        directory=directory,
+        log_store=logs,
+        batch_manager=batch,
+    )
+
+    assert len(directory.list_records()) == 1
+    assert first.payload["agent_id"] == second.payload["agent_id"]
+    assert second.payload["new_agent_created"] is False
+
+
+def test_distinct_creation_intents_allow_two_same_name_identities(tmp_path) -> None:
+    directory = AgentDirectory(tmp_path / "roster.json")
+    logs = ExecutionAgentLogStore(tmp_path / "logs")
+    batch = FakeBatchManager()
+    context = DispatchContext()
+
+    first = dispatch_and_drain(
+        agent_name="Vendor review",
+        agent_purpose="Review the first vendor",
+        creation_intent_id="vendor-one",
+        instructions="Review vendor one",
+        dispatch_context=context,
+        directory=directory,
+        log_store=logs,
+        batch_manager=batch,
+    )
+    second = dispatch_and_drain(
+        agent_name="Vendor review",
+        agent_purpose="Review the second vendor",
+        creation_intent_id="vendor-two",
+        instructions="Review vendor two",
+        dispatch_context=context,
+        directory=directory,
+        log_store=logs,
+        batch_manager=batch,
+    )
+
+    assert len(directory.list_records()) == 2
+    assert first.payload["agent_id"] != second.payload["agent_id"]
+    assert first.payload["new_agent_created"] is True
+    assert second.payload["new_agent_created"] is True
+
+
+def test_missing_event_loop_does_not_create_or_log_identity(tmp_path) -> None:
+    directory = AgentDirectory(tmp_path / "roster.json")
+    logs = ExecutionAgentLogStore(tmp_path / "logs")
+
+    result = send_message_to_agent(
+        agent_name="Bob invoices",
+        agent_purpose="Track Bob invoices",
+        instructions="Do not partially apply",
+        dispatch_context=DispatchContext(routing_action=RoutingAction.CREATE_NEW),
+        directory=directory,
+        log_store=logs,
+        batch_manager=FakeBatchManager(),
+    )
+
+    assert result.success is False
+    assert directory.list_records() == []
+    assert logs.list_agents() == []
+
+
+def test_missing_event_loop_does_not_mark_or_log_reused_identity(tmp_path) -> None:
+    directory = AgentDirectory(tmp_path / "roster.json")
+    record = directory.create(name="Alice", purpose="Track Alice")
+    logs = ExecutionAgentLogStore(tmp_path / "logs")
+
+    result = send_message_to_agent(
+        agent_id=str(record.agent_id),
+        instructions="Do not partially apply",
+        dispatch_context=DispatchContext(
+            routing_action=RoutingAction.REUSE,
+            allowed_agent_ids=frozenset({record.agent_id}),
+        ),
+        directory=directory,
+        log_store=logs,
+        batch_manager=FakeBatchManager(),
+    )
+
+    assert result.success is False
+    assert directory.require(record.agent_id).use_count == 0
+    assert logs.list_agents() == []
+
+
 def test_stable_log_keys_isolate_names_that_share_the_same_slug(tmp_path) -> None:
     directory = AgentDirectory(tmp_path / "roster.json")
     first = directory.create(name="A B", purpose="First workflow")

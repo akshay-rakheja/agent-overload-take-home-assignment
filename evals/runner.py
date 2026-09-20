@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import platform
+import shlex
 import subprocess
 import tempfile
 from dataclasses import asdict
@@ -19,12 +20,21 @@ from evals.materialize import EVALUATION_NOW, fixture_to_record, materialize_cas
 from evals.metrics import percentile, summarize_routing
 from evals.schema import load_routing_corpus
 from evals.strategies import default_breadth_strategies
-from server.config import Settings
+from server.agents.interaction_agent.agent import CandidateContext, render_agent_candidates
+from server.config import MAX_AGENT_CANDIDATES, Settings
 from server.services.execution.directory import AgentDirectory
 from server.services.execution.context_policy import ExecutionContextPolicy
 from server.services.execution.log_store import ExecutionAgentLogStore
 from server.services.execution.retrieval import AgentRetriever, RetrievalQuery
 from server.services.execution.routing import AgentRouter, RoutingAction
+
+
+CANONICAL_EVALUATOR_COMMAND = (
+    ".venv/bin/python -m evals.runner "
+    "--corpus evals/agent_routing_cases.jsonl "
+    "--json evals/results/hybrid_directory.json "
+    "--report evals/results/report.md"
+)
 
 
 def _git_commit() -> str:
@@ -40,6 +50,31 @@ def _git_commit() -> str:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _partition_sha256(cases: list[Any], split: str) -> str:
+    canonical = "\n".join(
+        case.model_dump_json()
+        for case in cases
+        if case.split == split
+    ) + "\n"
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _evaluator_command(corpus_path: Path, json_path: Path, report_path: Path) -> str:
+    return shlex.join(
+        [
+            ".venv/bin/python",
+            "-m",
+            "evals.runner",
+            "--corpus",
+            str(corpus_path),
+            "--json",
+            str(json_path),
+            "--report",
+            str(report_path),
+        ]
+    )
 
 
 def _evaluate_depth(settings: Settings) -> dict[str, Any]:
@@ -161,13 +196,11 @@ def _benchmark_roster_1000(settings: Settings) -> dict[str, Any]:
             )
             candidates = retriever.retrieve(query)
             decision = router.route(query, candidates)
-            prompt = "\n".join(
-                f"{candidate.agent_id}|{candidate.name}|{candidate.purpose}|{candidate.status.value}"
-                for candidate in candidates
-            )
+            context = CandidateContext(tuple(candidates), decision)
+            prompt = render_agent_candidates(context)
             elapsed_ms = (perf_counter() - started) * 1_000
             correct = decision.action is RoutingAction.REUSE and decision.agent_id == expected_id
-            return elapsed_ms, len(candidates), len(prompt), correct
+            return elapsed_ms, len(context.prompt_candidates), len(prompt), correct
 
         for _ in range(warmup_runs):
             run_once()
@@ -176,6 +209,7 @@ def _benchmark_roster_1000(settings: Settings) -> dict[str, Any]:
     return {
         "roster_size": len(records),
         "source": "AgentDirectory.list_records",
+        "candidate_renderer": "server.agents.interaction_agent.agent.render_agent_candidates",
         "warmup_runs": warmup_runs,
         "measured_runs": measured_runs,
         "candidate_count_max": max(observation[1] for observation in observations),
@@ -204,7 +238,7 @@ def _target_assessment(
         "decision_accuracy_at_least_90_percent": test_metrics["decision_accuracy"] >= 0.90,
         "wrong_agent_reuse_at_most_2_percent": test_metrics["wrong_agent_reuse_rate"] <= 0.02,
         "candidate_count_at_most_5": test_metrics["max_candidate_count"] <= 5,
-        "retrieval_p95_below_50_ms": scale_benchmark["latency_ms"]["p95"] < 50,
+        "production_path_p95_below_50_ms": scale_benchmark["latency_ms"]["p95"] < 50,
     }
     return {
         "checks": checks,
@@ -214,7 +248,11 @@ def _target_assessment(
     }
 
 
-def run_offline_evaluation(corpus_path: Path) -> dict[str, Any]:
+def run_offline_evaluation(
+    corpus_path: Path,
+    *,
+    evaluator_command: str = CANONICAL_EVALUATOR_COMMAND,
+) -> dict[str, Any]:
     """Evaluate both overload axes without network calls or provider credentials."""
 
     cases = load_routing_corpus(corpus_path)
@@ -232,19 +270,38 @@ def run_offline_evaluation(corpus_path: Path) -> dict[str, Any]:
     settings = Settings()
     hybrid_test = split_results["test"]["hybrid_directory"]
     roster_1000_benchmark = _benchmark_roster_1000(settings)
+    corpus_sha256 = _sha256(corpus_path)
+    implementation_commit = _git_commit()
     return {
         "schema_version": 1,
         "mode": "deterministic_offline",
         "credentials_required": False,
-        "implementation_commit": _git_commit(),
-        "corpus_revision": _sha256(corpus_path),
+        "implementation_commit": implementation_commit,
+        "corpus_revision": corpus_sha256,
         "corpus_case_count": len(cases),
+        "corpus": {
+            "path": corpus_path.as_posix(),
+            "sha256": corpus_sha256,
+            "partitions": {
+                split: {
+                    "case_count": sum(case.split == split for case in cases),
+                    "sha256": _partition_sha256(cases, split),
+                }
+                for split in ("development", "test")
+            },
+        },
+        "reproducibility": {
+            "evaluator_command": evaluator_command,
+            "random_seed": None,
+            "randomness": "not applicable; cases, fixtures, retrieval, and routing are deterministic",
+        },
         "environment": {
             "python": platform.python_version(),
             "platform": platform.platform(),
         },
         "configuration": {
             "retrieval_top_k": settings.agent_retrieval_top_k,
+            "candidate_hard_max": MAX_AGENT_CANDIDATES,
             "retrieval_min_score": settings.agent_retrieval_min_score,
             "reuse_threshold": settings.agent_route_reuse_threshold,
             "ambiguity_margin": settings.agent_route_ambiguity_margin,
@@ -262,7 +319,7 @@ def run_offline_evaluation(corpus_path: Path) -> dict[str, Any]:
             "strategies": [strategy.name for strategy in strategies],
             "splits": split_results,
             "scale_benchmarks": {"roster_1000": roster_1000_benchmark},
-            "held_out_target_assessment": _target_assessment(
+            "test_partition_target_assessment": _target_assessment(
                 hybrid_test, roster_1000_benchmark
             ),
         },
@@ -272,12 +329,21 @@ def run_offline_evaluation(corpus_path: Path) -> dict[str, Any]:
             "The harness measures deterministic routing and prompt construction, not end-to-end Gmail task success.",
             "Local latency measurements vary by machine and process load.",
             "No LLM judge is used as identity-routing ground truth.",
+            "The checked-in test partition is reproducible but was not sealed from inspection during development.",
         ],
     }
 
 
 def _percent(value: float) -> str:
     return f"{value * 100:.1f}%"
+
+
+def _optional_percent(value: float | None) -> str:
+    return "n/a" if value is None else _percent(value)
+
+
+def _optional_decimal(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.3f}"
 
 
 def render_report(results: dict[str, Any]) -> str:
@@ -289,11 +355,15 @@ def render_report(results: dict[str, Any]) -> str:
         "# Agent overload evaluation",
         "",
         f"- Implementation commit: `{results['implementation_commit']}`",
-        f"- Corpus revision: `{results['corpus_revision']}`",
-        f"- Corpus cases: {results['corpus_case_count']} (20 development, 20 held-out)",
+        f"- Corpus SHA-256: `{results['corpus']['sha256']}`",
+        f"- Development partition SHA-256: `{results['corpus']['partitions']['development']['sha256']}`",
+        f"- Test partition SHA-256: `{results['corpus']['partitions']['test']['sha256']}`",
+        f"- Corpus cases: {results['corpus_case_count']} (20 development, 20 checked-in test)",
+        f"- Exact evaluator command: `{results['reproducibility']['evaluator_command']}`",
+        "- Random seed: not applicable; the harness has no random sampling",
         "- Mode: deterministic offline; no credentials required",
         "",
-        "## Held-out test results",
+        "## Checked-in test partition results",
         "",
         "| Strategy | Top-5 recall | MRR | Decision accuracy | Wrong reuse | Duplicate creation | Max candidates | Prompt chars mean | Case-mix p95 ms |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -301,12 +371,12 @@ def render_report(results: dict[str, Any]) -> str:
     for strategy in breadth["strategies"]:
         metrics = breadth["splits"]["test"][strategy]
         lines.append(
-            f"| {strategy} | {_percent(metrics['top_k_recall'])} | "
-            f"{metrics['mean_reciprocal_rank']:.3f} | {_percent(metrics['decision_accuracy'])} | "
+            f"| {strategy} | {_optional_percent(metrics['top_k_recall'])} | "
+            f"{_optional_decimal(metrics['mean_reciprocal_rank'])} | {_percent(metrics['decision_accuracy'])} | "
             f"{_percent(metrics['wrong_agent_reuse_rate'])} | "
             f"{_percent(metrics['duplicate_creation_rate'])} | {metrics['max_candidate_count']} | "
             f"{metrics['prompt_characters_mean']:.1f} | "
-            f"{metrics['retrieval_latency_ms']['p95']:.3f} |"
+            f"{metrics['strategy_latency_ms']['p95']:.3f} |"
         )
 
     benchmark = breadth["scale_benchmarks"]["roster_1000"]
@@ -324,8 +394,8 @@ def render_report(results: dict[str, Any]) -> str:
         ]
     )
 
-    assessment = breadth["held_out_target_assessment"]
-    lines.extend(["", "## Held-out target assessment", ""])
+    assessment = breadth["test_partition_target_assessment"]
+    lines.extend(["", "## Checked-in test partition target assessment", ""])
     for name, passed in assessment["checks"].items():
         lines.append(f"- {'PASS' if passed else 'MISS'} — {name.replace('_', ' ')}")
 
@@ -383,11 +453,11 @@ def render_report(results: dict[str, Any]) -> str:
                 f"`{failure['expected_action']}` but produced `{failure['actual_action']}`."
             )
     else:
-        lines.append("- Hybrid directory had no held-out routing misses in this corpus revision.")
+        lines.append("- Hybrid directory had no test-partition routing misses in this corpus revision.")
     if assessment["missed_targets"]:
         lines.append(f"- Missed targets: {', '.join(assessment['missed_targets'])}.")
     else:
-        lines.append("- No proposed held-out target was missed on this corpus revision.")
+        lines.append("- No proposed test-partition target was missed on this corpus revision.")
 
     lines.extend(
         [
@@ -433,7 +503,10 @@ def main() -> None:
         default=Path("evals/results/report.md"),
     )
     args = parser.parse_args()
-    results = run_offline_evaluation(args.corpus)
+    results = run_offline_evaluation(
+        args.corpus,
+        evaluator_command=_evaluator_command(args.corpus, args.json, args.report),
+    )
     write_results(results, json_path=args.json, report_path=args.report)
     print(f"Wrote {args.json} and {args.report}")
 

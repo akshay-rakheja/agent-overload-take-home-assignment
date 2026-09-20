@@ -18,3 +18,5 @@ def test_demo_covers_breadth_depth_and_safe_decisions() -> None:
     assert "4,376" in output
     assert "raw history mutation: none" in output
     assert "honest baseline failure" in output
+    assert "depth evidence replay source: evals/results/hybrid_directory.json" in output
+    assert "evidence evaluated commit:" in output

@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
 from uuid import NAMESPACE_URL, UUID, uuid5
+
+import pytest
+from pydantic import ValidationError
 
 from evals.fixtures import make_roster
 from evals.schema import AgentFixture, RoutingCase, load_routing_corpus
@@ -80,6 +86,50 @@ def test_default_retrieval_configuration_is_bounded() -> None:
     assert 0 < settings.agent_retrieval_min_score < 1
     assert 0 < settings.agent_route_reuse_threshold < 1
     assert 0 < settings.agent_route_ambiguity_margin < 1
+
+
+def test_retrieval_configuration_rejects_more_than_five_candidates() -> None:
+    with pytest.raises(ValidationError):
+        Settings(agent_retrieval_top_k=6)
+
+
+def test_environment_retrieval_configuration_above_five_is_rejected() -> None:
+    environment = dict(os.environ)
+    environment["OPENPOKE_AGENT_RETRIEVAL_TOP_K"] = "20"
+
+    completed = subprocess.run(
+        [sys.executable, "-c", "from server.config import Settings; Settings()"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert completed.returncode != 0
+    assert "less than or equal to 5" in completed.stderr
+
+
+def test_retrieval_hard_cap_survives_validation_bypass() -> None:
+    records = [
+        make_record(
+            f"record-{index}",
+            name=f"Alice project {index}",
+            purpose="Coordinate Alice project follow-ups",
+        )
+        for index in range(30)
+    ]
+    unsafe_settings = Settings.model_construct(
+        agent_retrieval_top_k=20,
+        agent_retrieval_min_score=0.0,
+    )
+
+    candidates = AgentRetriever(
+        records,
+        now=lambda: NOW,
+        settings=unsafe_settings,
+    ).retrieve(RetrievalQuery(text="Follow up on Alice's project"))
+
+    assert len(candidates) == 5
 
 
 def test_candidate_count_never_exceeds_top_k_and_order_is_deterministic() -> None:

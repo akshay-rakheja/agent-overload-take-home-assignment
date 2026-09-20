@@ -6,13 +6,16 @@ from datetime import datetime, timedelta, timezone
 from uuid import NAMESPACE_URL, uuid5
 
 from server.agents.interaction_agent.agent import (
+    CandidateContext,
     build_candidate_context,
     prepare_message_with_history,
 )
 from server.agents.interaction_agent.runtime import InteractionAgentRuntime
 from server.agents.interaction_agent.tools import DispatchContext
+from server.config import Settings
 from server.services.execution.models import AgentRecord, AgentStatus
-from server.services.execution.routing import RoutingAction
+from server.services.execution.retrieval import AgentRetriever, RetrievalQuery
+from server.services.execution.routing import AgentRouter, RoutingAction
 
 
 UTC = timezone.utc
@@ -65,6 +68,37 @@ def test_prompt_contains_only_five_candidates_with_thousand_record_directory() -
     assert "Synthetic workflow 00001" not in content
     assert "<active_agents>" not in content
     assert "<agent_candidates" in content
+
+
+def test_prompt_boundary_caps_candidates_when_configuration_validation_is_bypassed() -> None:
+    records = [
+        record(
+            index,
+            name=f"Alice project {index}",
+            purpose="Coordinate Alice project follow-ups",
+        )
+        for index in range(20)
+    ]
+    unsafe_settings = Settings.model_construct(
+        agent_retrieval_top_k=20,
+        agent_retrieval_min_score=0.0,
+        agent_route_reuse_threshold=0.34,
+        agent_route_ambiguity_margin=0.12,
+    )
+    query = RetrievalQuery("Follow up on Alice's project")
+    candidates = AgentRetriever(
+        records,
+        now=lambda: NOW,
+        settings=unsafe_settings,
+    ).retrieve(query)
+    decision = AgentRouter(settings=unsafe_settings).route(query, candidates)
+    content = prepare_message_with_history(
+        query.text,
+        "",
+        candidate_context=CandidateContext(tuple(candidates), decision),
+    )[0]["content"]
+
+    assert content.count("<agent_candidate ") == 5
 
 
 def test_candidate_prompt_includes_stable_fields_and_relevance_hints_without_scores() -> None:

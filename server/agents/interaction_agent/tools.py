@@ -60,6 +60,10 @@ TOOL_SCHEMAS = [
                         "type": "string",
                         "description": "Concise routing purpose for a new agent. Required with agent_name."
                     },
+                    "creation_intent_id": {
+                        "type": "string",
+                        "description": "Optional stable token for one create-new decision. Reuse it when retrying the same decision; use a different token only to intentionally create another identity in this turn."
+                    },
                     "instructions": {"type": "string", "description": "Instructions for the agent to execute."},
                 },
                 "required": ["instructions"],
@@ -144,6 +148,7 @@ def send_message_to_agent(
     agent_id: str | None = None,
     agent_name: str | None = None,
     agent_purpose: str | None = None,
+    creation_intent_id: str | None = None,
     *,
     dispatch_context: DispatchContext | None = None,
     directory: AgentDirectory | None = None,
@@ -163,7 +168,7 @@ def send_message_to_agent(
             payload={"code": "routing_not_authorized", "message": message},
         )
 
-    if agent_id and (agent_name or agent_purpose):
+    if agent_id and (agent_name or agent_purpose or creation_intent_id):
         return ToolResult(
             success=False,
             payload={
@@ -173,6 +178,7 @@ def send_message_to_agent(
         )
 
     is_new = False
+    pending_creation = False
     if agent_id:
         if context.routing_action is not None and context.routing_action is not RoutingAction.REUSE:
             return routing_rejection("The routing policy did not authorize agent reuse for this turn.")
@@ -206,21 +212,31 @@ def send_message_to_agent(
                     "message": "Creating an execution agent requires both agent_name and agent_purpose.",
                 },
             )
+        normalized_intent = normalize_agent_text(creation_intent_id or "")
         creation_key = (
-            normalize_agent_text(agent_name),
-            normalize_agent_text(agent_purpose),
+            "intent" if normalized_intent else "name",
+            normalized_intent or normalize_agent_text(agent_name),
         )
         existing_id = context.created_agent_ids.get(creation_key)
         if existing_id is not None:
             record = resolved_directory.require(existing_id)
         else:
-            record = resolved_directory.create(
-                name=agent_name,
-                purpose=agent_purpose,
-                aliases=(agent_name,),
-            )
-            context.created_agent_ids[creation_key] = record.agent_id
-            is_new = True
+            pending_creation = True
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.error("No running event loop available for async execution")
+        return ToolResult(success=False, payload={"error": "No event loop available"})
+
+    if pending_creation:
+        record = resolved_directory.create(
+            name=agent_name,
+            purpose=agent_purpose,
+            aliases=(agent_name,),
+        )
+        context.created_agent_ids[creation_key] = record.agent_id
+        is_new = True
 
     record = resolved_directory.mark_used(record.agent_id)
     stable_id = str(record.agent_id)
@@ -243,12 +259,6 @@ def send_message_to_agent(
             logger.info(f"Agent '{record.name}' completed: {status}")
         except Exception as exc:  # pragma: no cover - defensive
             logger.error(f"Agent '{record.name}' failed: {str(exc)}")
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        logger.error("No running event loop available for async execution")
-        return ToolResult(success=False, payload={"error": "No event loop available"})
 
     loop.create_task(_execute_async())
 

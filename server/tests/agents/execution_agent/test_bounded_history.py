@@ -67,11 +67,11 @@ def test_migrated_identity_rehydrates_legacy_name_log_then_stable_log(tmp_path) 
     execution_dir = tmp_path / "execution_agents"
     execution_dir.mkdir()
     roster_path = execution_dir / "roster.json"
-    roster_path.write_text(json.dumps(["Alice", "Alice"]), encoding="utf-8")
+    roster_path.write_text(json.dumps(["Alice"]), encoding="utf-8")
     logs = ExecutionAgentLogStore(execution_dir)
     logs.record_request("Alice", "LEGACY-CONTEXT")
     directory = AgentDirectory(roster_path)
-    first, duplicate = directory.list_records()
+    first = directory.list_records()[0]
     logs.record_request(str(first.agent_id), "STABLE-CONTEXT")
 
     first_agent = ExecutionAgent(
@@ -83,21 +83,9 @@ def test_migrated_identity_rehydrates_legacy_name_log_then_stable_log(tmp_path) 
         directory=directory,
         context_policy=ExecutionContextPolicy(max_recent_episodes=4, max_characters=2_000),
     )
-    duplicate_agent = ExecutionAgent(
-        duplicate.name,
-        storage_key=str(duplicate.agent_id),
-        agent_id=str(duplicate.agent_id),
-        legacy_storage_key=duplicate.legacy_storage_key,
-        log_store=logs,
-        directory=directory,
-        context_policy=ExecutionContextPolicy(max_recent_episodes=4, max_characters=2_000),
-    )
-
     first_prompt = first_agent.build_system_prompt_with_history()
-    duplicate_prompt = duplicate_agent.build_system_prompt_with_history()
     assert "LEGACY-CONTEXT" in first_prompt
     assert "STABLE-CONTEXT" in first_prompt
-    assert "LEGACY-CONTEXT" not in duplicate_prompt
     assert logs.read_raw_bytes("Alice")
 
 
@@ -133,3 +121,45 @@ def test_normalization_equivalent_names_keep_distinct_legacy_journals(tmp_path) 
     assert "PLAIN-CONTEXT" not in accented_prompt
     assert "PLAIN-CONTEXT" in plain_prompt
     assert "ACCENTED-CONTEXT" not in plain_prompt
+
+
+def test_colliding_legacy_journal_is_quarantined_without_mutation_or_leakage(tmp_path) -> None:
+    execution_dir = tmp_path / "execution_agents"
+    execution_dir.mkdir()
+    roster_path = execution_dir / "roster.json"
+    roster_path.write_text(json.dumps(["A B", "A-B"]), encoding="utf-8")
+    logs = ExecutionAgentLogStore(execution_dir)
+    logs.record_request("A B", "AMBIGUOUS-LEGACY-SENTINEL")
+    legacy_before = logs.read_raw_bytes("A B")
+
+    directory = AgentDirectory(roster_path)
+    first, second = directory.list_records()
+    logs.record_request(str(first.agent_id), "FIRST-STABLE-SENTINEL")
+    logs.record_request(str(second.agent_id), "SECOND-STABLE-SENTINEL")
+
+    def prompt_for(record):
+        return ExecutionAgent(
+            record.name,
+            storage_key=str(record.agent_id),
+            agent_id=str(record.agent_id),
+            legacy_storage_key=record.legacy_storage_key,
+            log_store=logs,
+            directory=directory,
+            context_policy=ExecutionContextPolicy(
+                max_recent_episodes=4,
+                max_characters=2_000,
+            ),
+        ).build_system_prompt_with_history()
+
+    first_prompt = prompt_for(first)
+    second_prompt = prompt_for(second)
+
+    assert first.legacy_storage_key is None
+    assert second.legacy_storage_key is None
+    assert "FIRST-STABLE-SENTINEL" in first_prompt
+    assert "SECOND-STABLE-SENTINEL" not in first_prompt
+    assert "SECOND-STABLE-SENTINEL" in second_prompt
+    assert "FIRST-STABLE-SENTINEL" not in second_prompt
+    assert "AMBIGUOUS-LEGACY-SENTINEL" not in first_prompt
+    assert "AMBIGUOUS-LEGACY-SENTINEL" not in second_prompt
+    assert logs.read_raw_bytes("A B") == legacy_before

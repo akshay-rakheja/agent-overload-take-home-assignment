@@ -89,6 +89,7 @@ def test_routing_metrics_match_hand_calculated_example() -> None:
     assert metrics["duplicate_creation_rate"] == pytest.approx(0.5)
     assert metrics["abstention_precision"] == pytest.approx(1.0)
     assert metrics["candidate_count_mean"] == pytest.approx(1.5)
-    assert metrics["retrieval_latency_ms"]["p50"] == pytest.approx(2.5)
-    assert metrics["retrieval_latency_ms"]["p95"] == pytest.approx(3.85)
+    assert metrics["strategy_latency_ms"]["p50"] == pytest.approx(2.5)
+    assert metrics["strategy_latency_ms"]["p95"] == pytest.approx(3.85)
+    assert "retrieval_latency_ms" not in metrics
     assert metrics["failures_by_category"] == {"hand_calculated": 2}

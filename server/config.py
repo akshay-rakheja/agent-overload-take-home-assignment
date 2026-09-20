@@ -30,6 +30,7 @@ _load_env_file()
 
 DEFAULT_APP_NAME = "OpenPoke Server"
 DEFAULT_APP_VERSION = "0.3.0"
+MAX_AGENT_CANDIDATES = 5
 
 
 def _env_int(name: str, fallback: int) -> int:
@@ -80,9 +81,10 @@ class Settings(BaseModel):
 
     # Bounded execution-agent retrieval and routing
     agent_retrieval_top_k: int = Field(
-        default=_env_int("OPENPOKE_AGENT_RETRIEVAL_TOP_K", 5),
+        default=_env_int("OPENPOKE_AGENT_RETRIEVAL_TOP_K", MAX_AGENT_CANDIDATES),
         ge=1,
-        le=20,
+        le=MAX_AGENT_CANDIDATES,
+        validate_default=True,
     )
     agent_retrieval_min_score: float = Field(
         default=_env_float("OPENPOKE_AGENT_RETRIEVAL_MIN_SCORE", 0.08),

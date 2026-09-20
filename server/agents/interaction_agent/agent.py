@@ -5,7 +5,7 @@ from html import escape
 from pathlib import Path
 from typing import Dict, List
 
-from ...config import get_settings
+from ...config import MAX_AGENT_CANDIDATES, get_settings
 from ...services.execution import (
     AgentCandidate,
     AgentDirectory,
@@ -26,6 +26,12 @@ class CandidateContext:
 
     candidates: tuple[AgentCandidate, ...]
     decision: RoutingDecision
+
+    @property
+    def prompt_candidates(self) -> tuple[AgentCandidate, ...]:
+        """Return the final safety-bounded candidate set visible to the model."""
+
+        return self.candidates[:MAX_AGENT_CANDIDATES]
 
 
 # Load and return the pre-defined system prompt from markdown file
@@ -50,7 +56,7 @@ def prepare_message_with_history(
     )
 
     sections.append(_render_conversation_history(transcript))
-    sections.append(_render_agent_candidates(candidate_context))
+    sections.append(render_agent_candidates(candidate_context))
     sections.append(_render_current_turn(latest_text, message_type))
 
     content = "\n\n".join(sections)
@@ -82,7 +88,7 @@ def build_candidate_context(
     return CandidateContext(candidates=tuple(candidates), decision=decision)
 
 
-def _render_agent_candidates(context: CandidateContext) -> str:
+def render_agent_candidates(context: CandidateContext) -> str:
     """Render stable IDs and concise evidence without numeric certainty claims."""
 
     action = escape(context.decision.action.value, quote=True)
@@ -90,7 +96,7 @@ def _render_agent_candidates(context: CandidateContext) -> str:
     if not context.candidates:
         rendered.append("None")
     else:
-        for candidate in context.candidates:
+        for candidate in context.prompt_candidates:
             identifier = escape(str(candidate.agent_id), quote=True)
             name = escape(candidate.name or "agent", quote=True)
             purpose = escape(candidate.purpose, quote=True)

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from uuid import UUID
 
-from ...config import Settings
+from ...config import MAX_AGENT_CANDIDATES, Settings
 from .models import AgentRecord, AgentStatus, normalize_agent_text
 
 
@@ -240,7 +240,11 @@ class AgentRetriever:
         requested_limit = self._settings.agent_retrieval_top_k if limit is None else limit
         if requested_limit < 1:
             raise ValueError("retrieval limit must be positive")
-        effective_limit = min(requested_limit, self._settings.agent_retrieval_top_k)
+        effective_limit = min(
+            requested_limit,
+            self._settings.agent_retrieval_top_k,
+            MAX_AGENT_CANDIDATES,
+        )
 
         features = _query_features(query)
         now = self._now()

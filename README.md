@@ -15,10 +15,12 @@ logs are never deleted or rewritten by the context policy.
 
 ## Measured outcome
 
-The committed credential-free evaluation uses 40 labeled cases (20 development,
-20 held-out) and deterministic scale fixtures.
+The committed credential-free evaluation uses a checked-in 40-case corpus (20
+development and 20 test-partition cases) plus deterministic scale fixtures. The
+test partition is reproducible, but it is not a sealed set whose cases can be
+proven uninspected during development.
 
-- Held-out hybrid routing: **100% top-5 recall**, **100% decision accuracy**,
+- Test-partition hybrid routing: **100% top-5 recall**, **100% decision accuracy**,
   **0% wrong reuse**, and **0% duplicate creation** on this corpus revision.
 - A 1,000-identity directory exposes at most five candidates; measured local
   directory-backed p95 retrieval was **28.96 ms** across 30 dedicated runs
@@ -67,7 +69,8 @@ Requirements: Python 3.10+.
 python3 -m venv .venv
 .venv/bin/python -m pip install -r server/requirements-dev.txt
 .venv/bin/python -m pytest -q
-.venv/bin/python -m evals.runner
+.venv/bin/python -m evals.runner --corpus evals/agent_routing_cases.jsonl \
+  --json evals/results/hybrid_directory.json --report evals/results/report.md
 .venv/bin/python -m evals.demo
 ```
 
@@ -75,7 +78,8 @@ The test suite, evaluator, and demo require no OpenRouter, Gmail, or Composio
 credentials. The evaluator rewrites:
 
 - `evals/results/hybrid_directory.json` — complete machine-readable metrics,
-  observations, commit, corpus revision, configuration, and environment.
+  observations, evaluated commit, overall and per-partition corpus hashes,
+  configuration, exact evaluator command, and environment.
 - `evals/results/report.md` — reviewer-readable breadth/depth comparison and
   failure analysis.
 
@@ -138,7 +142,7 @@ not require a `.env` file.
   ambiguity.
 - Lexical retrieval is deterministic and dependency-light but not semantic.
   Embeddings or a probabilistic classifier such as Jev can be added behind the
-  existing interfaces and compared with the same held-out harness.
+  existing interfaces and compared with the same checked-in test-partition harness.
 - This implementation consumes a durable memory summary but deliberately does
   not build an LLM summarization pipeline or semantic search over old logs.
 - The prompt is bounded, but the selected agent's append-only journal is still

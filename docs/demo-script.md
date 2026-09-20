@@ -22,7 +22,8 @@ Point out:
   five;
 - paraphrased work reuses, novel work creates, and ambiguous work abstains; and
 - the 10,000-entry history drops from 1,322,499 to 4,376 prompt characters
-  while raw history remains unchanged.
+  while raw history remains unchanged; these depth values are explicitly labeled
+  as a replay from the generated evidence file and evaluated commit.
 
 ## 1:20–2:10 — Show the directory and bounded prompt
 
@@ -46,8 +47,9 @@ Open:
 
 Explain the separation between retrieval and final routing. Unknown IDs fail
 closed, creation requires name plus purpose, and repeated creation calls within
-one turn are idempotent. Stable IDs also isolate execution logs for names that
-would otherwise share a filesystem slug.
+one turn are idempotent by intent token or normalized-name fallback. Distinct
+intent tokens permit deliberate multi-create behavior. Stable IDs also isolate
+execution logs for names that would otherwise share a filesystem slug.
 
 ## 2:50–3:30 — Show bounded memory
 
@@ -61,7 +63,7 @@ append-only raw-log preservation.
 
 Open `evals/results/report.md`.
 
-Compare the three held-out breadth strategies, then the depth scale. Call out
+Compare the three checked-in test-partition breadth strategies, then the depth scale. Call out
 the exact-name baseline's routing miss and abstention error. State explicitly
 that the full-roster “accuracy” strategy is a deterministic proxy, not a live
 model claim.

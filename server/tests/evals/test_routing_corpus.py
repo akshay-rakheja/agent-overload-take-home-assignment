@@ -20,7 +20,7 @@ from server.tests.fixtures.agent_factory import make_agent, make_roster
 CORPUS_PATH = Path(__file__).resolve().parents[3] / "evals" / "agent_routing_cases.jsonl"
 
 
-def test_committed_corpus_has_balanced_development_and_held_out_splits() -> None:
+def test_committed_corpus_has_balanced_development_and_test_partitions() -> None:
     corpus = load_routing_corpus(CORPUS_PATH)
 
     assert len(corpus) >= 40

@@ -50,13 +50,16 @@ Each immutable record has a UUID, display name, routing purpose, aliases,
 lifecycle status, creation/use timestamps, use count, optional memory summary,
 and schema version.
 
-- Legacy name-list rosters migrate deterministically and idempotently.
-- Each migrated identity retains an explicit pointer to its old name-keyed
-  journal unless an earlier identity resolves to the same filesystem log slug.
-  Thus `José` and `Jose` keep distinct journals, while true filename collisions
-  such as `A B` and `A-B` cannot cross-contaminate. Earlier deterministic
-  migrations are backfilled by UUID proof. New entries use the stable UUID
-  journal, and rehydration reads legacy before UUID without rewriting either.
+- Legacy name-list rosters migrate deterministically and idempotently. Migration
+  first reserves explicit claims, regardless of record order, and never assigns
+  one journal to multiple identities.
+- A unique migrated identity retains an explicit pointer to its old name-keyed
+  journal. `José` and `Jose` keep distinct journals, while true filename
+  collisions such as `A B` and `A-B` and exact duplicate names are left
+  unresolved for manual recovery rather than assigned by list order. Earlier
+  structured migrations are backfilled only with deterministic UUID proof. New
+  entries use the stable UUID journal, and rehydration reads legacy before UUID
+  without rewriting or deleting either.
 - Writes use a lock file plus atomic replacement; malformed data fails without
   overwriting the source.
 - Duplicate names and aliases remain distinct records. Retrieval resolves
@@ -101,8 +104,10 @@ user-facing certainty.
 
 `send_message_to_agent` reuses only a known stable ID. An unknown/stale ID fails
 closed before logging or dispatch. Creating a new identity requires both name
-and purpose, and repeated creation calls within one interaction turn resolve to
-the same ID.
+and purpose. Same-turn retries use an optional creation-intent token, falling
+back to normalized name when no token is supplied, so purpose paraphrases reuse
+the same ID while distinct tokens can intentionally create two identities. The
+running event loop is validated before identity, usage, or journal mutation.
 
 The routing decision is also an authorization boundary. A reuse turn permits
 only the recommended UUID, a create-new turn permits only creation, and an

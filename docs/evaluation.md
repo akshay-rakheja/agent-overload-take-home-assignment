@@ -10,6 +10,8 @@ regression in the other.
 1. **Current full-roster exact-name proxy** renders every identity and reuses
    only when a complete display name appears verbatim. This measures current
    prompt growth, but it is deliberately labeled a proxy for model routing.
+   Fixture order is not retrieval, so top-5 recall and MRR are reported as not
+   applicable for this strategy.
 2. **Recency-only top-five** selects the five most recent hot identities, then
    applies the same deterministic relevance/router policy. It tests whether a
    much cheaper cache is sufficient.
@@ -30,22 +32,28 @@ paraphrased follow-ups, contextual pronouns, old relevant identities, recent
 distractors, similar identities, novel work, ambiguity, archived recovery,
 Unicode/punctuation, and 10/100/500/1,000-record rosters.
 
-- Twenty development cases were available while setting weights and thresholds.
-- Twenty held-out cases were not inspected until the configuration was frozen.
-- The final report records the corpus SHA-256 revision. No held-out case was
-  relabeled after evaluation.
+- Twenty cases form the development partition and twenty form the checked-in
+  test partition.
+- The repository does not establish that test-partition cases were never
+  inspected during implementation, so this is not described as a sealed
+  held-out evaluation.
+- Generated evidence records the whole-corpus SHA-256 plus canonical hashes and
+  case counts for both partitions.
 - Identity-routing labels are deterministic ground truth; no LLM judge is used.
+- The evaluator records its exact reproduction command, evaluated commit,
+  configuration, environment, and that random seed is not applicable because
+  the harness performs no random sampling.
 
 ## Metrics
 
 Retrieval and routing are reported independently:
 
-- top-5 recall and mean reciprocal rank;
+- top-5 recall and mean reciprocal rank for strategies that perform retrieval;
 - final reuse/create/abstain accuracy;
 - wrong-agent reuse and duplicate creation rates;
 - abstention precision;
 - candidate count and rendered prompt characters/bytes;
-- held-out case-mix retrieval p50/p95 plus a dedicated 30-run, 1,000-record
+- test-partition case-mix retrieval p50/p95 plus a dedicated 30-run, 1,000-record
   latency benchmark after three warm-ups; and
 - failures grouped by category with per-case observations.
 
@@ -71,15 +79,15 @@ and cross-agent contamination failures.
 | Recent episode limit | 8 |
 | Rendered history limit | 12,000 characters |
 
-## Actual held-out results
+## Checked-in test-partition results
 
 | Strategy | Top-5 recall | MRR | Accuracy | Wrong reuse | Duplicate creation | Max candidates | Prompt chars mean | Case-mix p95 ms |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Current full-roster proxy | 75.0% | 0.761 | 35.0% | 0.0% | 68.8% | 1,000 | 3,417.6 | 0.218 |
-| Recency-only top-five | 62.5% | 0.625 | 70.0% | 0.0% | 37.5% | 2 | 79.3 | 0.232 |
-| Hybrid directory | **100.0%** | **1.000** | **100.0%** | **0.0%** | **0.0%** | **2** | **112.8** | **3.375** |
+| Current full-roster proxy | n/a | n/a | 35.0% | 0.0% | 68.8% | 1,000 | 3,417.6 | recorded in generated report |
+| Recency-only top-five | 62.5% | 0.625 | 70.0% | 0.0% | 37.5% | 2 | recorded in generated report | recorded in generated report |
+| Hybrid directory | **100.0%** | **1.000** | **100.0%** | **0.0%** | **0.0%** | **2** | **recorded in generated report** | **recorded in generated report** |
 
-The table's p95 values describe a heterogeneous 20-case held-out mix and are not
+The table's p95 values describe a heterogeneous 20-case test partition and are not
 used for the scale target. The dedicated benchmark recreates the retriever on
 each run against a temporary 1,000-record production `AgentDirectory`, including
 its lock, disk read, JSON parse, schema validation, and feature scoring. After
@@ -108,7 +116,7 @@ checks that the second agent's sentinel never appears in the selected context.
 
 ## Targets and failure analysis
 
-The hybrid passed the proposed held-out targets: at least 95% top-5 recall, at
+The hybrid passed the proposed test-partition targets: at least 95% top-5 recall, at
 least 90% decision accuracy, at most 2% wrong reuse, no more than five
 candidates, and local 1,000-record p95 below 50 ms on the recorded run.
 
@@ -118,14 +126,15 @@ The report still includes failures rather than showing only the preferred path:
 - the same proxy creates new rather than abstaining on ambiguous
   `test-ambiguous-jordan`.
 
-The hybrid had no held-out miss on this corpus revision. That is encouraging,
+The hybrid had no test-partition miss on this corpus revision. That is encouraging,
 not proof of generalization beyond the fixture distribution.
 
 ## Reproduce
 
 ```bash
 .venv/bin/python -m pytest -q
-.venv/bin/python -m evals.runner
+.venv/bin/python -m evals.runner --corpus evals/agent_routing_cases.jsonl \
+  --json evals/results/hybrid_directory.json --report evals/results/report.md
 ```
 
 Inspect `evals/results/hybrid_directory.json` for every observation and

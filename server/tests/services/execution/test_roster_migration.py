@@ -22,7 +22,7 @@ def test_legacy_name_list_migrates_without_loss_and_is_idempotent(tmp_path) -> N
 
     assert [record.name for record in first] == names
     assert len({record.agent_id for record in first}) == 3
-    assert first[0].legacy_storage_key == "Alice correspondence"
+    assert first[0].legacy_storage_key is None
     assert first[1].legacy_storage_key is None
     assert first[2].legacy_storage_key == "José — résumé review"
     assert first == second
@@ -42,18 +42,48 @@ def test_legacy_log_ownership_uses_actual_filesystem_slug(tmp_path) -> None:
     assert [record.legacy_storage_key for record in records] == [
         "José",
         "Jose",
-        "A B",
+        None,
         None,
     ]
 
 
+def test_later_explicit_claim_is_reserved_before_deterministic_backfill(tmp_path) -> None:
+    path = tmp_path / "roster.json"
+    path.write_text(json.dumps(["A B", "A-B"]), encoding="utf-8")
+    AgentDirectory(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["agents"][0].pop("legacy_storage_key")
+    payload["agents"][1]["legacy_storage_key"] = "A-B"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    first, explicit_claimant = AgentDirectory(path).list_records()
+
+    assert first.legacy_storage_key is None
+    assert explicit_claimant.legacy_storage_key == "A-B"
+
+
+def test_conflicting_explicit_legacy_claims_are_quarantined(tmp_path) -> None:
+    path = tmp_path / "roster.json"
+    path.write_text(json.dumps(["A B", "A-B"]), encoding="utf-8")
+    AgentDirectory(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["agents"][0]["legacy_storage_key"] = "A B"
+    payload["agents"][1]["legacy_storage_key"] = "A-B"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    records = AgentDirectory(path).list_records()
+
+    assert [record.legacy_storage_key for record in records] == [None, None]
+
+
 def test_previous_structured_migration_backfills_only_deterministic_legacy_ids(tmp_path) -> None:
     path = tmp_path / "roster.json"
-    path.write_text(json.dumps(["Alice", "Alice"]), encoding="utf-8")
+    path.write_text(json.dumps(["Alice", "Bob"]), encoding="utf-8")
     AgentDirectory(path)
     migrated_payload = json.loads(path.read_text(encoding="utf-8"))
     for item in migrated_payload["agents"]:
         item.pop("legacy_storage_key")
+    migrated_payload["agents"][1]["agent_id"] = "00000000-0000-0000-0000-000000000001"
     path.write_text(json.dumps(migrated_payload), encoding="utf-8")
 
     records = AgentDirectory(path).list_records()

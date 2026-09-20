@@ -59,7 +59,10 @@ class ExecutionAgent:
 
         Args:
             name: Human-readable agent name (e.g., 'conversation with keith')
-            conversation_limit: Optional limit on past conversations to include (None = all)
+            conversation_limit: Optional recent-episode limit. ``None`` uses the
+                configured bounded default; it does not request unbounded history.
+                ``ExecutionAgentLogStore.load_transcript`` is the explicit full-
+                history diagnostic API.
         """
         self.name = name
         self.storage_key = storage_key or name

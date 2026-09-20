@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import threading
+from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -111,31 +112,63 @@ class AgentDirectory:
         """Upgrade records emitted by the earlier deterministic list migration."""
 
         normalized_occurrences: dict[str, int] = {}
-        claimed_log_slugs: set[str] = set()
-        upgraded: list[AgentRecord] = []
-        changed = False
+        field_presence: list[bool] = []
+        expected_legacy_ids: list[UUID] = []
+        explicit_claims: dict[str, list[int]] = defaultdict(list)
+        record_name_slugs = Counter(execution_log_slug(record.name) for record in records)
 
-        for raw_agent, record in zip(raw_agents, records):
+        for index, (raw_agent, record) in enumerate(zip(raw_agents, records)):
             normalized = normalize_agent_text(record.name)
             occurrence = normalized_occurrences.get(normalized, 0)
             normalized_occurrences[normalized] = occurrence + 1
-
-            if record.legacy_storage_key:
-                claimed_log_slugs.add(execution_log_slug(record.legacy_storage_key))
-
-            field_present = isinstance(raw_agent, dict) and "legacy_storage_key" in raw_agent
-            expected_legacy_id = uuid5(
-                NAMESPACE_URL,
-                f"openpoke-legacy:{normalized}:{occurrence}",
+            expected_legacy_ids.append(
+                uuid5(NAMESPACE_URL, f"openpoke-legacy:{normalized}:{occurrence}")
             )
-            if field_present or record.agent_id != expected_legacy_id:
+            field_presence.append(
+                isinstance(raw_agent, dict) and "legacy_storage_key" in raw_agent
+            )
+            if record.legacy_storage_key:
+                explicit_claims[execution_log_slug(record.legacy_storage_key)].append(index)
+
+        conflicting_explicit_slugs = {
+            slug for slug, claimants in explicit_claims.items() if len(claimants) > 1
+        }
+        reserved_explicit_slugs = set(explicit_claims) - conflicting_explicit_slugs
+        deterministic_candidates: dict[str, list[int]] = defaultdict(list)
+        for index, record in enumerate(records):
+            if field_presence[index] or record.agent_id != expected_legacy_ids[index]:
+                continue
+            deterministic_candidates[execution_log_slug(record.name)].append(index)
+
+        upgraded: list[AgentRecord] = []
+        changed = False
+
+        for index, record in enumerate(records):
+            if field_presence[index]:
+                claim_slug = (
+                    execution_log_slug(record.legacy_storage_key)
+                    if record.legacy_storage_key
+                    else None
+                )
+                if claim_slug in conflicting_explicit_slugs:
+                    upgraded.append(record.model_copy(update={"legacy_storage_key": None}))
+                    changed = True
+                else:
+                    upgraded.append(record)
+                continue
+
+            if record.agent_id != expected_legacy_ids[index]:
                 upgraded.append(record)
                 continue
 
             log_slug = execution_log_slug(record.name)
-            legacy_key = record.name if log_slug not in claimed_log_slugs else None
-            if legacy_key is not None:
-                claimed_log_slugs.add(log_slug)
+            ownership_is_unique = (
+                record_name_slugs[log_slug] == 1
+                and len(deterministic_candidates[log_slug]) == 1
+                and log_slug not in reserved_explicit_slugs
+                and log_slug not in conflicting_explicit_slugs
+            )
+            legacy_key = record.name if ownership_is_unique else None
             upgraded.append(record.model_copy(update={"legacy_storage_key": legacy_key}))
             changed = True
 
@@ -144,18 +177,16 @@ class AgentDirectory:
     def _migrate_legacy_names(self, payload: list[Any]) -> list[AgentRecord]:
         now = self._now()
         seen: dict[str, int] = {}
-        claimed_log_slugs: set[str] = set()
+        names = [str(raw_name).strip() or "agent" for raw_name in payload]
+        log_slug_counts = Counter(execution_log_slug(name) for name in names)
         migrated: list[AgentRecord] = []
-        for raw_name in payload:
-            name = str(raw_name).strip() or "agent"
+        for name in names:
             normalized = normalize_agent_text(name)
             occurrence = seen.get(normalized, 0)
             seen[normalized] = occurrence + 1
             stable_id = uuid5(NAMESPACE_URL, f"openpoke-legacy:{normalized}:{occurrence}")
             log_slug = execution_log_slug(name)
-            legacy_key = name if log_slug not in claimed_log_slugs else None
-            if legacy_key is not None:
-                claimed_log_slugs.add(log_slug)
+            legacy_key = name if log_slug_counts[log_slug] == 1 else None
             migrated.append(
                 AgentRecord(
                     agent_id=stable_id,

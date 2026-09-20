@@ -8,23 +8,17 @@ from time import perf_counter
 from evals.baseline import render_full_roster
 from evals.materialize import EVALUATION_NOW, MaterializedCase
 from evals.metrics import RoutingObservation
+from server.agents.interaction_agent.agent import CandidateContext, render_agent_candidates
 from server.services.execution.models import AgentRecord, AgentStatus
 from server.services.execution.retrieval import AgentCandidate, AgentRetriever, RetrievalQuery
 from server.services.execution.routing import AgentRouter, RoutingAction
-
-
-def _render_candidates(candidates: list[AgentCandidate]) -> str:
-    return "\n".join(
-        f"{candidate.agent_id}|{candidate.name}|{candidate.purpose}|{candidate.status.value}"
-        for candidate in candidates
-    )
 
 
 @dataclass(frozen=True)
 class StrategyResult:
     action: str
     agent_id: str | None
-    ranked_agent_ids: tuple[str, ...]
+    ranked_agent_ids: tuple[str, ...] | None
     candidate_count: int
     prompt_text: str
     latency_ms: float
@@ -78,7 +72,7 @@ class CurrentFullRosterStrategy(BreadthStrategy):
         return StrategyResult(
             action=action,
             agent_id=agent_id,
-            ranked_agent_ids=tuple(str(record.agent_id) for record in materialized.records),
+            ranked_agent_ids=None,
             candidate_count=len(materialized.records),
             prompt_text=prompt,
             latency_ms=latency_ms,
@@ -105,13 +99,15 @@ class RecencyOnlyStrategy(BreadthStrategy):
         )
         candidates = AgentRetriever(cache, now=lambda: EVALUATION_NOW).retrieve(query)
         decision = AgentRouter().route(query, candidates)
+        context = CandidateContext(tuple(candidates), decision)
+        prompt = render_agent_candidates(context)
         latency_ms = (perf_counter() - started) * 1_000
         return StrategyResult(
             action=decision.action.value,
             agent_id=str(decision.agent_id) if decision.agent_id else None,
-            ranked_agent_ids=tuple(str(candidate.agent_id) for candidate in candidates),
-            candidate_count=len(candidates),
-            prompt_text=_render_candidates(candidates),
+            ranked_agent_ids=tuple(str(candidate.agent_id) for candidate in context.prompt_candidates),
+            candidate_count=len(context.prompt_candidates),
+            prompt_text=prompt,
             latency_ms=latency_ms,
         )
 
@@ -130,13 +126,15 @@ class HybridDirectoryStrategy(BreadthStrategy):
             now=lambda: EVALUATION_NOW,
         ).retrieve(query)
         decision = AgentRouter().route(query, candidates)
+        context = CandidateContext(tuple(candidates), decision)
+        prompt = render_agent_candidates(context)
         latency_ms = (perf_counter() - started) * 1_000
         return StrategyResult(
             action=decision.action.value,
             agent_id=str(decision.agent_id) if decision.agent_id else None,
-            ranked_agent_ids=tuple(str(candidate.agent_id) for candidate in candidates),
-            candidate_count=len(candidates),
-            prompt_text=_render_candidates(candidates),
+            ranked_agent_ids=tuple(str(candidate.agent_id) for candidate in context.prompt_candidates),
+            candidate_count=len(context.prompt_candidates),
+            prompt_text=prompt,
             latency_ms=latency_ms,
         )
 
@@ -147,4 +145,3 @@ def default_breadth_strategies() -> tuple[BreadthStrategy, ...]:
         RecencyOnlyStrategy(),
         HybridDirectoryStrategy(),
     )
-
