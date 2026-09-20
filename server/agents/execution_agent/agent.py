@@ -1,9 +1,19 @@
 """Execution Agent implementation."""
 
 from pathlib import Path
+from itertools import chain
 from typing import List, Optional, Dict, Any
 
-from ...services.execution import get_execution_agent_logs
+from ...config import get_settings
+from ...services.execution import (
+    AgentDirectory,
+    ContextMetrics,
+    ExecutionAgentLogStore,
+    ExecutionContextPolicy,
+    UnknownAgentError,
+    get_agent_directory,
+    get_execution_agent_logs,
+)
 from ...logging_config import logger
 
 
@@ -36,18 +46,48 @@ class ExecutionAgent:
     def __init__(
         self,
         name: str,
-        conversation_limit: Optional[int] = None
+        conversation_limit: Optional[int] = None,
+        storage_key: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        legacy_storage_key: Optional[str] = None,
+        log_store: Optional[ExecutionAgentLogStore] = None,
+        directory: Optional[AgentDirectory] = None,
+        context_policy: Optional[ExecutionContextPolicy] = None,
     ):
         """
         Initialize an execution agent.
 
         Args:
             name: Human-readable agent name (e.g., 'conversation with keith')
-            conversation_limit: Optional limit on past conversations to include (None = all)
+            conversation_limit: Optional recent-episode limit. ``None`` uses the
+                configured bounded default; it does not request unbounded history.
+                ``ExecutionAgentLogStore.load_transcript`` is the explicit full-
+                history diagnostic API.
         """
         self.name = name
+        self.storage_key = storage_key or name
+        self.agent_id = agent_id
+        self.legacy_storage_key = legacy_storage_key
         self.conversation_limit = conversation_limit
-        self._log_store = get_execution_agent_logs()
+        self._log_store = log_store or get_execution_agent_logs()
+        self._directory = directory or (get_agent_directory() if agent_id else None)
+        settings = get_settings()
+        recent_episode_limit = conversation_limit or settings.execution_context_max_recent_episodes
+        self._context_policy = context_policy or ExecutionContextPolicy(
+            max_recent_episodes=recent_episode_limit,
+            max_characters=settings.execution_context_max_characters,
+        )
+        self.last_context_metrics = ContextMetrics(
+            raw_entry_count=0,
+            raw_history_characters=0,
+            raw_history_bytes=0,
+            rendered_characters=0,
+            rendered_bytes=0,
+            included_episode_count=0,
+            omitted_entry_count=0,
+            truncated_entry_count=0,
+            summary_used=False,
+        )
 
     # Generate system prompt template with agent name and purpose derived from name
     def build_system_prompt(self) -> str:
@@ -69,29 +109,25 @@ class ExecutionAgent:
         """
         base_prompt = self.build_system_prompt()
 
-        # Load history transcript
-        transcript = self._log_store.load_transcript(self.name)
+        memory_summary = ""
+        if self.agent_id and self._directory is not None:
+            try:
+                memory_summary = self._directory.require(self.agent_id).memory_summary
+            except UnknownAgentError:
+                memory_summary = ""
 
-        if transcript:
-            # Apply conversation limit if needed
-            if self.conversation_limit and self.conversation_limit > 0:
-                # Parse entries and limit them
-                lines = transcript.split('\n')
-                request_count = sum(1 for line in lines if '<agent_request' in line)
+        entry_sources = []
+        if self.legacy_storage_key and self.legacy_storage_key != self.storage_key:
+            entry_sources.append(self._log_store.iter_entries(self.legacy_storage_key))
+        entry_sources.append(self._log_store.iter_entries(self.storage_key))
+        context = self._context_policy.render(
+            chain.from_iterable(entry_sources),
+            memory_summary=memory_summary,
+        )
+        self.last_context_metrics = context.metrics
 
-                if request_count > self.conversation_limit:
-                    # Find where to cut
-                    kept_requests = 0
-                    cutoff_index = len(lines)
-                    for i in range(len(lines) - 1, -1, -1):
-                        if '<agent_request' in lines[i]:
-                            kept_requests += 1
-                            if kept_requests == self.conversation_limit:
-                                cutoff_index = i
-                                break
-                    transcript = '\n'.join(lines[cutoff_index:])
-
-            return f"{base_prompt}\n\n# Execution History\n\n{transcript}"
+        if context.text:
+            return f"{base_prompt}\n\n# Execution History\n\n{context.text}"
 
         return base_prompt
 
@@ -113,11 +149,11 @@ class ExecutionAgent:
     # Log the agent's final response to the execution log store
     def record_response(self, response: str) -> None:
         """Record agent's response to the log."""
-        self._log_store.record_agent_response(self.name, response)
+        self._log_store.record_agent_response(self.storage_key, response)
 
     # Log tool invocation and results with truncated content for readability
     def record_tool_execution(self, tool_name: str, arguments: str, result: str) -> None:
         """Record tool execution details."""
-        self._log_store.record_action(self.name, f"Calling {tool_name} with: {arguments[:200]}")
+        self._log_store.record_action(self.storage_key, f"Calling {tool_name} with: {arguments[:200]}")
         # Record the tool response
-        self._log_store.record_tool_response(self.name, tool_name, result[:500])
+        self._log_store.record_tool_response(self.storage_key, tool_name, result[:500])

@@ -1,0 +1,2525 @@
+{
+  "schema_version": 1,
+  "mode": "deterministic_offline",
+  "credentials_required": false,
+  "implementation_commit": "8ac1aa8e5eca21e52744fedf8166fa25ae17bfeb",
+  "corpus_revision": "20d2035b14650fcff4eb6b14058bcb41bb37f8fdcf45b2497067b0d0056d7877",
+  "corpus_case_count": 40,
+  "corpus": {
+    "path": "evals/agent_routing_cases.jsonl",
+    "sha256": "20d2035b14650fcff4eb6b14058bcb41bb37f8fdcf45b2497067b0d0056d7877",
+    "partitions": {
+      "development": {
+        "case_count": 20,
+        "sha256": "de5c1668299015adf6ffbf62f531860ceac1b7eac0b7abb048009364386c30aa"
+      },
+      "test": {
+        "case_count": 20,
+        "sha256": "bdb5a1b6757ee577e3e897e0391b057b379f5aaa3686f08e4b64088c2731876c"
+      }
+    }
+  },
+  "reproducibility": {
+    "evaluator_command": ".venv/bin/python -m evals.runner --corpus evals/agent_routing_cases.jsonl --json evals/results/hybrid_directory.json --report evals/results/report.md",
+    "random_seed": null,
+    "randomness": "not applicable; cases, fixtures, retrieval, and routing are deterministic"
+  },
+  "environment": {
+    "python": "3.11.5",
+    "platform": "macOS-26.6.2-arm64-arm-64bit"
+  },
+  "configuration": {
+    "retrieval_top_k": 5,
+    "candidate_hard_max": 5,
+    "retrieval_min_score": 0.08,
+    "reuse_threshold": 0.34,
+    "ambiguity_margin": 0.12,
+    "weights": {
+      "exact_match": 0.7,
+      "token_overlap_max": 0.35,
+      "phrase_match": 0.12,
+      "recency_max": 0.05,
+      "prior_use_max": 0.04,
+      "dormant_penalty": -0.03,
+      "archived_penalty": -0.08
+    }
+  },
+  "breadth": {
+    "strategies": [
+      "current_full_roster_exact_name_proxy",
+      "recency_only_top_five",
+      "hybrid_directory"
+    ],
+    "splits": {
+      "development": {
+        "current_full_roster_exact_name_proxy": {
+          "case_count": 20,
+          "reuse_case_count": 15,
+          "retrieval_metrics_applicable": false,
+          "top_k": 5,
+          "top_k_recall": null,
+          "mean_reciprocal_rank": null,
+          "decision_accuracy": 0.2,
+          "wrong_agent_reuse_rate": 0.0,
+          "duplicate_creation_rate": 0.8666666666666667,
+          "abstention_precision": 0.0,
+          "candidate_count_mean": 81.6,
+          "max_candidate_count": 1000,
+          "prompt_characters_mean": 3417.45,
+          "prompt_bytes_mean": 3417.8,
+          "strategy_latency_ms": {
+            "p50": 0.002666609361767769,
+            "p95": 0.27251030551269667
+          },
+          "failures_by_category": {
+            "ambiguous_task": 2,
+            "archived_identity_recovery": 1,
+            "contextual_pronoun": 2,
+            "exact_named_follow_up": 3,
+            "old_relevant_identity": 2,
+            "paraphrased_follow_up": 2,
+            "recent_irrelevant_distractor": 1,
+            "semantically_similar_identities": 1,
+            "unicode_punctuation_variant": 2
+          },
+          "failed_cases": [
+            {
+              "case_id": "dev-exact-alice",
+              "category": "exact_named_follow_up",
+              "expected_action": "reuse",
+              "expected_agent_id": "620a2ac8-99a0-542f-991a-39daa9314c74",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-paraphrase-vendor",
+              "category": "paraphrased_follow_up",
+              "expected_action": "reuse",
+              "expected_agent_id": "5db1a2e1-665b-5b98-9964-4528847d7917",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-context-pronoun-keith",
+              "category": "contextual_pronoun",
+              "expected_action": "reuse",
+              "expected_agent_id": "f6e9dcd9-3aca-5eae-bac1-0facd06fd7aa",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-old-relevant-renewal",
+              "category": "old_relevant_identity",
+              "expected_action": "reuse",
+              "expected_agent_id": "67ec0a9c-3916-51b9-ae8a-19563fb585e7",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-recent-distractor-board",
+              "category": "recent_irrelevant_distractor",
+              "expected_action": "reuse",
+              "expected_agent_id": "710e14f5-6703-5827-993e-41666c7db048",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-similar-designers",
+              "category": "semantically_similar_identities",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-ambiguous-followup",
+              "category": "ambiguous_task",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-archived-maya",
+              "category": "archived_identity_recovery",
+              "expected_action": "reuse",
+              "expected_agent_id": "e85bbc2e-7613-5e34-a03e-9c04fa54f563",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-unicode-jose",
+              "category": "unicode_punctuation_variant",
+              "expected_action": "reuse",
+              "expected_agent_id": "6c03c626-8792-58e8-a93e-2e54d25cf212",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-scale-10",
+              "category": "exact_named_follow_up",
+              "expected_action": "reuse",
+              "expected_agent_id": "d4ab1c9c-4b40-5f65-9ad7-9d833fa66d96",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-scale-100",
+              "category": "paraphrased_follow_up",
+              "expected_action": "reuse",
+              "expected_agent_id": "d4dc3c6b-9dbf-54e2-b0c5-60ab63bed327",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-scale-500",
+              "category": "old_relevant_identity",
+              "expected_action": "reuse",
+              "expected_agent_id": "9ea49c95-a229-5d2f-9439-acb1e4fe32e8",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-scale-1000",
+              "category": "exact_named_follow_up",
+              "expected_action": "reuse",
+              "expected_agent_id": "d24750e2-f102-50c2-956a-9b9390cdd1bc",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-context-pronoun-draft",
+              "category": "contextual_pronoun",
+              "expected_action": "reuse",
+              "expected_agent_id": "0ae88fa1-2867-5ec0-ba72-a5d4412d9c6c",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-ambiguous-alex",
+              "category": "ambiguous_task",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-punctuation-oconnor",
+              "category": "unicode_punctuation_variant",
+              "expected_action": "reuse",
+              "expected_agent_id": "d05d507c-1b8b-592e-83b7-ac4ffa61d406",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            }
+          ],
+          "observations": [
+            {
+              "case_id": "dev-exact-alice",
+              "category": "exact_named_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "620a2ac8-99a0-542f-991a-39daa9314c74",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 37,
+              "prompt_bytes": 37,
+              "latency_ms": 0.014916062355041504
+            },
+            {
+              "case_id": "dev-paraphrase-vendor",
+              "category": "paraphrased_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "5db1a2e1-665b-5b98-9964-4528847d7917",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 2,
+              "prompt_characters": 74,
+              "prompt_bytes": 74,
+              "latency_ms": 0.00400003045797348
+            },
+            {
+              "case_id": "dev-context-pronoun-keith",
+              "category": "contextual_pronoun",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "f6e9dcd9-3aca-5eae-bac1-0facd06fd7aa",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 31,
+              "prompt_bytes": 31,
+              "latency_ms": 0.002166023477911949
+            },
+            {
+              "case_id": "dev-old-relevant-renewal",
+              "category": "old_relevant_identity",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "67ec0a9c-3916-51b9-ae8a-19563fb585e7",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 2,
+              "prompt_characters": 72,
+              "prompt_bytes": 72,
+              "latency_ms": 0.002750195562839508
+            },
+            {
+              "case_id": "dev-recent-distractor-board",
+              "category": "recent_irrelevant_distractor",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "710e14f5-6703-5827-993e-41666c7db048",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 2,
+              "prompt_characters": 72,
+              "prompt_bytes": 72,
+              "latency_ms": 0.00300002284348011
+            },
+            {
+              "case_id": "dev-similar-designers",
+              "category": "semantically_similar_identities",
+              "split": "development",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 2,
+              "prompt_characters": 61,
+              "prompt_bytes": 61,
+              "latency_ms": 0.0022079329937696457
+            },
+            {
+              "case_id": "dev-novel-dentist",
+              "category": "novel_task",
+              "split": "development",
+              "expected_action": "create_new",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 28,
+              "prompt_bytes": 28,
+              "latency_ms": 0.0014998950064182281
+            },
+            {
+              "case_id": "dev-ambiguous-followup",
+              "category": "ambiguous_task",
+              "split": "development",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 2,
+              "prompt_characters": 64,
+              "prompt_bytes": 64,
+              "latency_ms": 0.003708992153406143
+            },
+            {
+              "case_id": "dev-archived-maya",
+              "category": "archived_identity_recovery",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "e85bbc2e-7613-5e34-a03e-9c04fa54f563",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 33,
+              "prompt_bytes": 33,
+              "latency_ms": 0.0020829029381275177
+            },
+            {
+              "case_id": "dev-unicode-jose",
+              "category": "unicode_punctuation_variant",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "6c03c626-8792-58e8-a93e-2e54d25cf212",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 37,
+              "prompt_bytes": 42,
+              "latency_ms": 0.0025830231606960297
+            },
+            {
+              "case_id": "dev-scale-10",
+              "category": "exact_named_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "d4ab1c9c-4b40-5f65-9ad7-9d833fa66d96",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 10,
+              "prompt_characters": 422,
+              "prompt_bytes": 422,
+              "latency_ms": 0.00695791095495224
+            },
+            {
+              "case_id": "dev-scale-100",
+              "category": "paraphrased_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "d4dc3c6b-9dbf-54e2-b0c5-60ab63bed327",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 100,
+              "prompt_characters": 4192,
+              "prompt_bytes": 4192,
+              "latency_ms": 0.056042103096842766
+            },
+            {
+              "case_id": "dev-scale-500",
+              "category": "old_relevant_identity",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "9ea49c95-a229-5d2f-9439-acb1e4fe32e8",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 500,
+              "prompt_characters": 20995,
+              "prompt_bytes": 20995,
+              "latency_ms": 0.26199989952147007
+            },
+            {
+              "case_id": "dev-scale-1000",
+              "category": "exact_named_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "d24750e2-f102-50c2-956a-9b9390cdd1bc",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1000,
+              "prompt_characters": 41997,
+              "prompt_bytes": 41997,
+              "latency_ms": 0.47220801934599876
+            },
+            {
+              "case_id": "dev-exact-billing",
+              "category": "exact_named_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "345bd26f-6a6a-5ff0-8804-62e151528477",
+              "action": "reuse",
+              "agent_id": "345bd26f-6a6a-5ff0-8804-62e151528477",
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 36,
+              "prompt_bytes": 36,
+              "latency_ms": 0.004749977961182594
+            },
+            {
+              "case_id": "dev-novel-calendar",
+              "category": "novel_task",
+              "split": "development",
+              "expected_action": "create_new",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 37,
+              "prompt_bytes": 37,
+              "latency_ms": 0.001584179699420929
+            },
+            {
+              "case_id": "dev-context-pronoun-draft",
+              "category": "contextual_pronoun",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "0ae88fa1-2867-5ec0-ba72-a5d4412d9c6c",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 30,
+              "prompt_bytes": 30,
+              "latency_ms": 0.0016670674085617065
+            },
+            {
+              "case_id": "dev-ambiguous-alex",
+              "category": "ambiguous_task",
+              "split": "development",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 2,
+              "prompt_characters": 67,
+              "prompt_bytes": 67,
+              "latency_ms": 0.002250075340270996
+            },
+            {
+              "case_id": "dev-punctuation-oconnor",
+              "category": "unicode_punctuation_variant",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "d05d507c-1b8b-592e-83b7-ac4ffa61d406",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 36,
+              "prompt_bytes": 38,
+              "latency_ms": 0.002040993422269821
+            },
+            {
+              "case_id": "dev-archived-audit",
+              "category": "archived_identity_recovery",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "3f195448-b9f4-55e3-a11d-1c3914985e32",
+              "action": "reuse",
+              "agent_id": "3f195448-b9f4-55e3-a11d-1c3914985e32",
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 28,
+              "prompt_bytes": 28,
+              "latency_ms": 0.0024158507585525513
+            }
+          ]
+        },
+        "recency_only_top_five": {
+          "case_count": 20,
+          "reuse_case_count": 15,
+          "retrieval_metrics_applicable": true,
+          "top_k": 5,
+          "top_k_recall": 0.6,
+          "mean_reciprocal_rank": 0.6,
+          "decision_accuracy": 0.7,
+          "wrong_agent_reuse_rate": 0.0,
+          "duplicate_creation_rate": 0.4,
+          "abstention_precision": 1.0,
+          "candidate_count_mean": 0.75,
+          "max_candidate_count": 2,
+          "prompt_characters_mean": 234.7,
+          "prompt_bytes_mean": 235.3,
+          "strategy_latency_ms": {
+            "p50": 0.12333306949585676,
+            "p95": 0.5781708983704449
+          },
+          "failures_by_category": {
+            "archived_identity_recovery": 2,
+            "exact_named_follow_up": 1,
+            "old_relevant_identity": 2,
+            "paraphrased_follow_up": 1
+          },
+          "failed_cases": [
+            {
+              "case_id": "dev-old-relevant-renewal",
+              "category": "old_relevant_identity",
+              "expected_action": "reuse",
+              "expected_agent_id": "67ec0a9c-3916-51b9-ae8a-19563fb585e7",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-archived-maya",
+              "category": "archived_identity_recovery",
+              "expected_action": "reuse",
+              "expected_agent_id": "e85bbc2e-7613-5e34-a03e-9c04fa54f563",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-scale-100",
+              "category": "paraphrased_follow_up",
+              "expected_action": "reuse",
+              "expected_agent_id": "d4dc3c6b-9dbf-54e2-b0c5-60ab63bed327",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-scale-500",
+              "category": "old_relevant_identity",
+              "expected_action": "reuse",
+              "expected_agent_id": "9ea49c95-a229-5d2f-9439-acb1e4fe32e8",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-scale-1000",
+              "category": "exact_named_follow_up",
+              "expected_action": "reuse",
+              "expected_agent_id": "d24750e2-f102-50c2-956a-9b9390cdd1bc",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "dev-archived-audit",
+              "category": "archived_identity_recovery",
+              "expected_action": "reuse",
+              "expected_agent_id": "3f195448-b9f4-55e3-a11d-1c3914985e32",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            }
+          ],
+          "observations": [
+            {
+              "case_id": "dev-exact-alice",
+              "category": "exact_named_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "620a2ac8-99a0-542f-991a-39daa9314c74",
+              "action": "reuse",
+              "agent_id": "620a2ac8-99a0-542f-991a-39daa9314c74",
+              "ranked_agent_ids": [
+                "620a2ac8-99a0-542f-991a-39daa9314c74"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 275,
+              "prompt_bytes": 275,
+              "latency_ms": 0.2774170134216547
+            },
+            {
+              "case_id": "dev-paraphrase-vendor",
+              "category": "paraphrased_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "5db1a2e1-665b-5b98-9964-4528847d7917",
+              "action": "reuse",
+              "agent_id": "5db1a2e1-665b-5b98-9964-4528847d7917",
+              "ranked_agent_ids": [
+                "5db1a2e1-665b-5b98-9964-4528847d7917"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 321,
+              "prompt_bytes": 321,
+              "latency_ms": 0.20499993115663528
+            },
+            {
+              "case_id": "dev-context-pronoun-keith",
+              "category": "contextual_pronoun",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "f6e9dcd9-3aca-5eae-bac1-0facd06fd7aa",
+              "action": "reuse",
+              "agent_id": "f6e9dcd9-3aca-5eae-bac1-0facd06fd7aa",
+              "ranked_agent_ids": [
+                "f6e9dcd9-3aca-5eae-bac1-0facd06fd7aa"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 276,
+              "prompt_bytes": 276,
+              "latency_ms": 0.10258401744067669
+            },
+            {
+              "case_id": "dev-old-relevant-renewal",
+              "category": "old_relevant_identity",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "67ec0a9c-3916-51b9-ae8a-19563fb585e7",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.0712911132723093
+            },
+            {
+              "case_id": "dev-recent-distractor-board",
+              "category": "recent_irrelevant_distractor",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "710e14f5-6703-5827-993e-41666c7db048",
+              "action": "reuse",
+              "agent_id": "710e14f5-6703-5827-993e-41666c7db048",
+              "ranked_agent_ids": [
+                "710e14f5-6703-5827-993e-41666c7db048"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 307,
+              "prompt_bytes": 307,
+              "latency_ms": 0.15166704542934895
+            },
+            {
+              "case_id": "dev-similar-designers",
+              "category": "semantically_similar_identities",
+              "split": "development",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "abstain",
+              "agent_id": null,
+              "ranked_agent_ids": [
+                "eb761e4c-9fc2-5a40-8773-93e49325f769",
+                "6b3bf5e2-a35a-50df-ac22-07bbf07f22bb"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 490,
+              "prompt_bytes": 490,
+              "latency_ms": 0.16229180619120598
+            },
+            {
+              "case_id": "dev-novel-dentist",
+              "category": "novel_task",
+              "split": "development",
+              "expected_action": "create_new",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.0730419997125864
+            },
+            {
+              "case_id": "dev-ambiguous-followup",
+              "category": "ambiguous_task",
+              "split": "development",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "abstain",
+              "agent_id": null,
+              "ranked_agent_ids": [
+                "867e8c4f-15ad-581d-9c11-6bdd04bdc965",
+                "c41dfb0a-fca6-5a65-a13c-cc6ca04042b3"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 475,
+              "prompt_bytes": 475,
+              "latency_ms": 0.14916714280843735
+            },
+            {
+              "case_id": "dev-archived-maya",
+              "category": "archived_identity_recovery",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "e85bbc2e-7613-5e34-a03e-9c04fa54f563",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.030916184186935425
+            },
+            {
+              "case_id": "dev-unicode-jose",
+              "category": "unicode_punctuation_variant",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "6c03c626-8792-58e8-a93e-2e54d25cf212",
+              "action": "reuse",
+              "agent_id": "6c03c626-8792-58e8-a93e-2e54d25cf212",
+              "ranked_agent_ids": [
+                "6c03c626-8792-58e8-a93e-2e54d25cf212"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 305,
+              "prompt_bytes": 313,
+              "latency_ms": 0.11066696606576443
+            },
+            {
+              "case_id": "dev-scale-10",
+              "category": "exact_named_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "d4ab1c9c-4b40-5f65-9ad7-9d833fa66d96",
+              "action": "reuse",
+              "agent_id": "d4ab1c9c-4b40-5f65-9ad7-9d833fa66d96",
+              "ranked_agent_ids": [
+                "d4ab1c9c-4b40-5f65-9ad7-9d833fa66d96"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 311,
+              "prompt_bytes": 311,
+              "latency_ms": 0.48474990762770176
+            },
+            {
+              "case_id": "dev-scale-100",
+              "category": "paraphrased_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "d4dc3c6b-9dbf-54e2-b0c5-60ab63bed327",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.5544999148696661
+            },
+            {
+              "case_id": "dev-scale-500",
+              "category": "old_relevant_identity",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "9ea49c95-a229-5d2f-9439-acb1e4fe32e8",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.7191661279648542
+            },
+            {
+              "case_id": "dev-scale-1000",
+              "category": "exact_named_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "d24750e2-f102-50c2-956a-9b9390cdd1bc",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.5707500968128443
+            },
+            {
+              "case_id": "dev-exact-billing",
+              "category": "exact_named_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "345bd26f-6a6a-5ff0-8804-62e151528477",
+              "action": "reuse",
+              "agent_id": "345bd26f-6a6a-5ff0-8804-62e151528477",
+              "ranked_agent_ids": [
+                "345bd26f-6a6a-5ff0-8804-62e151528477"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 323,
+              "prompt_bytes": 323,
+              "latency_ms": 0.09487499482929707
+            },
+            {
+              "case_id": "dev-novel-calendar",
+              "category": "novel_task",
+              "split": "development",
+              "expected_action": "create_new",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.081624835729599
+            },
+            {
+              "case_id": "dev-context-pronoun-draft",
+              "category": "contextual_pronoun",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "0ae88fa1-2867-5ec0-ba72-a5d4412d9c6c",
+              "action": "reuse",
+              "agent_id": "0ae88fa1-2867-5ec0-ba72-a5d4412d9c6c",
+              "ranked_agent_ids": [
+                "0ae88fa1-2867-5ec0-ba72-a5d4412d9c6c"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 269,
+              "prompt_bytes": 269,
+              "latency_ms": 0.09541702456772327
+            },
+            {
+              "case_id": "dev-ambiguous-alex",
+              "category": "ambiguous_task",
+              "split": "development",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "abstain",
+              "agent_id": null,
+              "ranked_agent_ids": [
+                "00f7d654-71a9-51ed-8ea6-ced15ee5f5ea",
+                "1be74f02-b495-5df5-9e1b-1a46150ff0f0"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 469,
+              "prompt_bytes": 469,
+              "latency_ms": 0.1318750437349081
+            },
+            {
+              "case_id": "dev-punctuation-oconnor",
+              "category": "unicode_punctuation_variant",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "d05d507c-1b8b-592e-83b7-ac4ffa61d406",
+              "action": "reuse",
+              "agent_id": "d05d507c-1b8b-592e-83b7-ac4ffa61d406",
+              "ranked_agent_ids": [
+                "d05d507c-1b8b-592e-83b7-ac4ffa61d406"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 305,
+              "prompt_bytes": 309,
+              "latency_ms": 0.11479109525680542
+            },
+            {
+              "case_id": "dev-archived-audit",
+              "category": "archived_identity_recovery",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "3f195448-b9f4-55e3-a11d-1c3914985e32",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.02545909956097603
+            }
+          ]
+        },
+        "hybrid_directory": {
+          "case_count": 20,
+          "reuse_case_count": 15,
+          "retrieval_metrics_applicable": true,
+          "top_k": 5,
+          "top_k_recall": 1.0,
+          "mean_reciprocal_rank": 1.0,
+          "decision_accuracy": 1.0,
+          "wrong_agent_reuse_rate": 0.0,
+          "duplicate_creation_rate": 0.0,
+          "abstention_precision": 1.0,
+          "candidate_count_mean": 1.05,
+          "max_candidate_count": 2,
+          "prompt_characters_mean": 312.95,
+          "prompt_bytes_mean": 313.55,
+          "strategy_latency_ms": {
+            "p50": 0.04956265911459923,
+            "p95": 38.99387953570113
+          },
+          "failures_by_category": {},
+          "failed_cases": [],
+          "observations": [
+            {
+              "case_id": "dev-exact-alice",
+              "category": "exact_named_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "620a2ac8-99a0-542f-991a-39daa9314c74",
+              "action": "reuse",
+              "agent_id": "620a2ac8-99a0-542f-991a-39daa9314c74",
+              "ranked_agent_ids": [
+                "620a2ac8-99a0-542f-991a-39daa9314c74"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 275,
+              "prompt_bytes": 275,
+              "latency_ms": 0.042291125282645226
+            },
+            {
+              "case_id": "dev-paraphrase-vendor",
+              "category": "paraphrased_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "5db1a2e1-665b-5b98-9964-4528847d7917",
+              "action": "reuse",
+              "agent_id": "5db1a2e1-665b-5b98-9964-4528847d7917",
+              "ranked_agent_ids": [
+                "5db1a2e1-665b-5b98-9964-4528847d7917"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 321,
+              "prompt_bytes": 321,
+              "latency_ms": 0.06745895370841026
+            },
+            {
+              "case_id": "dev-context-pronoun-keith",
+              "category": "contextual_pronoun",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "f6e9dcd9-3aca-5eae-bac1-0facd06fd7aa",
+              "action": "reuse",
+              "agent_id": "f6e9dcd9-3aca-5eae-bac1-0facd06fd7aa",
+              "ranked_agent_ids": [
+                "f6e9dcd9-3aca-5eae-bac1-0facd06fd7aa"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 276,
+              "prompt_bytes": 276,
+              "latency_ms": 0.04891701973974705
+            },
+            {
+              "case_id": "dev-old-relevant-renewal",
+              "category": "old_relevant_identity",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "67ec0a9c-3916-51b9-ae8a-19563fb585e7",
+              "action": "reuse",
+              "agent_id": "67ec0a9c-3916-51b9-ae8a-19563fb585e7",
+              "ranked_agent_ids": [
+                "67ec0a9c-3916-51b9-ae8a-19563fb585e7"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 319,
+              "prompt_bytes": 319,
+              "latency_ms": 0.10054209269583225
+            },
+            {
+              "case_id": "dev-recent-distractor-board",
+              "category": "recent_irrelevant_distractor",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "710e14f5-6703-5827-993e-41666c7db048",
+              "action": "reuse",
+              "agent_id": "710e14f5-6703-5827-993e-41666c7db048",
+              "ranked_agent_ids": [
+                "710e14f5-6703-5827-993e-41666c7db048"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 307,
+              "prompt_bytes": 307,
+              "latency_ms": 0.04216702654957771
+            },
+            {
+              "case_id": "dev-similar-designers",
+              "category": "semantically_similar_identities",
+              "split": "development",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "abstain",
+              "agent_id": null,
+              "ranked_agent_ids": [
+                "eb761e4c-9fc2-5a40-8773-93e49325f769",
+                "6b3bf5e2-a35a-50df-ac22-07bbf07f22bb"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 490,
+              "prompt_bytes": 490,
+              "latency_ms": 0.047083012759685516
+            },
+            {
+              "case_id": "dev-novel-dentist",
+              "category": "novel_task",
+              "split": "development",
+              "expected_action": "create_new",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.03504101186990738
+            },
+            {
+              "case_id": "dev-ambiguous-followup",
+              "category": "ambiguous_task",
+              "split": "development",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "abstain",
+              "agent_id": null,
+              "ranked_agent_ids": [
+                "867e8c4f-15ad-581d-9c11-6bdd04bdc965",
+                "c41dfb0a-fca6-5a65-a13c-cc6ca04042b3"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 475,
+              "prompt_bytes": 475,
+              "latency_ms": 0.04333304241299629
+            },
+            {
+              "case_id": "dev-archived-maya",
+              "category": "archived_identity_recovery",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "e85bbc2e-7613-5e34-a03e-9c04fa54f563",
+              "action": "reuse",
+              "agent_id": "e85bbc2e-7613-5e34-a03e-9c04fa54f563",
+              "ranked_agent_ids": [
+                "e85bbc2e-7613-5e34-a03e-9c04fa54f563"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 317,
+              "prompt_bytes": 317,
+              "latency_ms": 0.0863748136907816
+            },
+            {
+              "case_id": "dev-unicode-jose",
+              "category": "unicode_punctuation_variant",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "6c03c626-8792-58e8-a93e-2e54d25cf212",
+              "action": "reuse",
+              "agent_id": "6c03c626-8792-58e8-a93e-2e54d25cf212",
+              "ranked_agent_ids": [
+                "6c03c626-8792-58e8-a93e-2e54d25cf212"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 305,
+              "prompt_bytes": 313,
+              "latency_ms": 0.044042011722922325
+            },
+            {
+              "case_id": "dev-scale-10",
+              "category": "exact_named_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "d4ab1c9c-4b40-5f65-9ad7-9d833fa66d96",
+              "action": "reuse",
+              "agent_id": "d4ab1c9c-4b40-5f65-9ad7-9d833fa66d96",
+              "ranked_agent_ids": [
+                "d4ab1c9c-4b40-5f65-9ad7-9d833fa66d96"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 311,
+              "prompt_bytes": 311,
+              "latency_ms": 0.5351670552045107
+            },
+            {
+              "case_id": "dev-scale-100",
+              "category": "paraphrased_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "d4dc3c6b-9dbf-54e2-b0c5-60ab63bed327",
+              "action": "reuse",
+              "agent_id": "d4dc3c6b-9dbf-54e2-b0c5-60ab63bed327",
+              "ranked_agent_ids": [
+                "d4dc3c6b-9dbf-54e2-b0c5-60ab63bed327"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 353,
+              "prompt_bytes": 353,
+              "latency_ms": 8.375250035896897
+            },
+            {
+              "case_id": "dev-scale-500",
+              "category": "old_relevant_identity",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "9ea49c95-a229-5d2f-9439-acb1e4fe32e8",
+              "action": "reuse",
+              "agent_id": "9ea49c95-a229-5d2f-9439-acb1e4fe32e8",
+              "ranked_agent_ids": [
+                "9ea49c95-a229-5d2f-9439-acb1e4fe32e8"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 355,
+              "prompt_bytes": 355,
+              "latency_ms": 38.25454204343259
+            },
+            {
+              "case_id": "dev-scale-1000",
+              "category": "exact_named_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "d24750e2-f102-50c2-956a-9b9390cdd1bc",
+              "action": "reuse",
+              "agent_id": "d24750e2-f102-50c2-956a-9b9390cdd1bc",
+              "ranked_agent_ids": [
+                "d24750e2-f102-50c2-956a-9b9390cdd1bc"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 317,
+              "prompt_bytes": 317,
+              "latency_ms": 53.041291888803244
+            },
+            {
+              "case_id": "dev-exact-billing",
+              "category": "exact_named_follow_up",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "345bd26f-6a6a-5ff0-8804-62e151528477",
+              "action": "reuse",
+              "agent_id": "345bd26f-6a6a-5ff0-8804-62e151528477",
+              "ranked_agent_ids": [
+                "345bd26f-6a6a-5ff0-8804-62e151528477"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 323,
+              "prompt_bytes": 323,
+              "latency_ms": 0.049084192141890526
+            },
+            {
+              "case_id": "dev-novel-calendar",
+              "category": "novel_task",
+              "split": "development",
+              "expected_action": "create_new",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.03450014628469944
+            },
+            {
+              "case_id": "dev-context-pronoun-draft",
+              "category": "contextual_pronoun",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "0ae88fa1-2867-5ec0-ba72-a5d4412d9c6c",
+              "action": "reuse",
+              "agent_id": "0ae88fa1-2867-5ec0-ba72-a5d4412d9c6c",
+              "ranked_agent_ids": [
+                "0ae88fa1-2867-5ec0-ba72-a5d4412d9c6c"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 269,
+              "prompt_bytes": 269,
+              "latency_ms": 0.05004112608730793
+            },
+            {
+              "case_id": "dev-ambiguous-alex",
+              "category": "ambiguous_task",
+              "split": "development",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "abstain",
+              "agent_id": null,
+              "ranked_agent_ids": [
+                "00f7d654-71a9-51ed-8ea6-ced15ee5f5ea",
+                "1be74f02-b495-5df5-9e1b-1a46150ff0f0"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 469,
+              "prompt_bytes": 469,
+              "latency_ms": 0.05712499842047691
+            },
+            {
+              "case_id": "dev-punctuation-oconnor",
+              "category": "unicode_punctuation_variant",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "d05d507c-1b8b-592e-83b7-ac4ffa61d406",
+              "action": "reuse",
+              "agent_id": "d05d507c-1b8b-592e-83b7-ac4ffa61d406",
+              "ranked_agent_ids": [
+                "d05d507c-1b8b-592e-83b7-ac4ffa61d406"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 305,
+              "prompt_bytes": 309,
+              "latency_ms": 0.03820913843810558
+            },
+            {
+              "case_id": "dev-archived-audit",
+              "category": "archived_identity_recovery",
+              "split": "development",
+              "expected_action": "reuse",
+              "expected_agent_id": "3f195448-b9f4-55e3-a11d-1c3914985e32",
+              "action": "reuse",
+              "agent_id": "3f195448-b9f4-55e3-a11d-1c3914985e32",
+              "ranked_agent_ids": [
+                "3f195448-b9f4-55e3-a11d-1c3914985e32"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 330,
+              "prompt_bytes": 330,
+              "latency_ms": 0.10095816105604172
+            }
+          ]
+        }
+      },
+      "test": {
+        "current_full_roster_exact_name_proxy": {
+          "case_count": 20,
+          "reuse_case_count": 16,
+          "retrieval_metrics_applicable": false,
+          "top_k": 5,
+          "top_k_recall": null,
+          "mean_reciprocal_rank": null,
+          "decision_accuracy": 0.35,
+          "wrong_agent_reuse_rate": 0.0,
+          "duplicate_creation_rate": 0.6875,
+          "abstention_precision": 0.0,
+          "candidate_count_mean": 81.55,
+          "max_candidate_count": 1000,
+          "prompt_characters_mean": 3417.6,
+          "prompt_bytes_mean": 3417.85,
+          "strategy_latency_ms": {
+            "p50": 0.002166489139199257,
+            "p95": 0.2738681389018895
+          },
+          "failures_by_category": {
+            "ambiguous_task": 2,
+            "contextual_pronoun": 2,
+            "exact_named_follow_up": 2,
+            "old_relevant_identity": 1,
+            "paraphrased_follow_up": 2,
+            "recent_irrelevant_distractor": 1,
+            "semantically_similar_identities": 1,
+            "unicode_punctuation_variant": 2
+          },
+          "failed_cases": [
+            {
+              "case_id": "test-exact-sam",
+              "category": "exact_named_follow_up",
+              "expected_action": "reuse",
+              "expected_agent_id": "2acde88a-30be-578d-9591-05219b486246",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-paraphrase-recruiting",
+              "category": "paraphrased_follow_up",
+              "expected_action": "reuse",
+              "expected_agent_id": "079d1e27-cc26-5e85-a716-5b5ec3be5422",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-context-pronoun-board",
+              "category": "contextual_pronoun",
+              "expected_action": "reuse",
+              "expected_agent_id": "efea4e49-1cab-57da-b061-aaf8cd09ab85",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-old-relevant-insurance",
+              "category": "old_relevant_identity",
+              "expected_action": "reuse",
+              "expected_agent_id": "e8e5d523-7d69-5a46-9f94-ccbdecd28a71",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-recent-distractor-legal",
+              "category": "recent_irrelevant_distractor",
+              "expected_action": "reuse",
+              "expected_agent_id": "133aee84-8e6b-540b-8fdc-3ce9dab3cfa8",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-similar-expenses",
+              "category": "semantically_similar_identities",
+              "expected_action": "reuse",
+              "expected_agent_id": "b9e1e951-8976-57c4-9b3a-93c6eaa72699",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-ambiguous-jordan",
+              "category": "ambiguous_task",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-unicode-zoe",
+              "category": "unicode_punctuation_variant",
+              "expected_action": "reuse",
+              "expected_agent_id": "2ce58e96-48fa-5409-969c-f289e735ef88",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-scale-100",
+              "category": "paraphrased_follow_up",
+              "expected_action": "reuse",
+              "expected_agent_id": "f5c4265e-848c-54be-b328-171d8eb85501",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-scale-1000",
+              "category": "exact_named_follow_up",
+              "expected_action": "reuse",
+              "expected_agent_id": "15c1727b-824a-568b-b8d9-9c976fc45219",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-context-pronoun-landlord",
+              "category": "contextual_pronoun",
+              "expected_action": "reuse",
+              "expected_agent_id": "32e5bec5-b8da-5796-98df-523ff9f5e589",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-ambiguous-account",
+              "category": "ambiguous_task",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-punctuation-acme",
+              "category": "unicode_punctuation_variant",
+              "expected_action": "reuse",
+              "expected_agent_id": "b1dde0d3-b743-53c4-afaa-1da3f30db1a1",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            }
+          ],
+          "observations": [
+            {
+              "case_id": "test-exact-sam",
+              "category": "exact_named_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "2acde88a-30be-578d-9591-05219b486246",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 36,
+              "prompt_bytes": 36,
+              "latency_ms": 0.0038750004023313522
+            },
+            {
+              "case_id": "test-paraphrase-recruiting",
+              "category": "paraphrased_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "079d1e27-cc26-5e85-a716-5b5ec3be5422",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 45,
+              "prompt_bytes": 45,
+              "latency_ms": 0.0017918646335601807
+            },
+            {
+              "case_id": "test-context-pronoun-board",
+              "category": "contextual_pronoun",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "efea4e49-1cab-57da-b061-aaf8cd09ab85",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 39,
+              "prompt_bytes": 39,
+              "latency_ms": 0.0016249250620603561
+            },
+            {
+              "case_id": "test-old-relevant-insurance",
+              "category": "old_relevant_identity",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "e8e5d523-7d69-5a46-9f94-ccbdecd28a71",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 2,
+              "prompt_characters": 75,
+              "prompt_bytes": 75,
+              "latency_ms": 0.0022919848561286926
+            },
+            {
+              "case_id": "test-recent-distractor-legal",
+              "category": "recent_irrelevant_distractor",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "133aee84-8e6b-540b-8fdc-3ce9dab3cfa8",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 2,
+              "prompt_characters": 78,
+              "prompt_bytes": 78,
+              "latency_ms": 0.002125045284628868
+            },
+            {
+              "case_id": "test-similar-expenses",
+              "category": "semantically_similar_identities",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "b9e1e951-8976-57c4-9b3a-93c6eaa72699",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 2,
+              "prompt_characters": 69,
+              "prompt_bytes": 69,
+              "latency_ms": 0.0022079329937696457
+            },
+            {
+              "case_id": "test-novel-travel",
+              "category": "novel_task",
+              "split": "test",
+              "expected_action": "create_new",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 30,
+              "prompt_bytes": 30,
+              "latency_ms": 0.0014170072972774506
+            },
+            {
+              "case_id": "test-ambiguous-jordan",
+              "category": "ambiguous_task",
+              "split": "test",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 2,
+              "prompt_characters": 72,
+              "prompt_bytes": 72,
+              "latency_ms": 0.00200001522898674
+            },
+            {
+              "case_id": "test-archived-tax",
+              "category": "archived_identity_recovery",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "8728f5a4-eca2-5a54-86ba-54f9e0d9f40d",
+              "action": "reuse",
+              "agent_id": "8728f5a4-eca2-5a54-86ba-54f9e0d9f40d",
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 33,
+              "prompt_bytes": 33,
+              "latency_ms": 0.0025830231606960297
+            },
+            {
+              "case_id": "test-unicode-zoe",
+              "category": "unicode_punctuation_variant",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "2ce58e96-48fa-5409-969c-f289e735ef88",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 35,
+              "prompt_bytes": 40,
+              "latency_ms": 0.0016249250620603561
+            },
+            {
+              "case_id": "test-scale-10",
+              "category": "exact_named_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "f079679e-6dfa-5baa-9bdf-2d702f011453",
+              "action": "reuse",
+              "agent_id": "f079679e-6dfa-5baa-9bdf-2d702f011453",
+              "ranked_agent_ids": null,
+              "candidate_count": 10,
+              "prompt_characters": 412,
+              "prompt_bytes": 412,
+              "latency_ms": 0.009208917617797852
+            },
+            {
+              "case_id": "test-scale-100",
+              "category": "paraphrased_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "f5c4265e-848c-54be-b328-171d8eb85501",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 100,
+              "prompt_characters": 4197,
+              "prompt_bytes": 4197,
+              "latency_ms": 0.054416945204138756
+            },
+            {
+              "case_id": "test-scale-500",
+              "category": "old_relevant_identity",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "5e903a8e-c273-5dbc-afb6-b8a9486e3e1f",
+              "action": "reuse",
+              "agent_id": "5e903a8e-c273-5dbc-afb6-b8a9486e3e1f",
+              "ranked_agent_ids": null,
+              "candidate_count": 500,
+              "prompt_characters": 21002,
+              "prompt_bytes": 21002,
+              "latency_ms": 0.2615409903228283
+            },
+            {
+              "case_id": "test-scale-1000",
+              "category": "exact_named_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "15c1727b-824a-568b-b8d9-9c976fc45219",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1000,
+              "prompt_characters": 41998,
+              "prompt_bytes": 41998,
+              "latency_ms": 0.5080839619040489
+            },
+            {
+              "case_id": "test-exact-vendor",
+              "category": "exact_named_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "f760d7cf-23c5-516f-9316-10916a635a03",
+              "action": "reuse",
+              "agent_id": "f760d7cf-23c5-516f-9316-10916a635a03",
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 36,
+              "prompt_bytes": 36,
+              "latency_ms": 0.002708984538912773
+            },
+            {
+              "case_id": "test-novel-pet",
+              "category": "novel_task",
+              "split": "test",
+              "expected_action": "create_new",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 32,
+              "prompt_bytes": 32,
+              "latency_ms": 0.0016670674085617065
+            },
+            {
+              "case_id": "test-context-pronoun-landlord",
+              "category": "contextual_pronoun",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "32e5bec5-b8da-5796-98df-523ff9f5e589",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 37,
+              "prompt_bytes": 37,
+              "latency_ms": 0.0014579854905605316
+            },
+            {
+              "case_id": "test-ambiguous-account",
+              "category": "ambiguous_task",
+              "split": "test",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 2,
+              "prompt_characters": 60,
+              "prompt_bytes": 60,
+              "latency_ms": 0.002416083589196205
+            },
+            {
+              "case_id": "test-punctuation-acme",
+              "category": "unicode_punctuation_variant",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "b1dde0d3-b743-53c4-afaa-1da3f30db1a1",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 27,
+              "prompt_bytes": 27,
+              "latency_ms": 0.0013329554349184036
+            },
+            {
+              "case_id": "test-archived-orchid",
+              "category": "archived_identity_recovery",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "41a8841a-191b-51a7-8d70-76a5ab596e60",
+              "action": "reuse",
+              "agent_id": "41a8841a-191b-51a7-8d70-76a5ab596e60",
+              "ranked_agent_ids": null,
+              "candidate_count": 1,
+              "prompt_characters": 39,
+              "prompt_bytes": 39,
+              "latency_ms": 0.00200001522898674
+            }
+          ]
+        },
+        "recency_only_top_five": {
+          "case_count": 20,
+          "reuse_case_count": 16,
+          "retrieval_metrics_applicable": true,
+          "top_k": 5,
+          "top_k_recall": 0.625,
+          "mean_reciprocal_rank": 0.625,
+          "decision_accuracy": 0.7,
+          "wrong_agent_reuse_rate": 0.0,
+          "duplicate_creation_rate": 0.375,
+          "abstention_precision": 1.0,
+          "candidate_count_mean": 0.8,
+          "max_candidate_count": 2,
+          "prompt_characters_mean": 254.85,
+          "prompt_bytes_mean": 255.25,
+          "strategy_latency_ms": {
+            "p50": 0.11716701555997133,
+            "p95": 0.29068740550428646
+          },
+          "failures_by_category": {
+            "archived_identity_recovery": 2,
+            "exact_named_follow_up": 1,
+            "old_relevant_identity": 2,
+            "paraphrased_follow_up": 1
+          },
+          "failed_cases": [
+            {
+              "case_id": "test-old-relevant-insurance",
+              "category": "old_relevant_identity",
+              "expected_action": "reuse",
+              "expected_agent_id": "e8e5d523-7d69-5a46-9f94-ccbdecd28a71",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-archived-tax",
+              "category": "archived_identity_recovery",
+              "expected_action": "reuse",
+              "expected_agent_id": "8728f5a4-eca2-5a54-86ba-54f9e0d9f40d",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-scale-100",
+              "category": "paraphrased_follow_up",
+              "expected_action": "reuse",
+              "expected_agent_id": "f5c4265e-848c-54be-b328-171d8eb85501",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-scale-500",
+              "category": "old_relevant_identity",
+              "expected_action": "reuse",
+              "expected_agent_id": "5e903a8e-c273-5dbc-afb6-b8a9486e3e1f",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-scale-1000",
+              "category": "exact_named_follow_up",
+              "expected_action": "reuse",
+              "expected_agent_id": "15c1727b-824a-568b-b8d9-9c976fc45219",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            },
+            {
+              "case_id": "test-archived-orchid",
+              "category": "archived_identity_recovery",
+              "expected_action": "reuse",
+              "expected_agent_id": "41a8841a-191b-51a7-8d70-76a5ab596e60",
+              "actual_action": "create_new",
+              "actual_agent_id": null
+            }
+          ],
+          "observations": [
+            {
+              "case_id": "test-exact-sam",
+              "category": "exact_named_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "2acde88a-30be-578d-9591-05219b486246",
+              "action": "reuse",
+              "agent_id": "2acde88a-30be-578d-9591-05219b486246",
+              "ranked_agent_ids": [
+                "2acde88a-30be-578d-9591-05219b486246"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 274,
+              "prompt_bytes": 274,
+              "latency_ms": 0.09787501767277718
+            },
+            {
+              "case_id": "test-paraphrase-recruiting",
+              "category": "paraphrased_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "079d1e27-cc26-5e85-a716-5b5ec3be5422",
+              "action": "reuse",
+              "agent_id": "079d1e27-cc26-5e85-a716-5b5ec3be5422",
+              "ranked_agent_ids": [
+                "079d1e27-cc26-5e85-a716-5b5ec3be5422"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 355,
+              "prompt_bytes": 355,
+              "latency_ms": 0.14141621068120003
+            },
+            {
+              "case_id": "test-context-pronoun-board",
+              "category": "contextual_pronoun",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "efea4e49-1cab-57da-b061-aaf8cd09ab85",
+              "action": "reuse",
+              "agent_id": "efea4e49-1cab-57da-b061-aaf8cd09ab85",
+              "ranked_agent_ids": [
+                "efea4e49-1cab-57da-b061-aaf8cd09ab85"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 349,
+              "prompt_bytes": 349,
+              "latency_ms": 0.12104189954698086
+            },
+            {
+              "case_id": "test-old-relevant-insurance",
+              "category": "old_relevant_identity",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "e8e5d523-7d69-5a46-9f94-ccbdecd28a71",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.06883288733661175
+            },
+            {
+              "case_id": "test-recent-distractor-legal",
+              "category": "recent_irrelevant_distractor",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "133aee84-8e6b-540b-8fdc-3ce9dab3cfa8",
+              "action": "reuse",
+              "agent_id": "133aee84-8e6b-540b-8fdc-3ce9dab3cfa8",
+              "ranked_agent_ids": [
+                "133aee84-8e6b-540b-8fdc-3ce9dab3cfa8",
+                "f1b32271-e502-5b9b-b962-27414efc0d1a"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 545,
+              "prompt_bytes": 545,
+              "latency_ms": 0.16362499445676804
+            },
+            {
+              "case_id": "test-similar-expenses",
+              "category": "semantically_similar_identities",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "b9e1e951-8976-57c4-9b3a-93c6eaa72699",
+              "action": "reuse",
+              "agent_id": "b9e1e951-8976-57c4-9b3a-93c6eaa72699",
+              "ranked_agent_ids": [
+                "b9e1e951-8976-57c4-9b3a-93c6eaa72699",
+                "4bd3442e-00df-5e61-9607-bd52ef1d0fbf"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 472,
+              "prompt_bytes": 472,
+              "latency_ms": 0.16345782205462456
+            },
+            {
+              "case_id": "test-novel-travel",
+              "category": "novel_task",
+              "split": "test",
+              "expected_action": "create_new",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.06612506695091724
+            },
+            {
+              "case_id": "test-ambiguous-jordan",
+              "category": "ambiguous_task",
+              "split": "test",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "abstain",
+              "agent_id": null,
+              "ranked_agent_ids": [
+                "af378b99-adb3-5d61-ae6c-77653d5992ae",
+                "f48f6436-229c-59bf-8244-997fe993489d"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 498,
+              "prompt_bytes": 498,
+              "latency_ms": 0.14558411203324795
+            },
+            {
+              "case_id": "test-archived-tax",
+              "category": "archived_identity_recovery",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "8728f5a4-eca2-5a54-86ba-54f9e0d9f40d",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.025582965463399887
+            },
+            {
+              "case_id": "test-unicode-zoe",
+              "category": "unicode_punctuation_variant",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "2ce58e96-48fa-5409-969c-f289e735ef88",
+              "action": "reuse",
+              "agent_id": "2ce58e96-48fa-5409-969c-f289e735ef88",
+              "ranked_agent_ids": [
+                "2ce58e96-48fa-5409-969c-f289e735ef88"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 317,
+              "prompt_bytes": 325,
+              "latency_ms": 0.11062505654990673
+            },
+            {
+              "case_id": "test-scale-10",
+              "category": "exact_named_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "f079679e-6dfa-5baa-9bdf-2d702f011453",
+              "action": "reuse",
+              "agent_id": "f079679e-6dfa-5baa-9bdf-2d702f011453",
+              "ranked_agent_ids": [
+                "f079679e-6dfa-5baa-9bdf-2d702f011453"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 308,
+              "prompt_bytes": 308,
+              "latency_ms": 0.12537511065602303
+            },
+            {
+              "case_id": "test-scale-100",
+              "category": "paraphrased_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "f5c4265e-848c-54be-b328-171d8eb85501",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.12574996799230576
+            },
+            {
+              "case_id": "test-scale-500",
+              "category": "old_relevant_identity",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "5e903a8e-c273-5dbc-afb6-b8a9486e3e1f",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.28037489391863346
+            },
+            {
+              "case_id": "test-scale-1000",
+              "category": "exact_named_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "15c1727b-824a-568b-b8d9-9c976fc45219",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.48662512563169
+            },
+            {
+              "case_id": "test-exact-vendor",
+              "category": "exact_named_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "f760d7cf-23c5-516f-9316-10916a635a03",
+              "action": "reuse",
+              "agent_id": "f760d7cf-23c5-516f-9316-10916a635a03",
+              "ranked_agent_ids": [
+                "f760d7cf-23c5-516f-9316-10916a635a03"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 319,
+              "prompt_bytes": 319,
+              "latency_ms": 0.08599995635449886
+            },
+            {
+              "case_id": "test-novel-pet",
+              "category": "novel_task",
+              "split": "test",
+              "expected_action": "create_new",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.06550014950335026
+            },
+            {
+              "case_id": "test-context-pronoun-landlord",
+              "category": "contextual_pronoun",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "32e5bec5-b8da-5796-98df-523ff9f5e589",
+              "action": "reuse",
+              "agent_id": "32e5bec5-b8da-5796-98df-523ff9f5e589",
+              "ranked_agent_ids": [
+                "32e5bec5-b8da-5796-98df-523ff9f5e589"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 330,
+              "prompt_bytes": 330,
+              "latency_ms": 0.11329213157296181
+            },
+            {
+              "case_id": "test-ambiguous-account",
+              "category": "ambiguous_task",
+              "split": "test",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "abstain",
+              "agent_id": null,
+              "ranked_agent_ids": [
+                "8882305a-d4a5-524e-b890-41ee95116c06",
+                "1f032be4-8eef-5958-9bb3-543c3d0e39c3"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 471,
+              "prompt_bytes": 471,
+              "latency_ms": 0.1305420882999897
+            },
+            {
+              "case_id": "test-punctuation-acme",
+              "category": "unicode_punctuation_variant",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "b1dde0d3-b743-53c4-afaa-1da3f30db1a1",
+              "action": "reuse",
+              "agent_id": "b1dde0d3-b743-53c4-afaa-1da3f30db1a1",
+              "ranked_agent_ids": [
+                "b1dde0d3-b743-53c4-afaa-1da3f30db1a1"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 291,
+              "prompt_bytes": 291,
+              "latency_ms": 0.08033309131860733
+            },
+            {
+              "case_id": "test-archived-orchid",
+              "category": "archived_identity_recovery",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "41a8841a-191b-51a7-8d70-76a5ab596e60",
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.02433406189084053
+            }
+          ]
+        },
+        "hybrid_directory": {
+          "case_count": 20,
+          "reuse_case_count": 16,
+          "retrieval_metrics_applicable": true,
+          "top_k": 5,
+          "top_k_recall": 1.0,
+          "mean_reciprocal_rank": 1.0,
+          "decision_accuracy": 1.0,
+          "wrong_agent_reuse_rate": 0.0,
+          "duplicate_creation_rate": 0.0,
+          "abstention_precision": 1.0,
+          "candidate_count_mean": 1.1,
+          "max_candidate_count": 2,
+          "prompt_characters_mean": 338.9,
+          "prompt_bytes_mean": 339.3,
+          "strategy_latency_ms": {
+            "p50": 0.05750043783336878,
+            "p95": 4.792199656367305
+          },
+          "failures_by_category": {},
+          "failed_cases": [],
+          "observations": [
+            {
+              "case_id": "test-exact-sam",
+              "category": "exact_named_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "2acde88a-30be-578d-9591-05219b486246",
+              "action": "reuse",
+              "agent_id": "2acde88a-30be-578d-9591-05219b486246",
+              "ranked_agent_ids": [
+                "2acde88a-30be-578d-9591-05219b486246"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 274,
+              "prompt_bytes": 274,
+              "latency_ms": 0.10400009341537952
+            },
+            {
+              "case_id": "test-paraphrase-recruiting",
+              "category": "paraphrased_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "079d1e27-cc26-5e85-a716-5b5ec3be5422",
+              "action": "reuse",
+              "agent_id": "079d1e27-cc26-5e85-a716-5b5ec3be5422",
+              "ranked_agent_ids": [
+                "079d1e27-cc26-5e85-a716-5b5ec3be5422"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 355,
+              "prompt_bytes": 355,
+              "latency_ms": 0.07562502287328243
+            },
+            {
+              "case_id": "test-context-pronoun-board",
+              "category": "contextual_pronoun",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "efea4e49-1cab-57da-b061-aaf8cd09ab85",
+              "action": "reuse",
+              "agent_id": "efea4e49-1cab-57da-b061-aaf8cd09ab85",
+              "ranked_agent_ids": [
+                "efea4e49-1cab-57da-b061-aaf8cd09ab85"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 349,
+              "prompt_bytes": 349,
+              "latency_ms": 0.056958990171551704
+            },
+            {
+              "case_id": "test-old-relevant-insurance",
+              "category": "old_relevant_identity",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "e8e5d523-7d69-5a46-9f94-ccbdecd28a71",
+              "action": "reuse",
+              "agent_id": "e8e5d523-7d69-5a46-9f94-ccbdecd28a71",
+              "ranked_agent_ids": [
+                "e8e5d523-7d69-5a46-9f94-ccbdecd28a71"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 341,
+              "prompt_bytes": 341,
+              "latency_ms": 0.11704210191965103
+            },
+            {
+              "case_id": "test-recent-distractor-legal",
+              "category": "recent_irrelevant_distractor",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "133aee84-8e6b-540b-8fdc-3ce9dab3cfa8",
+              "action": "reuse",
+              "agent_id": "133aee84-8e6b-540b-8fdc-3ce9dab3cfa8",
+              "ranked_agent_ids": [
+                "133aee84-8e6b-540b-8fdc-3ce9dab3cfa8",
+                "f1b32271-e502-5b9b-b962-27414efc0d1a"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 545,
+              "prompt_bytes": 545,
+              "latency_ms": 0.05804188549518585
+            },
+            {
+              "case_id": "test-similar-expenses",
+              "category": "semantically_similar_identities",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "b9e1e951-8976-57c4-9b3a-93c6eaa72699",
+              "action": "reuse",
+              "agent_id": "b9e1e951-8976-57c4-9b3a-93c6eaa72699",
+              "ranked_agent_ids": [
+                "b9e1e951-8976-57c4-9b3a-93c6eaa72699",
+                "4bd3442e-00df-5e61-9607-bd52ef1d0fbf"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 472,
+              "prompt_bytes": 472,
+              "latency_ms": 0.047999899834394455
+            },
+            {
+              "case_id": "test-novel-travel",
+              "category": "novel_task",
+              "split": "test",
+              "expected_action": "create_new",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.04254188388586044
+            },
+            {
+              "case_id": "test-ambiguous-jordan",
+              "category": "ambiguous_task",
+              "split": "test",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "abstain",
+              "agent_id": null,
+              "ranked_agent_ids": [
+                "af378b99-adb3-5d61-ae6c-77653d5992ae",
+                "f48f6436-229c-59bf-8244-997fe993489d"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 498,
+              "prompt_bytes": 498,
+              "latency_ms": 0.04487484693527222
+            },
+            {
+              "case_id": "test-archived-tax",
+              "category": "archived_identity_recovery",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "8728f5a4-eca2-5a54-86ba-54f9e0d9f40d",
+              "action": "reuse",
+              "agent_id": "8728f5a4-eca2-5a54-86ba-54f9e0d9f40d",
+              "ranked_agent_ids": [
+                "8728f5a4-eca2-5a54-86ba-54f9e0d9f40d"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 357,
+              "prompt_bytes": 357,
+              "latency_ms": 0.10000006295740604
+            },
+            {
+              "case_id": "test-unicode-zoe",
+              "category": "unicode_punctuation_variant",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "2ce58e96-48fa-5409-969c-f289e735ef88",
+              "action": "reuse",
+              "agent_id": "2ce58e96-48fa-5409-969c-f289e735ef88",
+              "ranked_agent_ids": [
+                "2ce58e96-48fa-5409-969c-f289e735ef88"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 317,
+              "prompt_bytes": 325,
+              "latency_ms": 0.03545801155269146
+            },
+            {
+              "case_id": "test-scale-10",
+              "category": "exact_named_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "f079679e-6dfa-5baa-9bdf-2d702f011453",
+              "action": "reuse",
+              "agent_id": "f079679e-6dfa-5baa-9bdf-2d702f011453",
+              "ranked_agent_ids": [
+                "f079679e-6dfa-5baa-9bdf-2d702f011453"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 308,
+              "prompt_bytes": 308,
+              "latency_ms": 0.1230419147759676
+            },
+            {
+              "case_id": "test-scale-100",
+              "category": "paraphrased_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "f5c4265e-848c-54be-b328-171d8eb85501",
+              "action": "reuse",
+              "agent_id": "f5c4265e-848c-54be-b328-171d8eb85501",
+              "ranked_agent_ids": [
+                "f5c4265e-848c-54be-b328-171d8eb85501"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 346,
+              "prompt_bytes": 346,
+              "latency_ms": 1.02133397012949
+            },
+            {
+              "case_id": "test-scale-500",
+              "category": "old_relevant_identity",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "5e903a8e-c273-5dbc-afb6-b8a9486e3e1f",
+              "action": "reuse",
+              "agent_id": "5e903a8e-c273-5dbc-afb6-b8a9486e3e1f",
+              "ranked_agent_ids": [
+                "5e903a8e-c273-5dbc-afb6-b8a9486e3e1f"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 371,
+              "prompt_bytes": 371,
+              "latency_ms": 4.591458011418581
+            },
+            {
+              "case_id": "test-scale-1000",
+              "category": "exact_named_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "15c1727b-824a-568b-b8d9-9c976fc45219",
+              "action": "reuse",
+              "agent_id": "15c1727b-824a-568b-b8d9-9c976fc45219",
+              "ranked_agent_ids": [
+                "15c1727b-824a-568b-b8d9-9c976fc45219"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 330,
+              "prompt_bytes": 330,
+              "latency_ms": 8.606290910393
+            },
+            {
+              "case_id": "test-exact-vendor",
+              "category": "exact_named_follow_up",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "f760d7cf-23c5-516f-9316-10916a635a03",
+              "action": "reuse",
+              "agent_id": "f760d7cf-23c5-516f-9316-10916a635a03",
+              "ranked_agent_ids": [
+                "f760d7cf-23c5-516f-9316-10916a635a03"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 319,
+              "prompt_bytes": 319,
+              "latency_ms": 0.041041988879442215
+            },
+            {
+              "case_id": "test-novel-pet",
+              "category": "novel_task",
+              "split": "test",
+              "expected_action": "create_new",
+              "expected_agent_id": null,
+              "action": "create_new",
+              "agent_id": null,
+              "ranked_agent_ids": [],
+              "candidate_count": 0,
+              "prompt_characters": 71,
+              "prompt_bytes": 71,
+              "latency_ms": 0.03174995072185993
+            },
+            {
+              "case_id": "test-context-pronoun-landlord",
+              "category": "contextual_pronoun",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "32e5bec5-b8da-5796-98df-523ff9f5e589",
+              "action": "reuse",
+              "agent_id": "32e5bec5-b8da-5796-98df-523ff9f5e589",
+              "ranked_agent_ids": [
+                "32e5bec5-b8da-5796-98df-523ff9f5e589"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 330,
+              "prompt_bytes": 330,
+              "latency_ms": 0.051582930609583855
+            },
+            {
+              "case_id": "test-ambiguous-account",
+              "category": "ambiguous_task",
+              "split": "test",
+              "expected_action": "abstain",
+              "expected_agent_id": null,
+              "action": "abstain",
+              "agent_id": null,
+              "ranked_agent_ids": [
+                "8882305a-d4a5-524e-b890-41ee95116c06",
+                "1f032be4-8eef-5958-9bb3-543c3d0e39c3"
+              ],
+              "candidate_count": 2,
+              "prompt_characters": 471,
+              "prompt_bytes": 471,
+              "latency_ms": 0.04354212433099747
+            },
+            {
+              "case_id": "test-punctuation-acme",
+              "category": "unicode_punctuation_variant",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "b1dde0d3-b743-53c4-afaa-1da3f30db1a1",
+              "action": "reuse",
+              "agent_id": "b1dde0d3-b743-53c4-afaa-1da3f30db1a1",
+              "ranked_agent_ids": [
+                "b1dde0d3-b743-53c4-afaa-1da3f30db1a1"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 291,
+              "prompt_bytes": 291,
+              "latency_ms": 0.03024982288479805
+            },
+            {
+              "case_id": "test-archived-orchid",
+              "category": "archived_identity_recovery",
+              "split": "test",
+              "expected_action": "reuse",
+              "expected_agent_id": "41a8841a-191b-51a7-8d70-76a5ab596e60",
+              "action": "reuse",
+              "agent_id": "41a8841a-191b-51a7-8d70-76a5ab596e60",
+              "ranked_agent_ids": [
+                "41a8841a-191b-51a7-8d70-76a5ab596e60"
+              ],
+              "candidate_count": 1,
+              "prompt_characters": 362,
+              "prompt_bytes": 362,
+              "latency_ms": 0.09370804764330387
+            }
+          ]
+        }
+      }
+    },
+    "scale_benchmarks": {
+      "roster_1000": {
+        "roster_size": 1000,
+        "source": "AgentDirectory.list_records",
+        "candidate_renderer": "server.agents.interaction_agent.agent.render_agent_candidates",
+        "warmup_runs": 3,
+        "measured_runs": 30,
+        "candidate_count_max": 5,
+        "candidate_count": {
+          "min": 5,
+          "max": 5
+        },
+        "prompt_characters": {
+          "min": 1381,
+          "max": 1381
+        },
+        "correct_reuse_rate": 1.0,
+        "latency_ms": {
+          "p50": 27.817625436000526,
+          "p95": 45.24304624646902
+        }
+      }
+    },
+    "test_partition_target_assessment": {
+      "checks": {
+        "top_5_recall_at_least_95_percent": true,
+        "decision_accuracy_at_least_90_percent": true,
+        "wrong_agent_reuse_at_most_2_percent": true,
+        "candidate_count_at_most_5": true,
+        "production_path_p95_below_50_ms": true
+      },
+      "all_targets_met": true,
+      "missed_targets": [],
+      "latency_source": "scale_benchmarks.roster_1000.latency_ms.p95"
+    }
+  },
+  "depth": {
+    "configuration": {
+      "max_recent_episodes": 8,
+      "max_characters": 12000
+    },
+    "scale": [
+      {
+        "history_entries": 10,
+        "raw_history_characters": 1315,
+        "raw_history_bytes": 1315,
+        "full_history": {
+          "prompt_characters": 1315,
+          "prompt_bytes": 1315,
+          "included_entry_count": 10,
+          "latency_ms": 0.006667105481028557
+        },
+        "bounded": {
+          "prompt_characters": 1388,
+          "prompt_bytes": 1388,
+          "included_episode_count": 3,
+          "omitted_entry_count": 0,
+          "truncated_entry_count": 0,
+          "summary_used": true,
+          "latency_ms": 0.05625002086162567
+        },
+        "raw_log_unchanged": true,
+        "cross_agent_contamination_failures": 0
+      },
+      {
+        "history_entries": 100,
+        "raw_history_characters": 13224,
+        "raw_history_bytes": 13224,
+        "full_history": {
+          "prompt_characters": 13224,
+          "prompt_bytes": 13224,
+          "included_entry_count": 100,
+          "latency_ms": 0.03900006413459778
+        },
+        "bounded": {
+          "prompt_characters": 4374,
+          "prompt_bytes": 4374,
+          "included_episode_count": 8,
+          "omitted_entry_count": 68,
+          "truncated_entry_count": 0,
+          "summary_used": true,
+          "latency_ms": 0.07475004531443119
+        },
+        "raw_log_unchanged": true,
+        "cross_agent_contamination_failures": 0
+      },
+      {
+        "history_entries": 1000,
+        "raw_history_characters": 132249,
+        "raw_history_bytes": 132249,
+        "full_history": {
+          "prompt_characters": 132249,
+          "prompt_bytes": 132249,
+          "included_entry_count": 1000,
+          "latency_ms": 0.42266701348125935
+        },
+        "bounded": {
+          "prompt_characters": 4375,
+          "prompt_bytes": 4375,
+          "included_episode_count": 8,
+          "omitted_entry_count": 968,
+          "truncated_entry_count": 0,
+          "summary_used": true,
+          "latency_ms": 0.48404186964035034
+        },
+        "raw_log_unchanged": true,
+        "cross_agent_contamination_failures": 0
+      },
+      {
+        "history_entries": 10000,
+        "raw_history_characters": 1322499,
+        "raw_history_bytes": 1322499,
+        "full_history": {
+          "prompt_characters": 1322499,
+          "prompt_bytes": 1322499,
+          "included_entry_count": 10000,
+          "latency_ms": 3.777917008846998
+        },
+        "bounded": {
+          "prompt_characters": 4376,
+          "prompt_bytes": 4376,
+          "included_episode_count": 8,
+          "omitted_entry_count": 9968,
+          "truncated_entry_count": 0,
+          "summary_used": true,
+          "latency_ms": 4.3490000534802675
+        },
+        "raw_log_unchanged": true,
+        "cross_agent_contamination_failures": 0
+      }
+    ],
+    "full_history_latency_ms": {
+      "p50": 0.23083353880792856,
+      "p95": 3.274629509542136
+    },
+    "bounded_context_latency_ms": {
+      "p50": 0.27939595747739077,
+      "p95": 3.7692563259042786
+    }
+  },
+  "limitations": [
+    "The current full-roster result is an exact-name proxy because offline code cannot reproduce an unpinned live model's choice.",
+    "The harness measures deterministic routing and prompt construction, not end-to-end Gmail task success.",
+    "Local latency measurements vary by machine and process load.",
+    "No LLM judge is used as identity-routing ground truth.",
+    "The checked-in test partition is reproducible but was not sealed from inspection during development."
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "measurement_scope": "deterministic_offline_current_behavior",
+  "breadth": {
+    "implementation": "full_roster_prompt_injection",
+    "agents_injected_at_1000": 1000,
+    "reuse_match": "exact_case_sensitive_name",
+    "naming_variants_can_create_duplicates": true,
+    "name_match_examples": [
+      {
+        "requested": "Alice correspondence",
+        "reused": true
+      },
+      {
+        "requested": "alice correspondence",
+        "reused": false
+      },
+      {
+        "requested": "Alice-correspondence",
+        "reused": false
+      }
+    ],
+    "scale": [
+      {
+        "roster_size": 10,
+        "agents_injected": 10,
+        "rendered_characters": 419,
+        "rendered_bytes": 419
+      },
+      {
+        "roster_size": 100,
+        "agents_injected": 100,
+        "rendered_characters": 4199,
+        "rendered_bytes": 4199
+      },
+      {
+        "roster_size": 500,
+        "agents_injected": 500,
+        "rendered_characters": 20999,
+        "rendered_bytes": 20999
+      },
+      {
+        "roster_size": 1000,
+        "agents_injected": 1000,
+        "rendered_characters": 41999,
+        "rendered_bytes": 41999
+      }
+    ]
+  },
+  "depth": {
+    "implementation": "full_execution_log_rehydration",
+    "history_is_unbounded_by_default": true,
+    "default_conversation_limit": null,
+    "scale": [
+      {
+        "history_entries": 10,
+        "entries_loaded": 10,
+        "rendered_characters": 1297,
+        "rendered_bytes": 1297
+      },
+      {
+        "history_entries": 100,
+        "entries_loaded": 100,
+        "rendered_characters": 12999,
+        "rendered_bytes": 12999
+      },
+      {
+        "history_entries": 1000,
+        "entries_loaded": 1000,
+        "rendered_characters": 129999,
+        "rendered_bytes": 129999
+      },
+      {
+        "history_entries": 10000,
+        "entries_loaded": 10000,
+        "rendered_characters": 1299999,
+        "rendered_bytes": 1299999
+      }
+    ]
+  },
+  "limitations": [
+    "This baseline measures deterministic prompt growth, not live-model routing accuracy.",
+    "No external LLM, Gmail account, or API credentials are used."
+  ]
+}

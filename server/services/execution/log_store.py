@@ -10,13 +10,14 @@ from typing import Dict, Iterator, List, Tuple
 
 from ...logging_config import logger
 from ...utils.timezones import now_in_user_timezone
+from .context_policy import render_log_entries
 
 
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 _EXECUTION_LOG_DIR = _DATA_DIR / "execution_agents"
 
 
-def _slugify(name: str) -> str:
+def execution_log_slug(name: str) -> str:
     """Convert agent name to filesystem-safe slug."""
     slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in name.strip()).strip("-")
     while "--" in slug:
@@ -56,7 +57,7 @@ class ExecutionAgentLogStore:
 
     def _lock_for(self, agent_name: str) -> threading.Lock:
         """Get or create a lock for an agent."""
-        slug = _slugify(agent_name)
+        slug = execution_log_slug(agent_name)
         with self._global_lock:
             if slug not in self._locks:
                 self._locks[slug] = threading.Lock()
@@ -64,7 +65,7 @@ class ExecutionAgentLogStore:
 
     def _log_path(self, agent_name: str) -> Path:
         """Get log file path for an agent."""
-        return self._base_dir / f"{_slugify(agent_name)}.log"
+        return self._base_dir / f"{execution_log_slug(agent_name)}.log"
 
     def _append(self, agent_name: str, tag: str, payload: str) -> None:
         """Append an entry with the given tag."""
@@ -144,14 +145,17 @@ class ExecutionAgentLogStore:
 
     def load_transcript(self, agent_name: str) -> str:
         """Load the full transcript for inclusion in system prompt."""
-        parts: List[str] = []
-        for tag, timestamp, payload in self.iter_entries(agent_name):
-            escaped = escape(payload, quote=False)
-            if timestamp:
-                parts.append(f"<{tag} timestamp=\"{timestamp}\">{escaped}</{tag}>")
-            else:
-                parts.append(f"<{tag}>{escaped}</{tag}>")
-        return "\n".join(parts)
+        return render_log_entries(self.iter_entries(agent_name))
+
+    def read_raw_bytes(self, agent_name: str) -> bytes:
+        """Return the stored journal bytes for preservation checks and audit."""
+
+        path = self._log_path(agent_name)
+        with self._lock_for(agent_name):
+            try:
+                return path.read_bytes()
+            except FileNotFoundError:
+                return b""
 
     def load_recent(self, agent_name: str, limit: int = 10) -> list[tuple[str, str, str]]:
         """Load recent log entries."""

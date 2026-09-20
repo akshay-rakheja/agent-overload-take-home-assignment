@@ -16,7 +16,11 @@ Send Message to Agent Tool Usage
 - IMPORTANT: You should avoid telling the agent how to use its tools or do the task. Focus on telling it what, rather than how. Avoid technical descriptions about tools with both the user and the agent.
 - If you intend to call multiple tools and there are no dependencies between the calls, make all of the independent calls in the same message.
 - Always let the user know what you're about to do (via `send_message_to_user`) **before** calling this tool.
-- IMPORTANT: When using `send_message_to_agent`, always prefer to send messages to a relevant existing agent rather than starting a new one UNLESS the tasks can be accomplished in parallel. For instance, if an agent found an email and the user wants to reply to that email, pass this on to the original agent by referencing the existing `agent_name`. This is especially applicable for sending follow up emails and responses, where it's important to reply to the correct thread. Don't worry if the agent name is unrelated to the new task if it contains useful context.
+- `<agent_candidates>` is a deliberately bounded working set, not the full lifetime roster. Each candidate includes a stable `id`, display name, purpose, lifecycle status, and concise relevance hints.
+- When `routing_action="reuse"`, reuse the matching candidate by passing its exact stable `agent_id`. Never invent or alter an ID.
+- When `routing_action="create_new"`, omit `agent_id` and provide both a concise `agent_name` and an `agent_purpose` that will make later retrieval reliable.
+- When `routing_action="abstain"`, ask the user a short clarifying question instead of dispatching automatically.
+- Prefer a relevant existing candidate for follow-ups because it retains the appropriate durable context. A dormant or archived candidate may still be the correct identity.
 
 Send Message to User Tool Usage
 

@@ -4,10 +4,11 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
-from .agent import build_system_prompt, prepare_message_with_history
-from .tools import ToolResult, get_tool_schemas, handle_tool_call
+from .agent import build_candidate_context, build_system_prompt, prepare_message_with_history
+from .tools import DispatchContext, ToolResult, get_tool_schemas, handle_tool_call
 from ...config import get_settings
 from ...services.conversation import get_conversation_log, get_working_memory_log
+from ...services.execution import AgentDirectory, RoutingAction, get_agent_directory
 from ...openrouter_client import request_chat_completion
 from ...logging_config import logger
 
@@ -47,7 +48,7 @@ class InteractionAgentRuntime:
     MAX_TOOL_ITERATIONS = 8
 
     # Initialize interaction agent runtime with settings and service dependencies
-    def __init__(self) -> None:
+    def __init__(self, *, directory: AgentDirectory | None = None) -> None:
         settings = get_settings()
         self.api_key = settings.openrouter_api_key
         self.model = settings.interaction_agent_model
@@ -55,6 +56,8 @@ class InteractionAgentRuntime:
         self.conversation_log = get_conversation_log()
         self.working_memory_log = get_working_memory_log()
         self.tool_schemas = get_tool_schemas()
+        self.agent_directory = directory or get_agent_directory()
+        self.dispatch_context = DispatchContext()
 
         if not self.api_key:
             raise ValueError(
@@ -70,7 +73,7 @@ class InteractionAgentRuntime:
             self.conversation_log.record_user_message(user_message)
 
             system_prompt = build_system_prompt()
-            messages = prepare_message_with_history(
+            messages = self._prepare_turn_messages(
                 user_message, transcript_before, message_type="user"
             )
 
@@ -105,7 +108,7 @@ class InteractionAgentRuntime:
             self.conversation_log.record_agent_message(agent_message)
 
             system_prompt = build_system_prompt()
-            messages = prepare_message_with_history(
+            messages = self._prepare_turn_messages(
                 agent_message, transcript_before, message_type="agent"
             )
 
@@ -130,6 +133,38 @@ class InteractionAgentRuntime:
                 response="",
                 error=str(exc),
             )
+
+    def _prepare_turn_messages(
+        self,
+        latest_text: str,
+        transcript: str,
+        *,
+        message_type: str,
+    ) -> List[Dict[str, str]]:
+        """Bind the deterministic routing decision to this turn's tool permissions."""
+
+        candidate_context = build_candidate_context(
+            latest_text,
+            transcript,
+            directory=self.agent_directory,
+        )
+        allowed_ids = (
+            frozenset({candidate_context.decision.agent_id})
+            if candidate_context.decision.action is RoutingAction.REUSE
+            and candidate_context.decision.agent_id is not None
+            else frozenset()
+        )
+        self.dispatch_context = DispatchContext(
+            routing_action=candidate_context.decision.action,
+            allowed_agent_ids=allowed_ids,
+        )
+        return prepare_message_with_history(
+            latest_text,
+            transcript,
+            message_type=message_type,
+            directory=self.agent_directory,
+            candidate_context=candidate_context,
+        )
 
     # Core interaction loop that handles LLM calls and tool executions until completion
     async def _run_interaction_loop(
@@ -167,9 +202,12 @@ class InteractionAgentRuntime:
                 summary.tool_names.append(tool_call.name)
 
                 if tool_call.name == "send_message_to_agent":
-                    agent_name = tool_call.arguments.get("agent_name")
-                    if isinstance(agent_name, str) and agent_name:
-                        summary.execution_agents.add(agent_name)
+                    agent_reference = (
+                        tool_call.arguments.get("agent_id")
+                        or tool_call.arguments.get("agent_name")
+                    )
+                    if isinstance(agent_reference, str) and agent_reference:
+                        summary.execution_agents.add(agent_reference)
 
                 result = self._execute_tool(tool_call)
 
@@ -294,7 +332,11 @@ class InteractionAgentRuntime:
 
         try:
             self._log_tool_invocation(tool_call, stage="start")
-            result = handle_tool_call(tool_call.name, tool_call.arguments)
+            result = handle_tool_call(
+                tool_call.name,
+                tool_call.arguments,
+                dispatch_context=self.dispatch_context,
+            )
         except Exception as exc:  # pragma: no cover - defensive
             logger.error(
                 "Tool execution crashed",

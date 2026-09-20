@@ -20,6 +20,8 @@ class PendingExecution:
     agent_name: str
     instructions: str
     batch_id: str
+    agent_id: Optional[str] = None
+    legacy_storage_key: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
 
 
@@ -49,17 +51,29 @@ class ExecutionBatchManager:
         agent_name: str,
         instructions: str,
         request_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        legacy_storage_key: Optional[str] = None,
     ) -> ExecutionResult:
         """Execute an agent asynchronously and buffer the result for batch dispatch."""
 
         if not request_id:
             request_id = str(uuid.uuid4())
 
-        batch_id = await self._register_pending_execution(agent_name, instructions, request_id)
+        batch_id = await self._register_pending_execution(
+            agent_name,
+            instructions,
+            request_id,
+            agent_id=agent_id,
+            legacy_storage_key=legacy_storage_key,
+        )
 
         try:
             logger.info(f"[{agent_name}] Execution started")
-            runtime = ExecutionAgentRuntime(agent_name=agent_name)
+            runtime = ExecutionAgentRuntime(
+                agent_name=agent_name,
+                agent_id=agent_id,
+                legacy_storage_key=legacy_storage_key,
+            )
             result = await asyncio.wait_for(
                 runtime.execute(instructions),
                 timeout=self.timeout_seconds,
@@ -94,6 +108,8 @@ class ExecutionBatchManager:
         agent_name: str,
         instructions: str,
         request_id: str,
+        agent_id: Optional[str] = None,
+        legacy_storage_key: Optional[str] = None,
     ) -> str:
         """Attach a new execution to the active batch, opening one when required."""
 
@@ -110,6 +126,8 @@ class ExecutionBatchManager:
                 agent_name=agent_name,
                 instructions=instructions,
                 batch_id=batch_id,
+                agent_id=agent_id,
+                legacy_storage_key=legacy_storage_key,
             )
 
             return batch_id
@@ -151,6 +169,7 @@ class ExecutionBatchManager:
             {
                 "request_id": pending.request_id,
                 "agent_name": pending.agent_name,
+                "agent_id": pending.agent_id or "",
                 "batch_id": pending.batch_id,
                 "created_at": pending.created_at.isoformat(),
                 "elapsed_seconds": (datetime.now() - pending.created_at).total_seconds(),

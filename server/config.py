@@ -30,11 +30,19 @@ _load_env_file()
 
 DEFAULT_APP_NAME = "OpenPoke Server"
 DEFAULT_APP_VERSION = "0.3.0"
+MAX_AGENT_CANDIDATES = 5
 
 
 def _env_int(name: str, fallback: int) -> int:
     try:
         return int(os.getenv(name, str(fallback)))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _env_float(name: str, fallback: float) -> float:
+    try:
+        return float(os.getenv(name, str(fallback)))
     except (TypeError, ValueError):
         return fallback
 
@@ -70,6 +78,42 @@ class Settings(BaseModel):
     # Summarisation controls
     conversation_summary_threshold: int = Field(default=100)
     conversation_summary_tail_size: int = Field(default=10)
+
+    # Bounded execution-agent retrieval and routing
+    agent_retrieval_top_k: int = Field(
+        default=_env_int("OPENPOKE_AGENT_RETRIEVAL_TOP_K", MAX_AGENT_CANDIDATES),
+        ge=1,
+        le=MAX_AGENT_CANDIDATES,
+        validate_default=True,
+    )
+    agent_retrieval_min_score: float = Field(
+        default=_env_float("OPENPOKE_AGENT_RETRIEVAL_MIN_SCORE", 0.08),
+        ge=0,
+        le=1,
+    )
+    agent_route_reuse_threshold: float = Field(
+        default=_env_float("OPENPOKE_AGENT_ROUTE_REUSE_THRESHOLD", 0.34),
+        gt=0,
+        le=1,
+    )
+    agent_route_ambiguity_margin: float = Field(
+        default=_env_float("OPENPOKE_AGENT_ROUTE_AMBIGUITY_MARGIN", 0.12),
+        gt=0,
+        le=1,
+    )
+    agent_routing_context_max_characters: int = Field(
+        default=_env_int("OPENPOKE_AGENT_ROUTING_CONTEXT_MAX_CHARACTERS", 4_000),
+        ge=200,
+    )
+    execution_context_max_recent_episodes: int = Field(
+        default=_env_int("OPENPOKE_EXECUTION_CONTEXT_MAX_RECENT_EPISODES", 8),
+        ge=1,
+        le=100,
+    )
+    execution_context_max_characters: int = Field(
+        default=_env_int("OPENPOKE_EXECUTION_CONTEXT_MAX_CHARACTERS", 12_000),
+        ge=200,
+    )
 
     @property
     def cors_allow_origins(self) -> List[str]:
