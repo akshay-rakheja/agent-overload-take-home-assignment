@@ -53,8 +53,8 @@ Retrieval and routing are reported independently:
 - wrong-agent reuse and duplicate creation rates;
 - abstention precision;
 - candidate count and rendered prompt characters/bytes;
-- test-partition case-mix retrieval p50/p95 plus a dedicated 30-run, 1,000-record
-  latency benchmark after three warm-ups; and
+- test-partition case-mix strategy p50/p95 plus a dedicated 30-run,
+  1,000-record production-path latency benchmark after three warm-ups; and
 - failures grouped by category with per-case observations.
 
 Depth reports raw versus prompt-visible characters/bytes, included episodes,
@@ -83,18 +83,18 @@ and cross-agent contamination failures.
 
 | Strategy | Top-5 recall | MRR | Accuracy | Wrong reuse | Duplicate creation | Max candidates | Prompt chars mean | Case-mix p95 ms |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Current full-roster proxy | n/a | n/a | 35.0% | 0.0% | 68.8% | 1,000 | 3,417.6 | recorded in generated report |
-| Recency-only top-five | 62.5% | 0.625 | 70.0% | 0.0% | 37.5% | 2 | recorded in generated report | recorded in generated report |
-| Hybrid directory | **100.0%** | **1.000** | **100.0%** | **0.0%** | **0.0%** | **2** | **recorded in generated report** | **recorded in generated report** |
+| Current full-roster proxy | n/a | n/a | 35.0% | 0.0% | 68.8% | 1,000 | 3,417.6 | 0.274 |
+| Recency-only top-five | 62.5% | 0.625 | 70.0% | 0.0% | 37.5% | 2 | 254.8 | 0.291 |
+| Hybrid directory | **100.0%** | **1.000** | **100.0%** | **0.0%** | **0.0%** | **2** | **338.9** | **4.792** |
 
 The table's p95 values describe a heterogeneous 20-case test partition and are not
 used for the scale target. The dedicated benchmark recreates the retriever on
 each run against a temporary 1,000-record production `AgentDirectory`, including
-its lock, disk read, JSON parse, schema validation, and feature scoring. After
-three warm-ups, 30 measured runs produced **19.30 ms p50** and **28.96 ms p95**
-locally. These are observations, not service-level guarantees. Immutable record
-features use a bounded cache, while changed directory records produce new
-features.
+its lock, disk read, JSON parse, schema validation, feature scoring, routing,
+and production candidate rendering. After three warm-ups, 30 measured runs
+produced **27.818 ms p50** and **45.243 ms p95** locally. These are observations,
+not service-level guarantees. Immutable record features use a bounded cache,
+while changed directory records produce new features.
 
 ### Depth scaling
 

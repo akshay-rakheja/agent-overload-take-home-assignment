@@ -23,8 +23,8 @@ proven uninspected during development.
 - Test-partition hybrid routing: **100% top-5 recall**, **100% decision accuracy**,
   **0% wrong reuse**, and **0% duplicate creation** on this corpus revision.
 - A 1,000-identity directory exposes at most five candidates; measured local
-  directory-backed p95 retrieval was **28.96 ms** across 30 dedicated runs
-  after three warm-ups.
+  directory-backed retrieval, routing, and production rendering were **27.818
+  ms p50 / 45.243 ms p95** across 30 dedicated runs after three warm-ups.
 - At 10,000 raw history entries, full rehydration renders **1,322,499
   characters** versus **4,376 characters** for the bounded policy, with eight
   recent episodes and the raw log unchanged.
