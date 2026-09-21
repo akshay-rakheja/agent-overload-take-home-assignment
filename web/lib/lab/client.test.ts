@@ -19,7 +19,7 @@ describe('lab requests', () => {
     const sent: unknown[] = [];
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => { sent.push(JSON.parse(init.body as string)); throw new Error('Bearer private-provider-error'); });
     const request = { request_id: backend.handle.request_id, scenario_ids: ['fixture'] };
-    await expect(startRun(request)).rejects.toThrow('Connection unavailable');
+    await expect(startRun(request)).rejects.toMatchObject({ message: 'Connection unavailable', retryable: false });
     expect(sent).toEqual([request]);
   });
   it('never displays upstream errors or schema payloads', async () => {
@@ -44,6 +44,18 @@ describe('lab requests', () => {
 });
 
 describe('read-only polling', () => {
+  it('retries a typed upstream timeout and accepts the next terminal read', async () => {
+    vi.useFakeTimers();
+    const reads: number[] = [];
+    vi.stubGlobal('fetch', async () => {
+      reads.push(1);
+      return reads.length === 1 ? json({ error: 'Request timed out', code: 'UPSTREAM_TIMEOUT' }, 504) : json(backend.run);
+    });
+    const pending = pollRun(backend.handle.run_id, new AbortController().signal).catch((error) => error);
+    await vi.runAllTimersAsync();
+    expect((await pending).status).toBe('partial_failure');
+    expect(reads).toHaveLength(2);
+  });
   it.each(['complete', 'partial_failure', 'blocked'])('emits every stage and stops at %s with capped backoff', async (terminal) => {
     vi.useFakeTimers();
     const stages = ['queued', 'resetting', 'baseline_running', 'enhanced_running', 'grading', terminal];

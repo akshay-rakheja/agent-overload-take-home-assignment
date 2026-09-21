@@ -8,13 +8,22 @@ const uuid = z.string().uuid();
 const integer = z.number().int();
 const system = z.enum(['baseline', 'enhanced']);
 const nullableText = text.nullable();
-const secretKey = /(?:authorization|apikey|authconfigid|oauthcode|accesstoken|refreshtoken|idtoken|clientsecret|password|secret|token)$/i;
+const secretKey = /(?:authorization|authorizationcode|authcode|apikey|authconfigid|oauthcode|accesstoken|refreshtoken|idtoken|clientsecret|password|secret|token)$/i;
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+const normalizedKey = (key: string) => key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+function containsCodeField(value: JsonValue): boolean {
+  if (Array.isArray(value)) return value.some(containsCodeField);
+  if (value === null || typeof value !== 'object') return false;
+  return Object.entries(value).some(([key, item]) => normalizedKey(key) === 'code' || containsCodeField(item));
+}
 const jsonValue: z.ZodType<JsonValue> = z.lazy(() => z.union([
   text, z.number().finite(), z.boolean(), z.null(), z.array(jsonValue),
   z.record(jsonValue).superRefine((value, ctx) => {
-    for (const key of Object.keys(value)) {
-      if (secretKey.test(key.replace(/[^a-z0-9]/gi, ''))) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Unexpected private field' });
+    for (const [key, item] of Object.entries(value)) {
+      const normalized = normalizedKey(key);
+      if (secretKey.test(normalized) || (normalized.includes('oauth') && containsCodeField(item))) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Unexpected private field' });
+      }
     }
   }),
 ]));
@@ -104,6 +113,13 @@ export const LabPreflightSchema = z.object({
 }).strict();
 export const GmailStatusSchema = z.object({ schema_version: z.literal(1), connected: z.boolean(), read_only: z.boolean(), message: text }).strict();
 export const GmailLinkSchema = z.object({ schema_version: z.literal(1), available: z.boolean(), message: text }).strict();
+
+// Proxy-owned error contract. Raw upstream error messages never cross this boundary.
+export const LabProxyErrorSchema = z.discriminatedUnion('code', [
+  z.object({ code: z.literal('UPSTREAM_TRANSPORT'), error: z.literal('Lab service unavailable') }).strict(),
+  z.object({ code: z.literal('UPSTREAM_TIMEOUT'), error: z.literal('Request timed out') }).strict(),
+  z.object({ code: z.literal('INVALID_UPSTREAM_RESPONSE'), error: z.literal('Lab response could not be verified') }).strict(),
+]);
 
 export type Availability = z.infer<typeof AvailabilitySchema>;
 export type ObservedValue<T> = { availability: Availability; value: T | null; reason: string | null };

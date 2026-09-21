@@ -12,7 +12,7 @@ const endpoints: Record<string, z.ZodTypeAny> = {
 };
 const reply = (data: unknown, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
 class ProxyError extends Error {
-  constructor(readonly status: number, message: string) { super(message); }
+  constructor(readonly status: number, message: string, readonly code?: 'INVALID_UPSTREAM_RESPONSE') { super(message); }
 }
 
 async function upstream(path: string, schema: z.ZodTypeAny, signal: AbortSignal, method = 'GET', body?: unknown) {
@@ -26,9 +26,9 @@ async function upstream(path: string, schema: z.ZodTypeAny, signal: AbortSignal,
     throw new ProxyError(status, status === 404 ? 'Lab endpoint unavailable' : status === 409 ? 'Run blocked by the lab service' : 'Lab service unavailable');
   }
   let payload: unknown;
-  try { payload = await response.json(); } catch { throw new ProxyError(502, 'Lab response could not be verified'); }
+  try { payload = await response.json(); } catch { throw new ProxyError(502, 'Lab response could not be verified', 'INVALID_UPSTREAM_RESPONSE'); }
   const parsed = schema.safeParse(payload);
-  if (!parsed.success) throw new ProxyError(502, 'Lab response could not be verified');
+  if (!parsed.success) throw new ProxyError(502, 'Lab response could not be verified', 'INVALID_UPSTREAM_RESPONSE');
   return { data: parsed.data, status: response.status };
 }
 
@@ -65,9 +65,9 @@ export async function proxyLab(request: Request, path: string, method = 'GET'): 
     return reply(result.data, result.status);
   } catch (error) {
     if (request.signal.aborted) return reply({ error: 'Request cancelled' }, 499);
-    if (timedOut) return reply({ error: 'Request timed out' }, 504);
-    if (error instanceof ProxyError) return reply({ error: error.message }, error.status);
-    return reply({ error: 'Lab service unavailable' }, 502);
+    if (timedOut) return reply({ error: 'Request timed out', code: 'UPSTREAM_TIMEOUT' }, 504);
+    if (error instanceof ProxyError) return reply({ error: error.message, ...(error.code ? { code: error.code } : {}) }, error.status);
+    return reply({ error: 'Lab service unavailable', code: 'UPSTREAM_TRANSPORT' }, 502);
   } finally {
     clearTimeout(timer);
     request.signal.removeEventListener('abort', cancel);

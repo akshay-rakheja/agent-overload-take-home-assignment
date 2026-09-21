@@ -33,6 +33,20 @@ describe('Python serialization boundary', () => {
       expect(SystemRunResultSchema.safeParse({ ...backend.system_result, decision: { availability: 'available', value, reason: null } }).success).toBe(false);
     }
   });
+  it.each([
+    { authorization_code: 'private' },
+    { nested: { authorizationCode: 'private' } },
+    { nested: [{ 'authorization-code': 'private' }] },
+    { auth_code: 'private' },
+    { oauth: { code: 'private' } },
+    { nested: [{ oauth_response: { flow: [{ code: 'private' }] } }] },
+  ])('rejects authorization codes and contextual OAuth codes recursively: %j', (value) => {
+    expect(SystemRunResultSchema.safeParse({ ...backend.system_result, decision: { availability: 'available', value, reason: null } }).success).toBe(false);
+  });
+  it('preserves ordinary diagnostic codes and OAuth status without a code', () => {
+    const value = { code: 'timeout', oauth: { status: 'connected' } };
+    expect(SystemRunResultSchema.safeParse({ ...backend.system_result, decision: { availability: 'available', value, reason: null } }).success).toBe(true);
+  });
   it('accepts the documented prospective preflight and fails closed on missing proof', () => {
     expect(LabPreflightSchema.parse(preflight).runnable).toBe(true);
     expect(LabPreflightSchema.safeParse({ runnable: true }).success).toBe(false);

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { LabPreflightSchema, ScenarioListSchema, StartRunRequestSchema, RunHandleSchema, PairedRunResultSchema, type StartRunRequest, type PairedRunResult } from './schema';
+import { LabPreflightSchema, LabProxyErrorSchema, ScenarioListSchema, StartRunRequestSchema, RunHandleSchema, PairedRunResultSchema, type StartRunRequest, type PairedRunResult } from './schema';
 
 export class LabClientError extends Error {
   constructor(message: string, readonly retryable = false) { super(message); this.name = 'LabClientError'; }
@@ -25,6 +25,14 @@ async function request<T>(path: string, schema: z.ZodType<T>, signal?: AbortSign
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     if (!response.ok) {
+      const proxyError = LabProxyErrorSchema.safeParse(await response.json().catch(() => null));
+      if (proxyError.success) {
+        const retryableRead = !body && (
+          (response.status === 502 && proxyError.data.code === 'UPSTREAM_TRANSPORT') ||
+          (response.status === 504 && proxyError.data.code === 'UPSTREAM_TIMEOUT')
+        );
+        throw new LabClientError(proxyError.data.error, retryableRead);
+      }
       const message = response.status === 404 ? 'Lab endpoint unavailable' : response.status === 409 ? 'Run blocked by the lab service' : 'Lab service unavailable';
       throw new LabClientError(message);
     }
@@ -35,9 +43,9 @@ async function request<T>(path: string, schema: z.ZodType<T>, signal?: AbortSign
     return parsed.data;
   } catch (error) {
     if (signal?.aborted) throw abortError();
-    if (timedOut) throw new LabClientError('Request timed out', true);
+    if (timedOut) throw new LabClientError('Request timed out', !body);
     if (error instanceof LabClientError) throw error;
-    throw new LabClientError('Connection unavailable', true);
+    throw new LabClientError('Connection unavailable', !body);
   } finally {
     clearTimeout(timeout);
     signal?.removeEventListener('abort', cancel);
