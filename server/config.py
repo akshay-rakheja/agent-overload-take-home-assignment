@@ -108,6 +108,16 @@ def _env_float(name: str, fallback: float) -> float:
         return fallback
 
 
+def _strict_env_int(name: str, fallback: int) -> int:
+    value = os.getenv(name)
+    return fallback if value is None else int(value)
+
+
+def _strict_env_float(name: str, fallback: float) -> float:
+    value = os.getenv(name)
+    return fallback if value is None else float(value)
+
+
 def _env_bool(name: str, fallback: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -249,13 +259,13 @@ class Settings(BaseModel):
         default_factory=lambda: _env_optional("OPENPOKE_LAB_MODEL")
     )
     lab_temperature: float = Field(
-        default_factory=lambda: _env_float("OPENPOKE_LAB_TEMPERATURE", 0.0)
+        default_factory=lambda: _strict_env_float("OPENPOKE_LAB_TEMPERATURE", 0.0)
     )
     lab_top_p: float = Field(
-        default_factory=lambda: _env_float("OPENPOKE_LAB_TOP_P", 1.0)
+        default_factory=lambda: _strict_env_float("OPENPOKE_LAB_TOP_P", 1.0)
     )
     lab_max_tokens: int = Field(
-        default_factory=lambda: _env_int("OPENPOKE_LAB_MAX_TOKENS", 1000)
+        default_factory=lambda: _strict_env_int("OPENPOKE_LAB_MAX_TOKENS", 1000)
     )
     lab_seed: int | None = Field(
         default_factory=lambda: _env_optional_int("OPENPOKE_LAB_SEED")
@@ -264,10 +274,10 @@ class Settings(BaseModel):
         default_factory=lambda: _env_bool("OPENPOKE_LAB_SEED_COMPATIBLE")
     )
     lab_timeout_seconds: float = Field(
-        default_factory=lambda: _env_float("OPENPOKE_LAB_TIMEOUT_SECONDS", 60.0)
+        default_factory=lambda: _strict_env_float("OPENPOKE_LAB_TIMEOUT_SECONDS", 60.0)
     )
     lab_max_retries: int = Field(
-        default_factory=lambda: _env_int("OPENPOKE_LAB_MAX_RETRIES", 0)
+        default_factory=lambda: _strict_env_int("OPENPOKE_LAB_MAX_RETRIES", 0)
     )
 
     # HTTP behaviour

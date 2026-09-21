@@ -660,3 +660,25 @@ def test_taint_write_failure_returns_failed_and_blocks_next_turn(
     assert second.inferred_action == "unobservable"
     assert any(error.code == "tainted_process" for error in second.errors)
     assert (event_path.parent / "active_turn.json").exists()
+
+
+def test_phase_timing_parser_accepts_owned_public_event_envelope() -> None:
+    timings, errors = observer_module._phase_timings(
+        [
+            {
+                "kind": "phase_timing",
+                "owner_token": "owner",
+                "process_nonce": "nonce",
+                "phase": "total_run",
+                "started_monotonic_ns": 10,
+                "finished_monotonic_ns": 25,
+                "elapsed_ns": 15,
+                "error_type": None,
+            }
+        ]
+    )
+
+    assert errors == []
+    assert len(timings) == 1
+    assert timings[0].phase == "total_run"
+    assert timings[0].elapsed_ns == 15

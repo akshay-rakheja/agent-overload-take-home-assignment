@@ -7,8 +7,10 @@ import secrets
 import socket
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import httpx
 
 from evals.live_lab.baseline_launcher import (
     ObservationSink,
@@ -17,6 +19,7 @@ from evals.live_lab.baseline_launcher import (
     wrap_async_call,
     wrap_sync_call,
 )
+from evals.live_lab import baseline_launcher
 from evals.live_lab.baseline_observer import run_baseline_turn
 from evals.live_lab.fixtures import build_fixture_manifest, materialize_baseline
 from evals.live_lab.processes import ManagedProcess
@@ -81,6 +84,340 @@ def test_baseline_payload_withholds_seed_until_compatibility_is_accepted() -> No
         "max_tokens": 1000,
     }
     assert accepted_payload["seed"] == 1313
+
+
+@pytest.mark.parametrize("model_id", ["/", "/model", "provider/", "missing-provider", "p m/model"])
+def test_baseline_rejects_the_same_invalid_model_ids_as_enhanced(model_id: str) -> None:
+    with pytest.raises(ValueError, match="provider/model"):
+        _build_model_configs(model_id)
+
+
+def test_baseline_public_append_redacts_adversarial_metadata_but_private_raw_is_exact(
+    tmp_path: Path,
+) -> None:
+    sink = ObservationSink(tmp_path / "events.jsonl", tmp_path / "private")
+    raw = {
+        "provider": "Bearer FAKE_REVIEW_SECRET",
+        "model": "alice@example.test",
+        "choices": [],
+    }
+
+    async def response(**_kwargs):
+        return raw
+
+    wrapped = wrap_async_call(
+        "interaction_model",
+        response,
+        sink,
+        model_config=_build_model_configs("openai/gpt-4.1-mini")["interaction"],
+    )
+    returned = asyncio.run(wrapped(messages=[]))
+
+    public = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+    exported = sink.read_events()
+    event = exported[-1]["model_call"]
+    private = (tmp_path / "private" / f"{event['response_sha256']}.json").read_text(
+        encoding="utf-8"
+    )
+    assert returned is raw
+    assert "FAKE_REVIEW_SECRET" not in public
+    assert "alice@example.test" not in public
+    assert "FAKE_REVIEW_SECRET" not in json.dumps(exported)
+    assert "alice@example.test" not in json.dumps(exported)
+    assert "Bearer FAKE_REVIEW_SECRET" in private
+    assert "alice@example.test" in private
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [RuntimeError("transport failed"), {"choices": []}],
+)
+def test_measured_baseline_summarizer_helper_makes_one_request(outcome) -> None:
+    calls = []
+
+    class HistoricalError(RuntimeError):
+        pass
+
+    async def request(**kwargs):
+        calls.append(kwargs)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    call = baseline_launcher._single_request_summarizer(request, HistoricalError)
+    prompt = SimpleNamespace(system_prompt="system", messages=[])
+
+    with pytest.raises((RuntimeError, HistoricalError)):
+        asyncio.run(call(prompt, "openai/gpt-4.1-mini", "fixture-key"))
+
+    assert len(calls) == 1
+
+
+def test_baseline_transport_preserves_nested_provider_metadata_headers_and_timeout_cause(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    request = httpx.Request("POST", "https://fixture.invalid/chat/completions")
+
+    class FakeClient:
+        outcome = httpx.Response(
+            200,
+            request=request,
+            json={
+                "model": "openai/gpt-4.1-mini",
+                "provider": "Azure",
+                "provider_metadata": {
+                    "seed": 1313,
+                    "context_length": 8192,
+                    "retry_count": 3,
+                    "failover": True,
+                    "routing": ["Azure", "OpenAI"],
+                },
+                "choices": [],
+            },
+            headers={"retry-after": "2", "x-ratelimit-remaining": "0"},
+        )
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            if isinstance(self.outcome, BaseException):
+                raise self.outcome
+            return self.outcome
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(
+        baseline_launcher,
+        "_BASELINE_MODEL_CONFIGS",
+        _build_model_configs(
+            "openai/gpt-4.1-mini", seed=1313, seed_compatible=True
+        ),
+    )
+    sink = ObservationSink(tmp_path / "events.jsonl", tmp_path / "private")
+    wrapped = wrap_async_call(
+        "interaction_model",
+        baseline_launcher._transport("https://fixture.invalid", "interaction_model"),
+        sink,
+        model_config=baseline_launcher._BASELINE_MODEL_CONFIGS["interaction"],
+    )
+
+    raw = asyncio.run(wrapped(messages=[], api_key="fixture"))
+    evidence = sink.read_events()[-1]["model_call"]
+    assert raw["provider"] == "Azure"
+    assert evidence["requested_model_author"] == "openai"
+    assert evidence["requested_provider_policy"] is None
+    assert evidence["actual_provider"] == "Azure"
+    assert evidence["provider_retry_count"] == 3
+    assert evidence["provider_failover"] is True
+    assert evidence["provider_routing"] == ["Azure", "OpenAI"]
+    assert evidence["seed_acknowledged"] is True
+    assert evidence["context_limit"] == 8192
+    assert evidence["rate_limit"] == {
+        "remaining": "0",
+        "retry_after_seconds": "2",
+    }
+
+    timeout = httpx.ReadTimeout("fixture")
+    FakeClient.outcome = timeout
+    with pytest.raises(Exception) as caught:
+        asyncio.run(wrapped(messages=[], api_key="fixture"))
+    failed = sink.read_events()[-1]["model_call"]
+    assert caught.value.__cause__ is timeout
+    assert failed["timeout"] is True
+
+
+def test_baseline_transport_reports_application_retries_separately(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    request = httpx.Request("POST", "https://fixture.invalid/chat/completions")
+
+    class FakeClient:
+        outcomes = [
+            httpx.ReadTimeout("retryable"),
+            httpx.Response(200, request=request, json={"choices": []}),
+        ]
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            outcome = self.outcomes.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    configs = _build_model_configs("openai/gpt-4.1-mini")
+    configs["interaction"]["max_retries"] = 1
+    monkeypatch.setattr(baseline_launcher, "_BASELINE_MODEL_CONFIGS", configs)
+    sink = ObservationSink(tmp_path / "events.jsonl", tmp_path / "private")
+    wrapped = wrap_async_call(
+        "interaction_model",
+        baseline_launcher._transport("https://fixture.invalid", "interaction_model"),
+        sink,
+        model_config=configs["interaction"],
+    )
+
+    asyncio.run(wrapped(messages=[], api_key="fixture"))
+    evidence = sink.read_events()[-1]["model_call"]
+
+    assert evidence["application_retry_count"] == 1
+    assert evidence["provider_retry_count"] is None
+    assert evidence["provider_failover"] is None
+
+
+def test_baseline_error_response_retains_reported_usage_for_reconciliation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    request = httpx.Request("POST", "https://fixture.invalid/chat/completions")
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return httpx.Response(
+                400,
+                request=request,
+                json={
+                    "error": {"code": 400},
+                    "usage": {
+                        "prompt_tokens": 5,
+                        "completion_tokens": 2,
+                        "total_tokens": 7,
+                        "cost": 0.01,
+                    },
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    configs = _build_model_configs("openai/gpt-4.1-mini")
+    monkeypatch.setattr(baseline_launcher, "_BASELINE_MODEL_CONFIGS", configs)
+    sink = ObservationSink(tmp_path / "events.jsonl", tmp_path / "private")
+    wrapped = wrap_async_call(
+        "interaction_model",
+        baseline_launcher._transport("https://fixture.invalid", "interaction_model"),
+        sink,
+        model_config=configs["interaction"],
+    )
+
+    with pytest.raises(Exception):
+        asyncio.run(wrapped(messages=[], api_key="fixture"))
+    usage = sink.read_events()[-1]["model_call"]["usage"]
+
+    assert usage["prompt_tokens"] == {
+        "availability": "available",
+        "reason": None,
+        "value": 5,
+    }
+    assert usage["provider_cost_usd"] == {
+        "availability": "available",
+        "reason": None,
+        "value": 0.01,
+    }
+
+
+def test_baseline_total_mismatch_warning_is_retained(tmp_path: Path) -> None:
+    sink = ObservationSink(tmp_path / "events.jsonl", tmp_path / "private")
+
+    async def response(**_kwargs):
+        return {
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 4,
+                "completion_tokens": 1,
+                "total_tokens": 99,
+            },
+        }
+
+    wrapped = wrap_async_call(
+        "interaction_model",
+        response,
+        sink,
+        model_config=_build_model_configs("openai/gpt-4.1-mini")["interaction"],
+    )
+    asyncio.run(wrapped(messages=[]))
+
+    assert sink.read_events()[-1]["model_call"]["usage_warnings"] == [
+        "total_tokens mismatch: provider=99 calculated=5"
+    ]
+
+
+def test_baseline_phase_installer_wraps_real_total_and_gmail_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = {"now": 100}
+    events = []
+
+    class Sink:
+        def append(self, event):
+            clock["now"] += 1_000_000
+            events.append(event)
+
+    class Runtime:
+        async def execute(self, value):
+            clock["now"] += 7
+            return value
+
+    gmail_module = SimpleNamespace()
+
+    def execute_gmail_tool(value):
+        clock["now"] += 11
+        return value
+
+    gmail_module.execute_gmail_tool = execute_gmail_tool
+    runtime_module = SimpleNamespace(InteractionAgentRuntime=Runtime)
+    monkeypatch.setattr(baseline_launcher.time, "perf_counter_ns", lambda: clock["now"])
+
+    baseline_launcher._install_phase_wrappers(
+        Sink(),
+        interaction_runtime=runtime_module,
+        gmail_modules=(gmail_module,),
+    )
+
+    assert asyncio.run(Runtime().execute("turn")) == "turn"
+    assert gmail_module.execute_gmail_tool("gmail") == "gmail"
+    assert [(event["phase"], event["elapsed_ns"]) for event in events] == [
+        ("total_run", 7),
+        ("gmail_tool", 11),
+    ]
+
+
+def test_baseline_phase_wrapper_emits_on_cancellation_and_reraises_exact_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = {"now": 10}
+    events = []
+    error = asyncio.CancelledError()
+
+    class Sink:
+        def append(self, event):
+            clock["now"] += 1_000_000
+            events.append(event)
+
+    async def cancelled():
+        clock["now"] += 5
+        raise error
+
+    monkeypatch.setattr(baseline_launcher.time, "perf_counter_ns", lambda: clock["now"])
+    wrapped = baseline_launcher.wrap_async_phase_call("total_run", cancelled, Sink())
+
+    with pytest.raises(asyncio.CancelledError) as caught:
+        asyncio.run(wrapped())
+
+    assert caught.value is error
+    assert events[0]["phase"] == "total_run"
+    assert events[0]["elapsed_ns"] == 5
+    assert events[0]["error_type"] == "CancelledError"
 
 
 class _FailingSink:
@@ -468,16 +805,22 @@ def test_real_historical_path_exposes_full_roster_and_infers_action(
     selection: str,
     expected_action: str,
 ) -> None:
-    manifest, observation, _ = _run_real_turn(
+    manifest, observation, run_dir = _run_real_turn(
         tmp_path,
         size=size,
         selected_name=selection,
     )
+    events = ObservationSink(run_dir / "events.jsonl", run_dir / "private").read_events()
 
     assert observation.exposed_names == tuple(agent.name for agent in manifest.agents)
     assert observation.inferred_action == expected_action
     assert observation.inferred_name == selection
     assert observation.final_response in {"fixture execution complete", "fixture turn complete"}
+    assert any(
+        event.get("kind") == "phase_timing" and event.get("phase") == "total_run"
+        for event in events
+    )
+    assert any(timing.phase == "total_run" for timing in observation.raw_phase_timings)
     assert not observation.errors
 
 

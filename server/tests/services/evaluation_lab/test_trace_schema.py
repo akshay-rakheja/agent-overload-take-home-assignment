@@ -14,6 +14,7 @@ from server.services.evaluation_lab.models import (
     TraceEventKind,
 )
 from server.services.evaluation_lab.trace import consolidate_trace
+from server.services.evaluation_lab.usage import emit_usage_evidence
 
 
 RUN_ID = UUID("11111111-1111-4111-8111-111111111111")
@@ -185,3 +186,94 @@ def test_consolidation_rejects_copied_non_finite_payloads(value: float) -> None:
 
     with pytest.raises(ValueError, match="finite|JSON"):
         consolidate_trace([bypassed])
+
+
+def test_consolidation_sums_multiple_usage_calls_without_losing_call_events() -> None:
+    from server.services.evaluation_lab.models import TraceContext
+    from server.services.evaluation_lab.trace import trace_scope
+
+    class Sink:
+        def __init__(self) -> None:
+            self.events = []
+
+        def emit(self, event) -> None:
+            self.events.append(event)
+
+    sink = Sink()
+    context = TraceContext(
+        run_id=RUN_ID,
+        turn_id=TURN_ID,
+        system="enhanced",
+        revision="fixture",
+        mode="offline",
+    )
+    with trace_scope(context, sink):
+        emit_usage_evidence(
+            {
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 1,
+                    "cached_tokens": 2,
+                    "total_tokens": 11,
+                    "cost": 0.01,
+                }
+            },
+            role="interaction",
+        )
+        emit_usage_evidence(
+            {
+                "usage": {
+                    "prompt_tokens": 20,
+                    "completion_tokens": 2,
+                    "cached_tokens": 3,
+                    "total_tokens": 22,
+                    "cost": 0.02,
+                }
+            },
+            role="execution",
+        )
+
+    result = consolidate_trace(sink.events)
+
+    assert [event.payload["role"] for event in sink.events if event.kind is TraceEventKind.USAGE] == [
+        "interaction",
+        "execution",
+    ]
+    assert result.usage.input_tokens.value == 30
+    assert result.usage.output_tokens.value == 3
+    assert result.usage.cached_tokens.value == 5
+    assert result.usage.total_tokens.value == 33
+    assert result.cost.amount.value == pytest.approx(0.03)
+
+
+def test_consolidation_does_not_invent_currency_when_provider_cost_is_unavailable() -> None:
+    from server.services.evaluation_lab.models import TraceContext
+    from server.services.evaluation_lab.trace import trace_scope
+
+    class Sink:
+        def __init__(self) -> None:
+            self.events = []
+
+        def emit(self, event) -> None:
+            self.events.append(event)
+
+    sink = Sink()
+    with trace_scope(
+        TraceContext(
+            run_id=RUN_ID,
+            turn_id=TURN_ID,
+            system="enhanced",
+            revision="fixture",
+            mode="offline",
+        ),
+        sink,
+    ):
+        emit_usage_evidence(
+            {"usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            role="interaction",
+        )
+
+    result = consolidate_trace(sink.events)
+
+    assert result.cost.amount.availability is Availability.UNAVAILABLE
+    assert result.cost.currency.availability is Availability.UNAVAILABLE

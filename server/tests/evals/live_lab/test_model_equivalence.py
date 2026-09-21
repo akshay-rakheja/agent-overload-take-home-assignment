@@ -55,9 +55,26 @@ def test_all_five_exact_role_configurations_are_equivalent() -> None:
 def test_any_configuration_or_seed_state_difference_is_ungradeable(
     field: str, value: object
 ) -> None:
-    baseline = _all_roles()
+    baseline = tuple(
+        _evidence(
+            role,
+            **(
+                {"seed_requested": 1313, "seed_acknowledged": None}
+                if field == "seed_acknowledged" and role is ModelRole.EXECUTION
+                else {}
+            ),
+        )
+        for role in ModelRole
+    )
     enhanced = tuple(
-        _evidence(role, **({field: value} if role is ModelRole.EXECUTION else {}))
+        _evidence(
+            role,
+            **(
+                {"seed_requested": 1313, field: value}
+                if field == "seed_acknowledged" and role is ModelRole.EXECUTION
+                else ({field: value} if role is ModelRole.EXECUTION else {})
+            ),
+        )
         for role in ModelRole
     )
 
@@ -78,3 +95,25 @@ def test_missing_or_duplicate_role_rejects_the_pair() -> None:
     assert "baseline.missing.classifier" in missing.differences
     assert duplicate.equivalent is False
     assert "baseline.duplicate.interaction" in duplicate.differences
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"model_id": ""},
+        {"model_id": "missing-provider"},
+        {"provider": ""},
+        {"temperature": float("inf")},
+        {"temperature": -0.1},
+        {"top_p": 0.0},
+        {"top_p": 1.1},
+    ],
+)
+def test_invalid_or_unavailable_equivalence_facts_are_rejected(changes) -> None:
+    with pytest.raises(Exception):
+        _evidence(ModelRole.INTERACTION, **changes)
+
+
+def test_seed_acknowledgement_requires_a_requested_seed() -> None:
+    with pytest.raises(Exception, match="seed"):
+        _evidence(ModelRole.INTERACTION, seed_requested=None, seed_acknowledged=True)

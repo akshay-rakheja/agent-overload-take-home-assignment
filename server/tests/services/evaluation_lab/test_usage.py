@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
+
+import pytest
 
 from server.services.evaluation_lab.models import Availability, TraceContext, TraceEventKind
 from server.services.evaluation_lab.trace import trace_scope
@@ -137,6 +140,38 @@ def test_total_mismatch_is_preserved_with_warning() -> None:
     assert warnings == ["total_tokens mismatch: provider=10 calculated=9"]
 
 
+def test_error_response_retains_reported_usage_and_cost_for_charge_reconciliation() -> None:
+    record = normalize_usage(
+        {
+            "error": {"code": 500},
+            "usage": {
+                "prompt_tokens": 5,
+                "completion_tokens": 2,
+                "total_tokens": 7,
+                "cost": 0.01,
+            },
+        }
+    )
+
+    assert record.prompt_tokens.value == 5
+    assert record.completion_tokens.value == 2
+    assert record.total_tokens.value == 7
+    assert record.provider_cost_usd.value == 0.01
+
+
+def test_extreme_provider_cost_is_malformed_without_raising() -> None:
+    warnings: list[str] = []
+
+    record = normalize_usage(
+        {"usage": {"prompt_tokens": 1, "completion_tokens": 1, "cost": 10**400}},
+        warnings=warnings,
+    )
+
+    assert record.provider_cost_usd.availability is Availability.UNAVAILABLE
+    assert record.provider_cost_usd.value is None
+    assert warnings == ["provider_cost_usd is malformed"]
+
+
 def test_named_phase_uses_monotonic_duration_without_trace_sink_time() -> None:
     clock = {"now": 100}
     sink = _Sink(clock)
@@ -153,3 +188,20 @@ def test_named_phase_uses_monotonic_duration_without_trace_sink_time() -> None:
         "finished_monotonic_ns": 125,
         "elapsed_ns": 25,
     }
+
+
+@pytest.mark.parametrize("error", [TimeoutError("timeout"), asyncio.CancelledError()])
+def test_named_phase_emits_frozen_duration_and_reraises_exact_failure(error) -> None:
+    clock = {"now": 10}
+    sink = _Sink(clock)
+
+    with pytest.raises(BaseException) as caught:
+        with trace_scope(_context(), sink):
+            with monotonic_phase(PhaseName.EXECUTION_MODEL, clock=lambda: clock["now"]):
+                clock["now"] += 7
+                raise error
+
+    assert caught.value is error
+    timing = [event for event in sink.events if event.kind is TraceEventKind.PHASE_TIMING]
+    assert len(timing) == 1
+    assert timing[0].payload["elapsed_ns"] == 7

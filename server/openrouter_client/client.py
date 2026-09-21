@@ -147,6 +147,8 @@ def _emit_request_evidence(
             "role": role.value if role is not None else None,
             "model": model,
             "provider": _provider_from_model(model),
+            "requested_model_author": _provider_from_model(model),
+            "requested_provider_policy": None,
             "generation": config.explicit_payload_fields() if config is not None else {},
             "message_count": len(messages),
             "tool_names": _tool_names(tools),
@@ -168,7 +170,6 @@ def _emit_response_evidence(
 ) -> None:
     response_model = response.get("model")
     provider = response.get("provider")
-    requested_provider = _provider_from_model(requested_model)
     acknowledged_seed = _nested_value(
         response,
         ("seed",),
@@ -183,10 +184,20 @@ def _emit_response_evidence(
         ("top_provider", "context_length"),
         ("provider_metadata", "context_length"),
     )
-    response_provider_key = _provider_key(provider)
-    failover = (
-        response_provider_key is not None
-        and response_provider_key != _provider_key(requested_provider)
+    provider_retry_count = _nested_value(
+        response,
+        ("provider_metadata", "retry_count"),
+        ("routing", "retry_count"),
+    )
+    provider_failover = _nested_value(
+        response,
+        ("provider_metadata", "failover"),
+        ("routing", "failover"),
+    )
+    provider_routing = _nested_value(
+        response,
+        ("provider_metadata", "routing"),
+        ("routing", "attempts"),
     )
     emit_trace(
         TraceEventKind.MODEL_CALL,
@@ -196,17 +207,34 @@ def _emit_response_evidence(
             "model": response_model if isinstance(response_model, str) else requested_model,
             "requested_model": requested_model,
             "provider": provider if isinstance(provider, str) else None,
+            "requested_model_author": _provider_from_model(requested_model),
+            "requested_provider_policy": None,
+            "actual_provider": provider if isinstance(provider, str) else None,
             "generation": config.explicit_payload_fields() if config is not None else {},
             "context_limit": context_limit if isinstance(context_limit, int) else None,
             "requested_seed": requested_seed,
             "provider_seed": acknowledged_seed if isinstance(acknowledged_seed, int) else None,
             "seed_acknowledged": (
-                None
-                if requested_seed is None
-                else acknowledged_seed == requested_seed
+                acknowledged_seed == requested_seed
+                if requested_seed is not None and isinstance(acknowledged_seed, int)
+                else None
             ),
             "retry_count": retry_count,
-            "failover": failover,
+            "application_retry_count": retry_count,
+            "provider_retry_count": (
+                provider_retry_count if isinstance(provider_retry_count, int) else None
+            ),
+            "provider_failover": (
+                provider_failover if isinstance(provider_failover, bool) else None
+            ),
+            "provider_routing": (
+                provider_routing
+                if isinstance(provider_routing, (list, dict, str))
+                else None
+            ),
+            "failover": (
+                provider_failover if isinstance(provider_failover, bool) else None
+            ),
             "timeout": False,
             "rate_limit": _rate_limit_evidence(http_response),
             "malformed_tool_calls": _malformed_tool_call_count(response),
@@ -230,17 +258,41 @@ def _emit_error_evidence(
             "role": role.value if role is not None else None,
             "model": model,
             "provider": _provider_from_model(model),
+            "requested_model_author": _provider_from_model(model),
+            "requested_provider_policy": None,
+            "actual_provider": None,
             "generation": config.explicit_payload_fields() if config is not None else {},
             "requested_seed": config.seed if config is not None else None,
             "retry_count": retry_count,
+            "application_retry_count": retry_count,
+            "provider_retry_count": None,
             "max_retries": config.max_retries if config is not None else 0,
-            "failover": False,
+            "provider_failover": None,
+            "provider_routing": None,
+            "failover": None,
             "timeout": isinstance(error, httpx.TimeoutException),
             "status_code": response.status_code if response is not None else None,
             "rate_limit": _rate_limit_evidence(response) if response is not None else {},
             "error_type": type(error).__name__,
         },
     )
+
+
+def _emit_usage_best_effort(response: object, *, role: ModelRole | None) -> None:
+    try:
+        emit_usage_evidence(
+            response,
+            role=role.value if role is not None else "unassigned",
+        )
+    except Exception as exc:
+        emit_trace(
+            TraceEventKind.OBSERVABILITY_WARNING,
+            {
+                "boundary": "model_usage",
+                "role": role.value if role is not None else "unassigned",
+                "error_type": type(exc).__name__,
+            },
+        )
 
 
 async def request_chat_completion(
@@ -306,7 +358,21 @@ async def request_chat_completion(
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
-                if attempt < max_retries and response.status_code in {408, 409, 429, 500, 502, 503, 504}:
+                try:
+                    error_payload = response.json()
+                except Exception:
+                    error_payload = None
+                if error_payload is not None:
+                    _emit_usage_best_effort(error_payload, role=role)
+                if attempt < max_retries and response.status_code in {
+                    408,
+                    409,
+                    429,
+                    500,
+                    502,
+                    503,
+                    504,
+                }:
                     continue
                 _emit_error_evidence(
                     role=role,
@@ -337,10 +403,7 @@ async def request_chat_completion(
                 http_response=response,
                 retry_count=attempt,
             )
-            emit_usage_evidence(
-                raw_response,
-                role=role.value if role is not None else "unassigned",
-            )
+            _emit_usage_best_effort(raw_response, role=role)
             return raw_response
 
     raise OpenRouterError("OpenRouter request failed: unknown error")

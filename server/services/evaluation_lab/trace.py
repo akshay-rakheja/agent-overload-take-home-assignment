@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
 
-from pydantic import JsonValue
+from pydantic import JsonValue, TypeAdapter
 
 from .models import (
     Availability,
@@ -624,6 +624,30 @@ def _payload_value(payload: Mapping[str, JsonValue], key: str) -> JsonValue:
     return payload[key]
 
 
+def _observed_value(value: object, value_type: type) -> ObservedValue[Any]:
+    if isinstance(value, Mapping) and "availability" in value:
+        return TypeAdapter(ObservedValue[value_type]).validate_json(
+            json.dumps(value, allow_nan=False, sort_keys=True, separators=(",", ":"))
+        )
+    return _available(value)
+
+
+def _aggregate_observations(
+    observations: Sequence[ObservedValue[Any]], *, fact: str
+) -> ObservedValue[Any]:
+    if not observations:
+        return ObservedValue(
+            availability=Availability.UNAVAILABLE,
+            reason=f"{fact} was not emitted",
+        )
+    if not all(item.availability is Availability.AVAILABLE for item in observations):
+        return ObservedValue(
+            availability=Availability.UNAVAILABLE,
+            reason=f"one or more model calls did not emit {fact}",
+        )
+    return _available(sum(item.value for item in observations if item.value is not None))
+
+
 def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
     """Map only emitted event facts into the shared result schema."""
 
@@ -633,8 +657,8 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
     gmail_evidence: list[JsonValue] = []
     timings: list[JsonValue] = []
     errors: list[JsonValue] = []
-    usage: dict[str, dict[str, Any]] = {}
-    cost: dict[str, dict[str, Any]] = {}
+    usage_observations: dict[str, list[ObservedValue[Any]]] = {}
+    cost_observations: list[ObservedValue[Any]] = []
 
     for event in validated_events:
         payload = redact_value(event.payload)
@@ -684,10 +708,8 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
             for key in ("input_tokens", "output_tokens", "cached_tokens", "total_tokens"):
                 if key in payload:
                     observed = payload[key]
-                    usage[key] = (
-                        observed
-                        if isinstance(observed, dict) and "availability" in observed
-                        else _available(observed).model_dump()
+                    usage_observations.setdefault(key, []).append(
+                        _observed_value(observed, int)
                     )
             for source, target in (
                 ("prompt_tokens", "input_tokens"),
@@ -695,20 +717,18 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
             ):
                 observed = payload.get(source)
                 if isinstance(observed, dict) and "availability" in observed:
-                    usage[target] = observed
+                    usage_observations.setdefault(target, []).append(
+                        _observed_value(observed, int)
+                    )
         elif event.kind is TraceEventKind.COST:
             for key in ("amount", "currency"):
                 if key in payload:
                     observed = payload[key]
-                    cost[key] = (
-                        observed
-                        if isinstance(observed, dict) and "availability" in observed
-                        else _available(observed).model_dump()
-                    )
+                    if key == "amount":
+                        cost_observations.append(_observed_value(observed, float))
             provider_cost = payload.get("provider_cost_usd")
             if isinstance(provider_cost, dict) and "availability" in provider_cost:
-                cost["amount"] = provider_cost
-                cost["currency"] = _available("USD").model_dump()
+                cost_observations.append(_observed_value(provider_cost, float))
         elif event.kind in {TraceEventKind.ERROR, TraceEventKind.OBSERVABILITY_WARNING}:
             errors.append(payload)
 
@@ -719,12 +739,34 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
     if errors:
         values["errors"] = _available(errors)
 
+    usage = UsagePlaceholder(
+        **{
+            key: _aggregate_observations(
+                usage_observations.get(key, ()), fact=key
+            ).model_dump()
+            for key in ("input_tokens", "output_tokens", "cached_tokens", "total_tokens")
+        }
+    )
+    aggregate_cost = _aggregate_observations(
+        cost_observations, fact="provider cost"
+    )
+    cost = CostPlaceholder(
+        amount=aggregate_cost.model_dump(),
+        currency=(
+            _available("USD").model_dump()
+            if cost_observations
+            else ObservedValue(
+                availability=Availability.UNAVAILABLE,
+                reason="provider cost currency was not emitted",
+            ).model_dump()
+        ),
+    )
     result = SystemRunResult(
         run_id=first.run_id,
         turn_id=first.turn_id,
         system=first.system,
-        usage=UsagePlaceholder(**usage),
-        cost=CostPlaceholder(**cost),
+        usage=usage,
+        cost=cost,
         **{
             key: value.model_dump() if isinstance(value, ObservedValue) else value
             for key, value in values.items()

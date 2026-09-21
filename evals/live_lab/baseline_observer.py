@@ -21,6 +21,7 @@ from .raw_observation import (
     ObservedError,
     ObservedToolCall,
     RawModelCall,
+    RawPhaseTiming,
     StateFingerprint,
 )
 
@@ -345,6 +346,41 @@ def _model_calls(
     return calls, errors
 
 
+def _phase_timings(
+    events: Sequence[dict[str, Any]],
+) -> tuple[list[RawPhaseTiming], list[ObservedError]]:
+    timings: list[RawPhaseTiming] = []
+    errors: list[ObservedError] = []
+    for event in events:
+        if event.get("kind") != "phase_timing":
+            continue
+        try:
+            timings.append(
+                RawPhaseTiming.model_validate(
+                    {
+                        key: event.get(key)
+                        for key in (
+                            "phase",
+                            "started_monotonic_ns",
+                            "finished_monotonic_ns",
+                            "elapsed_ns",
+                            "error_type",
+                        )
+                    }
+                )
+            )
+        except Exception as exc:
+            errors.append(
+                ObservedError(
+                    phase="events",
+                    code="event_corruption",
+                    message=f"phase timing evidence is invalid: {type(exc).__name__}",
+                    partial=True,
+                )
+            )
+    return timings, errors
+
+
 async def _history(client: httpx.AsyncClient, base_url: str) -> list[dict[str, Any]]:
     response = await client.get(f"{base_url.rstrip('/')}/chat/history")
     response.raise_for_status()
@@ -608,8 +644,10 @@ async def run_baseline_turn(request: BaselineTurnRequest) -> BaselineObservation
             events = [event for event in all_events if event.get("owner_token") == owner_token]
             calls, call_errors = _tool_calls(events)
             model_calls, model_errors = _model_calls(events)
+            phase_timings, phase_errors = _phase_timings(events)
             errors.extend(call_errors)
             errors.extend(model_errors)
+            errors.extend(phase_errors)
             for event in events:
                 if event.get("kind") == "observation_failure":
                     errors.append(
@@ -737,6 +775,7 @@ async def run_baseline_turn(request: BaselineTurnRequest) -> BaselineObservation
                 inference_reason=inference.reason,
                 final_response=final_response,
                 raw_model_calls=tuple(model_calls),
+                raw_phase_timings=tuple(phase_timings),
                 errors=tuple(errors),
             )
             if errors or inference.action == "unobservable":

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from server.config import ModelRole
 
@@ -16,13 +16,41 @@ class ModelConfigurationEvidence(BaseModel):
     role: ModelRole
     model_id: str
     provider: str
-    temperature: float
-    top_p: float
+    temperature: float = Field(ge=0.0, le=2.0, allow_inf_nan=False)
+    top_p: float = Field(gt=0.0, le=1.0, allow_inf_nan=False)
     max_tokens: int = Field(gt=0)
     seed_requested: int | None = None
     seed_acknowledged: bool | None = None
     timeout_seconds: float = Field(gt=0)
     max_retries: int = Field(default=0, ge=0)
+
+    @field_validator("model_id")
+    @classmethod
+    def _valid_model_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if (
+            not normalized
+            or "/" not in normalized
+            or normalized.startswith("/")
+            or normalized.endswith("/")
+            or any(character.isspace() for character in normalized)
+        ):
+            raise ValueError("model_id must be a provider/model identifier")
+        return normalized
+
+    @field_validator("provider")
+    @classmethod
+    def _observed_provider(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("provider evidence is required")
+        return normalized
+
+    @model_validator(mode="after")
+    def _coherent_seed_state(self) -> "ModelConfigurationEvidence":
+        if self.seed_requested is None and self.seed_acknowledged is not None:
+            raise ValueError("seed acknowledgement requires a requested seed")
+        return self
 
 
 _FIELDS = (

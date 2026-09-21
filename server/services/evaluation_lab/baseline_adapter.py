@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import json
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -10,10 +11,13 @@ from evals.live_lab.raw_observation import BaselineObservation
 
 from .models import (
     Availability,
+    CostPlaceholder,
     ObservedValue,
     SystemRunResult,
+    UsagePlaceholder,
 )
 from .redaction import redact_value
+from .usage import UsageRecord
 
 
 def _available(value: Any) -> ObservedValue[Any]:
@@ -66,6 +70,54 @@ def _ordered_multiset_delta(
     return added, removed
 
 
+def _aggregate_observed(values: list[ObservedValue[Any]], fact: str) -> ObservedValue[Any]:
+    if not values:
+        return _unavailable(f"baseline {fact} was not observed")
+    if not all(value.availability is Availability.AVAILABLE for value in values):
+        return _unavailable(f"one or more baseline model calls omitted {fact}")
+    return ObservedValue(
+        availability=Availability.AVAILABLE,
+        value=sum(value.value for value in values if value.value is not None),
+    )
+
+
+def _aggregate_usage(observation: BaselineObservation) -> tuple[UsagePlaceholder, CostPlaceholder]:
+    records = [
+        UsageRecord.model_validate_json(
+            json.dumps(call.usage, allow_nan=False, sort_keys=True, separators=(",", ":"))
+        )
+        for call in observation.raw_model_calls
+    ]
+    usage = UsagePlaceholder(
+        input_tokens=_aggregate_observed(
+            [record.prompt_tokens for record in records], "prompt tokens"
+        ).model_dump(),
+        output_tokens=_aggregate_observed(
+            [record.completion_tokens for record in records], "completion tokens"
+        ).model_dump(),
+        cached_tokens=_aggregate_observed(
+            [record.cached_tokens for record in records], "cached tokens"
+        ).model_dump(),
+        total_tokens=_aggregate_observed(
+            [record.total_tokens for record in records], "total tokens"
+        ).model_dump(),
+    )
+    costs = [record.provider_cost_usd for record in records]
+    aggregate_cost = _aggregate_observed(costs, "provider cost")
+    cost = CostPlaceholder(
+        amount=aggregate_cost.model_dump(),
+        currency=(
+            ObservedValue(
+                availability=Availability.AVAILABLE,
+                value="USD",
+            ).model_dump()
+            if aggregate_cost.availability is Availability.AVAILABLE
+            else _unavailable("baseline provider cost currency was not observed").model_dump()
+        ),
+    )
+    return usage, cost
+
+
 def adapt_baseline(observation: BaselineObservation) -> SystemRunResult:
     """Adapt direct baseline evidence without projecting enhanced-only concepts."""
 
@@ -92,7 +144,7 @@ def adapt_baseline(observation: BaselineObservation) -> SystemRunResult:
         error.phase == "snapshot_after" for error in observation.errors
     )
     prompt_available = bool(observation.prompt_xml_sha256)
-    timings_available = bool(observation.raw_model_calls)
+    timings_available = bool(observation.raw_model_calls or observation.raw_phase_timings)
 
     selected_identity: ObservedValue[Any]
     if (
@@ -139,6 +191,7 @@ def adapt_baseline(observation: BaselineObservation) -> SystemRunResult:
         }
         for call in observation.raw_model_calls
     ]
+    timings.extend(timing.model_dump(mode="json") for timing in observation.raw_phase_timings)
     errors = [error.model_dump(mode="json") for error in observation.errors]
     values: dict[str, Any] = {
         "revision": _unavailable("baseline observation does not carry revision metadata"),
@@ -208,10 +261,13 @@ def adapt_baseline(observation: BaselineObservation) -> SystemRunResult:
         ),
         "errors": _available(errors),
     }
+    usage, cost = _aggregate_usage(observation)
     result = SystemRunResult(
         run_id=run_id,
         turn_id=turn_id,
         system="baseline",
+        usage=usage,
+        cost=cost,
         **{
             key: value.model_dump() if isinstance(value, ObservedValue) else value
             for key, value in values.items()

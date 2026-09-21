@@ -96,15 +96,19 @@ def _cost_value(
 ) -> ObservedValue[float]:
     if value is None:
         return _missing(missing_reason)
+    try:
+        normalized = float(value) if isinstance(value, (int, float)) else None
+    except (OverflowError, TypeError, ValueError):
+        normalized = None
     if (
         isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(float(value))
-        or value < 0
+        or normalized is None
+        or not math.isfinite(normalized)
+        or normalized < 0
     ):
         warnings.append(f"{name} is malformed")
         return _missing(f"{name} was malformed")
-    return ObservedValue(availability=Availability.AVAILABLE, value=float(value))
+    return ObservedValue(availability=Availability.AVAILABLE, value=normalized)
 
 
 def normalize_usage(
@@ -116,22 +120,6 @@ def normalize_usage(
     """Normalize documented OpenRouter/OpenAI-compatible response shapes."""
 
     observed_warnings = warnings if warnings is not None else []
-    if isinstance(response, Mapping) and response.get("error") is not None:
-        reason = "provider returned an error response"
-        return _record(
-            prompt_tokens=_missing(reason),
-            completion_tokens=_missing(reason),
-            cached_tokens=_missing(reason),
-            total_tokens=_missing(reason),
-            provider_cost_usd=_missing(reason),
-            estimated_cost_usd=_cost_value(
-                estimated_cost_usd,
-                "estimated_cost_usd",
-                observed_warnings,
-                missing_reason="estimated cost was not supplied",
-            ),
-        )
-
     usage = _first(
         response,
         ("usage",),
@@ -140,11 +128,12 @@ def normalize_usage(
         ("result", "usage"),
     )
     usage_mapping: Mapping[str, object] = usage if isinstance(usage, Mapping) else {}
-    usage_reason = (
-        "provider usage was malformed"
-        if usage is not None and not isinstance(usage, Mapping)
-        else "provider usage was not emitted"
-    )
+    if usage is not None and not isinstance(usage, Mapping):
+        usage_reason = "provider usage was malformed"
+    elif isinstance(response, Mapping) and response.get("error") is not None:
+        usage_reason = "provider returned an error response without usage"
+    else:
+        usage_reason = "provider usage was not emitted"
     prompt = _token_value(
         _first(usage_mapping, ("prompt_tokens",), ("input_tokens",)),
         "prompt_tokens",
@@ -259,16 +248,19 @@ def monotonic_phase(
 
     phase_name = phase.value if isinstance(phase, PhaseName) else str(phase)
     with trace_timing(clock) as timing:
-        yield timing
-    emit_trace(
-        TraceEventKind.PHASE_TIMING,
-        {
-            "phase": phase_name,
-            "started_monotonic_ns": timing.started_monotonic_ns,
-            "finished_monotonic_ns": timing.finished_monotonic_ns,
-            "elapsed_ns": timing.elapsed_ns,
-        },
-    )
+        try:
+            yield timing
+        finally:
+            timing.finish()
+            emit_trace(
+                TraceEventKind.PHASE_TIMING,
+                {
+                    "phase": phase_name,
+                    "started_monotonic_ns": timing.started_monotonic_ns,
+                    "finished_monotonic_ns": timing.finished_monotonic_ns,
+                    "elapsed_ns": timing.elapsed_ns,
+                },
+            )
 
 
 measure_phase = monotonic_phase

@@ -35,7 +35,13 @@ async def _call_openrouter(
     model_config: ModelCallConfig | None = None,
 ) -> str:
     last_error: Exception | None = None
-    for attempt in range(2):
+    measured_zero_retry = (
+        model_config is not None
+        and "max_retries" in model_config.model_fields_set
+        and model_config.max_retries == 0
+    )
+    attempts = 1 if measured_zero_retry else 2
+    for attempt in range(attempts):
         try:
             response = await request_chat_completion(
                 config=model_config or ModelCallConfig(model_id=model),
@@ -54,7 +60,7 @@ async def _call_openrouter(
             raise OpenRouterError("OpenRouter response missing content")
         except OpenRouterError as exc:
             last_error = exc
-            if attempt == 0:
+            if attempt + 1 < attempts:
                 logger.warning(
                     "conversation summarization attempt failed; retrying",
                     extra={"error": str(exc)},

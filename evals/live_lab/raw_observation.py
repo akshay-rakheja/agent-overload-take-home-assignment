@@ -28,20 +28,43 @@ class RawModelCall(_FrozenModel):
     tool_names: tuple[str, ...] = ()
     response_choice_count: int | None = Field(default=None, ge=0)
     response_tool_call_count: int | None = Field(default=None, ge=0)
+    status_code: int | None = Field(default=None, ge=100, le=599)
     provider: str | None = None
+    requested_model_author: str | None = None
+    requested_provider_policy: str | None = None
+    actual_provider: str | None = None
     generation: dict[str, Any] = Field(default_factory=dict)
     context_limit: int | None = Field(default=None, ge=1)
     requested_seed: int | None = None
     provider_seed: int | None = None
     seed_acknowledged: bool | None = None
     retry_count: int = Field(default=0, ge=0)
+    application_retry_count: int = Field(default=0, ge=0)
+    provider_retry_count: int | None = Field(default=None, ge=0)
     max_retries: int = Field(default=0, ge=0)
     failover: bool | None = None
+    provider_failover: bool | None = None
+    provider_routing: Any | None = None
     timeout: bool = False
     timeout_seconds: float | None = Field(default=None, gt=0)
     rate_limit: dict[str, Any] = Field(default_factory=dict)
     malformed_tool_calls: int = Field(default=0, ge=0)
     usage: dict[str, Any] = Field(default_factory=dict)
+    usage_warnings: tuple[str, ...] = ()
+    error_type: str | None = None
+
+
+class RawPhaseTiming(_FrozenModel):
+    phase: Literal[
+        "retrieval_routing",
+        "interaction_model",
+        "execution_model",
+        "gmail_tool",
+        "total_run",
+    ]
+    started_monotonic_ns: int = Field(ge=0)
+    finished_monotonic_ns: int = Field(ge=0)
+    elapsed_ns: int = Field(ge=0)
     error_type: str | None = None
 
 
@@ -82,6 +105,7 @@ class BaselineObservation(_FrozenModel):
     inference_reason: str
     final_response: str | None
     raw_model_calls: tuple[RawModelCall, ...]
+    raw_phase_timings: tuple[RawPhaseTiming, ...] = ()
     errors: tuple[ObservedError, ...]
 
 
@@ -103,5 +127,6 @@ __all__ = [
     "ObservedError",
     "ObservedToolCall",
     "RawModelCall",
+    "RawPhaseTiming",
     "StateFingerprint",
 ]

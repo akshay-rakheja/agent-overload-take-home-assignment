@@ -14,6 +14,7 @@ from evals.live_lab.raw_observation import (
     BaselineTurnRequest,
     ObservedError,
     RawModelCall,
+    RawPhaseTiming,
 )
 from server.services.evaluation_lab.baseline_adapter import adapt_baseline
 from server.services.evaluation_lab.models import Availability
@@ -151,10 +152,82 @@ def test_baseline_does_not_invent_candidates_ranks_scores_ids_or_zeroes() -> Non
     assert result.usage.input_tokens.value is None
     assert result.usage.output_tokens.value is None
     assert result.cost.amount.value is None
+    assert result.cost.currency.availability is Availability.UNAVAILABLE
+    assert result.cost.currency.value is None
     rendered = result.model_dump_json()
     assert '"rank"' not in rendered
     assert '"score"' not in rendered
     assert '"agent_id"' not in rendered
+
+
+def test_baseline_adapter_carries_direct_named_phases_and_aggregates_all_call_usage() -> None:
+    available = lambda value: {
+        "availability": "available",
+        "value": value,
+        "reason": None,
+    }
+    unavailable = {
+        "availability": "unavailable",
+        "value": None,
+        "reason": "estimated cost was not supplied",
+    }
+    first = RawModelCall(
+        component="interaction",
+        model="openai/gpt-4.1-mini",
+        elapsed_ms=1,
+        request_sha256="1" * 64,
+        usage={
+            "prompt_tokens": available(10),
+            "completion_tokens": available(2),
+            "cached_tokens": available(1),
+            "total_tokens": available(12),
+            "provider_cost_usd": available(0.01),
+            "estimated_cost_usd": unavailable,
+        },
+    )
+    second = first.model_copy(
+        update={
+            "component": "execution",
+            "request_sha256": "2" * 64,
+            "usage": {
+                "prompt_tokens": available(20),
+                "completion_tokens": available(3),
+                "cached_tokens": available(2),
+                "total_tokens": available(23),
+                "provider_cost_usd": available(0.02),
+                "estimated_cost_usd": unavailable,
+            },
+        }
+    )
+    observation = _observation().model_copy(
+        update={
+            "raw_model_calls": (first, second),
+            "raw_phase_timings": (
+                RawPhaseTiming(
+                    phase="gmail_tool",
+                    started_monotonic_ns=100,
+                    finished_monotonic_ns=111,
+                    elapsed_ns=11,
+                ),
+                RawPhaseTiming(
+                    phase="total_run",
+                    started_monotonic_ns=90,
+                    finished_monotonic_ns=140,
+                    elapsed_ns=50,
+                ),
+            ),
+        }
+    )
+
+    result = adapt_baseline(observation)
+
+    assert result.usage.input_tokens.value == 30
+    assert result.usage.output_tokens.value == 5
+    assert result.usage.cached_tokens.value == 3
+    assert result.usage.total_tokens.value == 35
+    assert result.cost.amount.value == 0.03
+    phases = [item for item in result.timings.value if "phase" in item]
+    assert [item["phase"] for item in phases] == ["gmail_tool", "total_run"]
 
 
 def test_create_maps_selected_and_created_names_as_inferred_without_stable_id() -> None:

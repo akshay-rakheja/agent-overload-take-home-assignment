@@ -22,6 +22,7 @@ import httpx
 
 from server.services.evaluation_lab.usage import normalize_usage
 from server.services.evaluation_lab.trace import TraceTiming
+from server.services.evaluation_lab.redaction import redact_value
 
 from .revisions import (
     APPROVED_OVERLAY_PATHS,
@@ -41,6 +42,9 @@ _COMPONENTS = {
 _BASELINE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {}
 _BASELINE_TIMINGS: ContextVar[tuple[TraceTiming, ...]] = ContextVar(
     "baseline_observation_timings", default=()
+)
+_BASELINE_TRANSPORT_EVIDENCE: ContextVar[dict[str, Any] | None] = ContextVar(
+    "baseline_transport_evidence", default=None
 )
 
 
@@ -65,7 +69,7 @@ def _build_model_configs(
 
     if not isinstance(model_id, str) or "/" not in model_id or any(
         character.isspace() for character in model_id
-    ):
+    ) or model_id.startswith("/") or model_id.endswith("/"):
         raise ValueError("model_id must be a provider/model identifier")
     common: dict[str, Any] = {
         "model_id": model_id,
@@ -145,7 +149,9 @@ class ObservationSink:
         return digest
 
     def append(self, event: Mapping[str, Any]) -> None:
-        public_event = dict(event)
+        public_event = redact_value(dict(event))
+        if not isinstance(public_event, dict):
+            raise ValueError("baseline public event must be a JSON object")
         if self.process_nonce is not None:
             public_event["process_nonce"] = self.process_nonce
         if self.owner_path is not None:
@@ -341,6 +347,98 @@ def wrap_sync_call(component: str, original: Callable[..., Any], sink: Observati
     return wrapped
 
 
+def _phase_event(
+    phase: str, timing: TraceTiming, error: BaseException | None
+) -> dict[str, Any]:
+    return {
+        "kind": "phase_timing",
+        "phase": phase,
+        "started_monotonic_ns": timing.started_monotonic_ns,
+        "finished_monotonic_ns": timing.finished_monotonic_ns,
+        "elapsed_ns": timing.elapsed_ns,
+        "error_type": type(error).__name__ if error is not None else None,
+    }
+
+
+def wrap_async_phase_call(
+    phase: str, original: Callable[..., Any], sink: ObservationSink
+):
+    @functools.wraps(original)
+    async def wrapped(*args: Any, **kwargs: Any) -> Any:
+        caught: BaseException | None = None
+        with _baseline_timing() as timing:
+            try:
+                result = original(*args, **kwargs)
+                if inspect.isawaitable(result):
+                    result = await result
+            except BaseException as error:
+                caught = error
+            finally:
+                timing.finish()
+        _best_effort_observe(
+            sink,
+            f"{phase}:timing",
+            lambda: sink.append(_phase_event(phase, timing, caught)),
+        )
+        if caught is not None:
+            raise caught
+        return result
+
+    return wrapped
+
+
+def wrap_sync_phase_call(
+    phase: str, original: Callable[..., Any], sink: ObservationSink
+):
+    @functools.wraps(original)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        caught: BaseException | None = None
+        with _baseline_timing() as timing:
+            try:
+                result = original(*args, **kwargs)
+            except BaseException as error:
+                caught = error
+            finally:
+                timing.finish()
+        _best_effort_observe(
+            sink,
+            f"{phase}:timing",
+            lambda: sink.append(_phase_event(phase, timing, caught)),
+        )
+        if caught is not None:
+            raise caught
+        return result
+
+    return wrapped
+
+
+def _install_phase_wrappers(
+    sink: ObservationSink,
+    *,
+    interaction_runtime: Any,
+    gmail_modules: Sequence[Any],
+) -> None:
+    interaction_runtime.InteractionAgentRuntime.execute = wrap_async_phase_call(
+        "total_run",
+        interaction_runtime.InteractionAgentRuntime.execute,
+        sink,
+    )
+    gmail_original = next(
+        (
+            module.execute_gmail_tool
+            for module in gmail_modules
+            if hasattr(module, "execute_gmail_tool")
+        ),
+        None,
+    )
+    if gmail_original is None:
+        return
+    gmail_wrapper = wrap_sync_phase_call("gmail_tool", gmail_original, sink)
+    for module in gmail_modules:
+        if hasattr(module, "execute_gmail_tool"):
+            module.execute_gmail_tool = gmail_wrapper
+
+
 def _tool_names(tools: Any) -> list[str]:
     names: list[str] = []
     if not isinstance(tools, list):
@@ -400,6 +498,32 @@ def _malformed_tool_call_count(response: Any) -> int:
     return malformed
 
 
+def _nested_value(payload: object, *paths: tuple[str, ...]) -> object | None:
+    for path in paths:
+        current = payload
+        for part in path:
+            if not isinstance(current, Mapping) or part not in current:
+                break
+            current = current[part]
+        else:
+            return current
+    return None
+
+
+def _rate_limit_evidence(headers: Mapping[str, Any]) -> dict[str, str]:
+    normalized = {str(key).casefold(): str(value) for key, value in headers.items()}
+    evidence: dict[str, str] = {}
+    for header, target in (
+        ("retry-after", "retry_after_seconds"),
+        ("x-ratelimit-limit", "limit"),
+        ("x-ratelimit-remaining", "remaining"),
+        ("x-ratelimit-reset", "reset"),
+    ):
+        if header in normalized:
+            evidence[target] = normalized[header]
+    return evidence
+
+
 def _model_evidence(
     model_component: str,
     kwargs: Mapping[str, Any],
@@ -408,44 +532,100 @@ def _model_evidence(
     elapsed_ms: float,
     request_digest: str,
     config: Mapping[str, Any] | None,
+    transport_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     policy = dict(config or {})
+    transport = dict(transport_evidence or {})
+    transport_response = transport.get("response_payload")
+    observed_result = (
+        result
+        if isinstance(result, Mapping)
+        else transport_response
+        if isinstance(transport_response, Mapping)
+        else None
+    )
     requested_model = str(policy.get("model_id") or kwargs.get("model") or "")
     requested_seed = policy.get("seed")
-    response_model = result.get("model") if isinstance(result, dict) else None
-    provider = result.get("provider") if isinstance(result, dict) else None
-    provider_seed = result.get("seed") if isinstance(result, dict) else None
-    context_limit = None
-    if isinstance(result, dict):
-        context_limit = result.get("context_length") or result.get("context_limit")
-    requested_provider = requested_model.split("/", 1)[0].casefold()
-    response_provider = provider.casefold() if isinstance(provider, str) else None
+    response_model = observed_result.get("model") if observed_result is not None else None
+    provider = observed_result.get("provider") if observed_result is not None else None
+    provider_seed = _nested_value(
+        observed_result,
+        ("seed",),
+        ("metadata", "seed"),
+        ("provider_metadata", "seed"),
+    )
+    context_limit = _nested_value(
+        observed_result,
+        ("context_length",),
+        ("context_limit",),
+        ("top_provider", "context_length"),
+        ("provider_metadata", "context_length"),
+    )
+    provider_retry_count = _nested_value(
+        observed_result,
+        ("provider_metadata", "retry_count"),
+        ("routing", "retry_count"),
+    )
+    provider_failover = _nested_value(
+        observed_result,
+        ("provider_metadata", "failover"),
+        ("routing", "failover"),
+    )
+    provider_routing = _nested_value(
+        observed_result,
+        ("provider_metadata", "routing"),
+        ("routing", "attempts"),
+    )
+    application_retry_count = transport.get("application_retry_count")
+    if not isinstance(application_retry_count, int) or isinstance(
+        application_retry_count, bool
+    ):
+        application_retry_count = 0
     generation = {
         key: policy[key]
         for key in ("temperature", "top_p", "max_tokens", "seed")
         if key in policy
     }
+    usage_warnings: list[str] = []
+    usage = normalize_usage(observed_result, warnings=usage_warnings)
     return {
         "component": model_component,
         "model": response_model if isinstance(response_model, str) else requested_model,
         "provider": provider if isinstance(provider, str) else None,
+        "requested_model_author": requested_model.split("/", 1)[0],
+        "requested_provider_policy": None,
+        "actual_provider": provider if isinstance(provider, str) else None,
         "generation": generation,
         "context_limit": context_limit if isinstance(context_limit, int) else None,
         "requested_seed": requested_seed if isinstance(requested_seed, int) else None,
         "provider_seed": provider_seed if isinstance(provider_seed, int) else None,
         "seed_acknowledged": (
-            None if requested_seed is None else provider_seed == requested_seed
+            provider_seed == requested_seed
+            if requested_seed is not None and isinstance(provider_seed, int)
+            else None
         ),
-        "retry_count": 0,
+        "retry_count": application_retry_count,
+        "application_retry_count": application_retry_count,
+        "provider_retry_count": (
+            provider_retry_count if isinstance(provider_retry_count, int) else None
+        ),
         "max_retries": int(policy.get("max_retries", 0)),
-        "failover": (
-            response_provider is not None and response_provider != requested_provider
+        "provider_failover": (
+            provider_failover if isinstance(provider_failover, bool) else None
         ),
-        "timeout": False,
+        "provider_routing": (
+            provider_routing
+            if isinstance(provider_routing, (list, dict, str))
+            else None
+        ),
+        "failover": provider_failover if isinstance(provider_failover, bool) else None,
+        "timeout": bool(transport.get("timeout", False)),
         "timeout_seconds": float(policy.get("timeout_seconds", 60.0)),
-        "rate_limit": {},
-        "malformed_tool_calls": _malformed_tool_call_count(result),
-        "usage": normalize_usage(result).model_dump(mode="json"),
+        "status_code": transport.get("status_code"),
+        "rate_limit": transport.get("rate_limit", {}),
+        "malformed_tool_calls": _malformed_tool_call_count(observed_result),
+        "usage": usage.model_dump(mode="json"),
+        "usage_warnings": usage_warnings,
         "elapsed_ms": elapsed_ms,
         "request_sha256": request_digest,
         "message_count": len(kwargs.get("messages") or []),
@@ -471,18 +651,23 @@ def wrap_async_call(
             request_digest = ""
         model_component = _COMPONENTS.get(component)
         caught: BaseException | None = None
-        with _baseline_timing() as timing:
-            try:
-                result = original(*args, **kwargs)
-                if inspect.isawaitable(result):
-                    result = await result
-            except BaseException as error:
-                caught = error
-                timing.finish()
-                elapsed = timing.elapsed_ns / 1_000_000
-            else:
-                timing.finish()
-                elapsed = timing.elapsed_ns / 1_000_000
+        transport_token = _BASELINE_TRANSPORT_EVIDENCE.set(None)
+        try:
+            with _baseline_timing() as timing:
+                try:
+                    result = original(*args, **kwargs)
+                    if inspect.isawaitable(result):
+                        result = await result
+                except BaseException as error:
+                    caught = error
+                    timing.finish()
+                    elapsed = timing.elapsed_ns / 1_000_000
+                else:
+                    timing.finish()
+                    elapsed = timing.elapsed_ns / 1_000_000
+            transport_evidence = _BASELINE_TRANSPORT_EVIDENCE.get()
+        finally:
+            _BASELINE_TRANSPORT_EVIDENCE.reset(transport_token)
         if caught is not None:
             def observe_error() -> None:
                 error_digest = sink.store_private(
@@ -496,11 +681,15 @@ def wrap_async_call(
                         elapsed_ms=elapsed,
                         request_digest=request_digest,
                         config=model_config,
+                        transport_evidence=transport_evidence,
                     )
                     evidence.update(
                         {
                             "error_type": type(caught).__name__,
-                            "timeout": isinstance(caught, (TimeoutError, httpx.TimeoutException)),
+                            "timeout": bool(
+                                (transport_evidence or {}).get("timeout")
+                                or isinstance(caught, (TimeoutError, httpx.TimeoutException))
+                            ),
                         }
                     )
                     sink.append(
@@ -534,6 +723,7 @@ def wrap_async_call(
                     elapsed_ms=elapsed,
                     request_digest=request_digest,
                     config=model_config,
+                    transport_evidence=transport_evidence,
                 )
                 evidence.update(
                     {
@@ -625,6 +815,7 @@ def _transport(fake_base_url: str, component: str):
     config = _BASELINE_MODEL_CONFIGS[role]
 
     async def request_chat_completion(**kwargs: Any) -> Any:
+        _BASELINE_TRANSPORT_EVIDENCE.set(None)
         url = f"{fake_base_url.rstrip('/')}/chat/completions"
         payload = _build_baseline_payload(kwargs, config)
         timeout_seconds = float(config["timeout_seconds"])
@@ -639,6 +830,14 @@ def _transport(fake_base_url: str, component: str):
                         timeout=timeout_seconds,
                     )
                 except httpx.HTTPError as exc:
+                    _BASELINE_TRANSPORT_EVIDENCE.set(
+                        {
+                            "application_retry_count": attempt,
+                            "timeout": isinstance(exc, httpx.TimeoutException),
+                            "rate_limit": {},
+                            "status_code": None,
+                        }
+                    )
                     if attempt < max_retries:
                         continue
                     raise client_module.OpenRouterError(
@@ -647,6 +846,19 @@ def _transport(fake_base_url: str, component: str):
                 try:
                     response.raise_for_status()
                 except httpx.HTTPStatusError as exc:
+                    try:
+                        response_payload = response.json()
+                    except Exception:
+                        response_payload = None
+                    _BASELINE_TRANSPORT_EVIDENCE.set(
+                        {
+                            "application_retry_count": attempt,
+                            "timeout": False,
+                            "rate_limit": _rate_limit_evidence(response.headers),
+                            "response_payload": response_payload,
+                            "status_code": response.status_code,
+                        }
+                    )
                     if attempt < max_retries and response.status_code in {
                         408,
                         409,
@@ -658,6 +870,14 @@ def _transport(fake_base_url: str, component: str):
                     }:
                         continue
                     client_module._handle_response_error(exc)
+                _BASELINE_TRANSPORT_EVIDENCE.set(
+                    {
+                        "application_retry_count": attempt,
+                        "timeout": False,
+                        "rate_limit": _rate_limit_evidence(response.headers),
+                        "status_code": response.status_code,
+                    }
+                )
                 result = response.json()
                 if not isinstance(result, dict):
                     raise client_module.OpenRouterError(
@@ -667,6 +887,32 @@ def _transport(fake_base_url: str, component: str):
         raise client_module.OpenRouterError("OpenRouter request failed: unknown error")
 
     return request_chat_completion
+
+
+def _single_request_summarizer(
+    request: Callable[..., Any], error_type: type[BaseException]
+):
+    """Replace only the measured historical summarizer's outer retry loop."""
+
+    async def call(prompt: Any, model: str, api_key: str | None) -> str:
+        response = request(
+            model=model,
+            messages=prompt.messages,
+            system=prompt.system_prompt,
+            api_key=api_key,
+        )
+        if inspect.isawaitable(response):
+            response = await response
+        choices = response.get("choices") or [] if isinstance(response, dict) else []
+        if not choices:
+            raise error_type("OpenRouter response missing choices")
+        message = choices[0].get("message") or {}
+        content = (message.get("content") or "").strip()
+        if not content:
+            raise error_type("OpenRouter response missing content")
+        return content
+
+    return call
 
 
 def install_baseline_wrappers(
@@ -685,7 +931,24 @@ def install_baseline_wrappers(
     email_search = importlib.import_module("server.agents.execution_agent.tasks.search_email.tool")
     summarizer = importlib.import_module("server.services.conversation.summarization.summarizer")
     classifier = importlib.import_module("server.services.gmail.importance_classifier")
+    gmail_client = importlib.import_module("server.services.gmail.client")
+    gmail_package = importlib.import_module("server.services.gmail")
+    gmail_tools = importlib.import_module("server.agents.execution_agent.tools.gmail")
+    gmail_internal = importlib.import_module(
+        "server.agents.execution_agent.tasks.search_email.gmail_internal"
+    )
     interaction_tools._EXECUTION_BATCH_MANAGER.timeout_seconds = execution_timeout_seconds
+    _install_phase_wrappers(
+        sink,
+        interaction_runtime=interaction_runtime,
+        gmail_modules=(
+            gmail_client,
+            gmail_package,
+            gmail_tools,
+            gmail_internal,
+            email_search,
+        ),
+    )
 
     active_wrapper = wrap_sync_call(
         "active_roster", interaction_agent._render_active_agents, sink
@@ -750,11 +1013,16 @@ def install_baseline_wrappers(
         sink,
         model_config=_BASELINE_MODEL_CONFIGS["email_search"],
     )
-    summarizer.request_chat_completion = wrap_async_call(
+    summarizer_transport = wrap_async_call(
         "summarizer_model",
         _transport(fake_base_url, "summarizer_model"),
         sink,
         model_config=_BASELINE_MODEL_CONFIGS["summarizer"],
+    )
+    summarizer.request_chat_completion = summarizer_transport
+    summarizer._call_openrouter = _single_request_summarizer(
+        summarizer_transport,
+        summarizer.OpenRouterError,
     )
     classifier.request_chat_completion = wrap_async_call(
         "classifier_model",
@@ -947,5 +1215,7 @@ __all__ = [
     "install_baseline_wrappers",
     "main",
     "wrap_async_call",
+    "wrap_async_phase_call",
     "wrap_sync_call",
+    "wrap_sync_phase_call",
 ]
