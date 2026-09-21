@@ -348,8 +348,8 @@ def test_restore_revalidates_target_after_path_swap_without_mutating_link_target
     displaced = target.with_name("data-displaced")
     original_copy = state_module._copy_snapshot_bytes
 
-    def copy_then_swap(source_dir: Path, destination: Path) -> None:
-        original_copy(source_dir, destination)
+    def copy_then_swap(*args, **kwargs) -> None:
+        original_copy(*args, **kwargs)
         target.rename(displaced)
         target.symlink_to(outside, target_is_directory=True)
 
@@ -360,6 +360,75 @@ def test_restore_revalidates_target_after_path_swap_without_mutating_link_target
 
     assert marker.read_bytes() == b"outside remains unchanged"
     assert target.is_symlink()
+
+
+def test_restore_stages_through_pinned_parent_when_parent_path_is_replaced(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    manifest = build_fixture_manifest(seed=1313, roster_size=10)
+    source = tmp_path / "source" / "server" / "data"
+    materialize_baseline(manifest, source)
+    snapshot = create_snapshot(source, tmp_path / "snapshots" / "baseline")
+    allowed_root = tmp_path / "runtime"
+    target = allowed_root / "slot" / "server" / "data"
+    pinned_fingerprint = materialize_enhanced(manifest, target)
+    pinned_parent = target.parent.with_name("server-pinned")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "do-not-write-here.bin"
+    marker.write_bytes(b"outside remains byte-exact")
+    original_copy = state_module._copy_snapshot_bytes
+
+    def copy_after_parent_swap(*args, **kwargs) -> None:
+        target.parent.rename(pinned_parent)
+        target.parent.symlink_to(outside, target_is_directory=True)
+        original_copy(*args, **kwargs)
+
+    monkeypatch.setattr(state_module, "_copy_snapshot_bytes", copy_after_parent_swap)
+
+    with pytest.raises(ValueError, match="symlink|parent changed"):
+        restore_snapshot(snapshot, target, allowed_root=allowed_root)
+
+    assert list(outside.iterdir()) == [marker]
+    assert marker.read_bytes() == b"outside remains byte-exact"
+    assert fingerprint_state(pinned_parent / "data") == pinned_fingerprint
+    assert target.parent.is_symlink()
+
+
+def test_restore_rolls_back_exchange_when_ordinary_target_replaces_pinned_target(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    manifest = build_fixture_manifest(seed=1313, roster_size=10)
+    source = tmp_path / "source" / "server" / "data"
+    materialize_baseline(manifest, source)
+    snapshot = create_snapshot(source, tmp_path / "snapshots" / "baseline")
+    allowed_root = tmp_path / "runtime"
+    target = allowed_root / "slot" / "server" / "data"
+    pinned_fingerprint = materialize_enhanced(manifest, target)
+    displaced = target.with_name("data-pinned")
+    unrelated_marker = "unrelated.bin"
+    unrelated_bytes = b"ordinary replacement must survive"
+    original_exchange = state_module._atomic_exchange_at
+    replaced = False
+
+    def exchange_after_target_replacement(parent_fd: int, left_name: str, right_name: str) -> None:
+        nonlocal replaced
+        if not replaced:
+            replaced = True
+            target.rename(displaced)
+            target.mkdir()
+            (target / unrelated_marker).write_bytes(unrelated_bytes)
+        original_exchange(parent_fd, left_name, right_name)
+
+    monkeypatch.setattr(state_module, "_atomic_exchange_at", exchange_after_target_replacement)
+
+    with pytest.raises(RuntimeError, match="changed during atomic exchange"):
+        restore_snapshot(snapshot, target, allowed_root=allowed_root)
+
+    assert (target / unrelated_marker).read_bytes() == unrelated_bytes
+    assert fingerprint_state(displaced) == pinned_fingerprint
 
 
 @pytest.mark.parametrize(

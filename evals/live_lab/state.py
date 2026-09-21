@@ -7,10 +7,10 @@ import fcntl
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import stat
 import sys
-import tempfile
 import threading
 from collections import Counter
 from contextlib import contextmanager
@@ -356,26 +356,103 @@ def runtime_lock(data_dir: Path, *, allowed_root: Path) -> Iterator[None]:
             os.close(allowed_fd)
 
 
-def _copy_snapshot_bytes(source: Path, destination: Path) -> None:
-    destination.mkdir(mode=0o755)
-    for path in sorted(source.rglob("*")):
-        relative = path.relative_to(source)
-        target = destination / relative
-        mode = path.lstat().st_mode
+def _directory_open_flags() -> int:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    return flags
+
+
+def _copy_snapshot_directory_at(source: Path, destination_fd: int) -> None:
+    for path in sorted(source.iterdir(), key=lambda item: item.name):
+        name = path.name
+        source_stat = path.lstat()
+        mode = source_stat.st_mode
         if stat.S_ISLNK(mode):
             raise ValueError(f"snapshot may not contain symlinks: {path}")
         if stat.S_ISDIR(mode):
-            target.mkdir(mode=0o755)
+            os.mkdir(name, mode=0o755, dir_fd=destination_fd)
+            child_fd = os.open(name, _directory_open_flags(), dir_fd=destination_fd)
+            try:
+                _copy_snapshot_directory_at(path, child_fd)
+                os.fsync(child_fd)
+            finally:
+                os.close(child_fd)
         elif stat.S_ISREG(mode):
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("rb") as reader, target.open("wb") as writer:
+            source_flags = os.O_RDONLY
+            if hasattr(os, "O_NOFOLLOW"):
+                source_flags |= os.O_NOFOLLOW
+            source_fd = os.open(path, source_flags)
+            if not os.path.samestat(source_stat, os.fstat(source_fd)):
+                os.close(source_fd)
+                raise ValueError(f"snapshot entry changed while copying: {path}")
+            destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            if hasattr(os, "O_NOFOLLOW"):
+                destination_flags |= os.O_NOFOLLOW
+            try:
+                destination_file_fd = os.open(
+                    name,
+                    destination_flags,
+                    0o600,
+                    dir_fd=destination_fd,
+                )
+            except BaseException:
+                os.close(source_fd)
+                raise
+            with os.fdopen(source_fd, "rb") as reader, os.fdopen(
+                destination_file_fd,
+                "wb",
+            ) as writer:
                 shutil.copyfileobj(reader, writer)
                 writer.flush()
+                os.fchmod(writer.fileno(), 0o644)
                 os.fsync(writer.fileno())
-            target.chmod(0o644)
         else:
             raise ValueError(f"snapshot contains unsupported entry: {path}")
-    _fsync_tree(destination)
+
+
+def _copy_snapshot_bytes(source: Path, parent_fd: int, destination_name: str) -> None:
+    destination_fd = os.open(
+        destination_name,
+        _directory_open_flags(),
+        dir_fd=parent_fd,
+    )
+    try:
+        _copy_snapshot_directory_at(source, destination_fd)
+        os.fsync(destination_fd)
+    finally:
+        os.close(destination_fd)
+
+
+def _create_temporary_directory_at(parent_fd: int, target_name: str) -> tuple[str, os.stat_result]:
+    prefix = f".{target_name[:48]}.restore-"
+    for _ in range(100):
+        name = f"{prefix}{secrets.token_hex(8)}"
+        try:
+            os.mkdir(name, mode=0o755, dir_fd=parent_fd)
+        except FileExistsError:
+            continue
+        return name, os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    raise FileExistsError("could not allocate a unique restore staging directory")
+
+
+def _stat_at(parent_fd: int, name: str) -> os.stat_result | None:
+    try:
+        return os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+
+
+def _open_pinned_target_at(parent_fd: int, name: str) -> tuple[int | None, os.stat_result | None]:
+    try:
+        descriptor = os.open(name, _directory_open_flags(), dir_fd=parent_fd)
+    except FileNotFoundError:
+        return None, None
+    except OSError as error:
+        raise ValueError(f"restore target is not a safe directory: {name}") from error
+    return descriptor, os.fstat(descriptor)
 
 
 def _atomic_exchange_at(parent_fd: int, left_name: str, right_name: str) -> None:
@@ -413,6 +490,41 @@ def _atomic_exchange_at(parent_fd: int, left_name: str, right_name: str) -> None
         raise OSError(error_number, os.strerror(error_number), right_name)
 
 
+def _atomic_install_at(parent_fd: int, source_name: str, target_name: str) -> None:
+    """Atomically install a new target without replacing a concurrently created object."""
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    encoded_source = os.fsencode(source_name)
+    encoded_target = os.fsencode(target_name)
+    if sys.platform == "darwin":
+        rename = libc.renameatx_np
+        rename.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        rename.restype = ctypes.c_int
+        result = rename(parent_fd, encoded_source, parent_fd, encoded_target, 0x00000004)
+    elif sys.platform.startswith("linux") and hasattr(libc, "renameat2"):
+        rename = libc.renameat2
+        rename.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        rename.restype = ctypes.c_int
+        result = rename(parent_fd, encoded_source, parent_fd, encoded_target, 0x00000001)
+    else:
+        raise RuntimeError("atomic no-replace directory install is unsupported on this platform")
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number), target_name)
+
+
 def _discard_tree_at(parent_fd: int, name: str) -> None:
     try:
         mode = os.stat(name, dir_fd=parent_fd, follow_symlinks=False).st_mode
@@ -424,6 +536,18 @@ def _discard_tree_at(parent_fd: int, name: str) -> None:
         shutil.rmtree(name, dir_fd=parent_fd)
     else:
         raise ValueError(f"refusing to remove unsupported temporary entry: {name}")
+
+
+def _discard_tree_if_same_at(
+    parent_fd: int,
+    name: str,
+    expected: os.stat_result,
+) -> bool:
+    current = _stat_at(parent_fd, name)
+    if current is None or not os.path.samestat(current, expected):
+        return False
+    _discard_tree_at(parent_fd, name)
+    return True
 
 
 def restore_snapshot(
@@ -444,41 +568,93 @@ def restore_snapshot(
         target.parent.mkdir(parents=True, exist_ok=True)
         target, allowed = _validated_target(target, allowed)
         parent_before = target.parent.stat(follow_symlinks=False)
-        open_flags = os.O_RDONLY
-        if hasattr(os, "O_DIRECTORY"):
-            open_flags |= os.O_DIRECTORY
-        if hasattr(os, "O_NOFOLLOW"):
-            open_flags |= os.O_NOFOLLOW
-        parent_fd = os.open(target.parent, open_flags)
+        parent_fd = os.open(target.parent, _directory_open_flags())
         if not os.path.samestat(parent_before, os.fstat(parent_fd)):
             os.close(parent_fd)
             raise ValueError("restore target parent changed before temporary preparation")
-        temporary = Path(
-            tempfile.mkdtemp(prefix=f".{target.name}.restore-", dir=target.parent)
-        ).absolute()
-        temporary.rmdir()
+        target_fd: int | None = None
+        temporary_name: str | None = None
+        cleanup_identity: os.stat_result | None = None
         try:
-            _copy_snapshot_bytes(snapshot_root, temporary)
+            target_fd, pinned_target = _open_pinned_target_at(parent_fd, target.name)
+            temporary_name, staged_identity = _create_temporary_directory_at(
+                parent_fd,
+                target.name,
+            )
+            cleanup_identity = staged_identity
+            _copy_snapshot_bytes(snapshot_root, parent_fd, temporary_name)
             confirmed_target, _ = _validated_target(target, allowed)
             parent_after = confirmed_target.parent.stat(follow_symlinks=False)
             if confirmed_target != target or not os.path.samestat(parent_before, parent_after):
                 raise ValueError("restore target path changed during snapshot preparation")
             if not os.path.samestat(parent_before, os.fstat(parent_fd)):
                 raise ValueError("restore target parent changed during snapshot preparation")
-            if target.exists():
-                _atomic_exchange_at(parent_fd, temporary.name, target.name)
-            else:
-                os.replace(
-                    temporary.name,
-                    target.name,
-                    src_dir_fd=parent_fd,
-                    dst_dir_fd=parent_fd,
+
+            current_target = _stat_at(parent_fd, target.name)
+            current_staged = _stat_at(parent_fd, temporary_name)
+            if current_staged is None or not os.path.samestat(current_staged, staged_identity):
+                raise RuntimeError("restore staging directory changed before atomic exchange")
+            if pinned_target is not None:
+                if current_target is None or not os.path.samestat(current_target, pinned_target):
+                    raise RuntimeError("restore target changed before atomic exchange")
+                _atomic_exchange_at(parent_fd, temporary_name, target.name)
+                installed_target = _stat_at(parent_fd, target.name)
+                exchanged_target = _stat_at(parent_fd, temporary_name)
+                valid_exchange = (
+                    installed_target is not None
+                    and os.path.samestat(installed_target, staged_identity)
+                    and exchanged_target is not None
+                    and os.path.samestat(exchanged_target, pinned_target)
                 )
+                if not valid_exchange:
+                    if (
+                        installed_target is not None
+                        and os.path.samestat(installed_target, staged_identity)
+                        and exchanged_target is not None
+                    ):
+                        unexpected_target = exchanged_target
+                        _atomic_exchange_at(parent_fd, temporary_name, target.name)
+                        rolled_back_target = _stat_at(parent_fd, target.name)
+                        rolled_back_staging = _stat_at(parent_fd, temporary_name)
+                        if (
+                            rolled_back_target is None
+                            or not os.path.samestat(rolled_back_target, unexpected_target)
+                            or rolled_back_staging is None
+                            or not os.path.samestat(rolled_back_staging, staged_identity)
+                        ):
+                            cleanup_identity = None
+                            raise RuntimeError(
+                                "restore target changed during atomic exchange and rollback failed"
+                            )
+                    else:
+                        cleanup_identity = None
+                    raise RuntimeError("restore target changed during atomic exchange")
+                cleanup_identity = pinned_target
+            else:
+                if current_target is not None:
+                    raise RuntimeError("restore target appeared before atomic install")
+                _atomic_install_at(parent_fd, temporary_name, target.name)
+                installed_target = _stat_at(parent_fd, target.name)
+                if installed_target is None or not os.path.samestat(
+                    installed_target,
+                    staged_identity,
+                ):
+                    cleanup_identity = None
+                    raise RuntimeError("restore target changed during atomic install")
+                temporary_name = None
+                cleanup_identity = None
             os.fsync(parent_fd)
-            _discard_tree_at(parent_fd, temporary.name)
+            if temporary_name is not None and cleanup_identity is not None:
+                if not _discard_tree_if_same_at(parent_fd, temporary_name, cleanup_identity):
+                    raise RuntimeError("restore cleanup object changed before deletion")
+                temporary_name = None
+                cleanup_identity = None
             os.fsync(parent_fd)
         finally:
-            _discard_tree_at(parent_fd, temporary.name)
+            if temporary_name is not None and cleanup_identity is not None:
+                _discard_tree_if_same_at(parent_fd, temporary_name, cleanup_identity)
+            if target_fd is not None:
+                os.close(target_fd)
             os.close(parent_fd)
 
     target, _ = _validated_target(target, allowed)
