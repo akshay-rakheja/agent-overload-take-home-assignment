@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
+import subprocess
+import sys
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -485,6 +488,131 @@ async def test_outer_cancellation_retains_ownership_until_side_is_joined(tmp_pat
 
 
 @pytest.mark.anyio
+async def test_cancellation_during_late_grace_joins_side_before_releasing_lease(
+    tmp_path,
+) -> None:
+    scenario = _scenario()
+    caught = asyncio.Event()
+    release = asyncio.Event()
+
+    async def runner(*, run_id, system, scheduled, **_kwargs):
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            caught.set()
+            await release.wait()
+            return SideRunOutput(
+                status=OutcomeStatus.SUCCESS,
+                model_id="openai/gpt-4.1-mini",
+                results=(_result(run_id, system, scheduled.pair_id),),
+            )
+
+    root = tmp_path / ".lab" / "runs"
+    owner = _offline_orchestrator(
+        store=RunStore(root),
+        scenarios=(scenario,),
+        resetter=lambda **kwargs: _verification(kwargs["system"]),
+        runners={system: runner for system in MeasuredSystem},
+        side_timeout_seconds=0.001,
+        late_completion_grace_seconds=10,
+    )
+    run_id = (
+        await owner.start(
+            StartRunRequest(request_id=REQUEST_ID, scenario_ids=(scenario.scenario_id,))
+        )
+    ).run_id
+    execution = asyncio.create_task(owner.execute(run_id))
+    await caught.wait()
+    await asyncio.sleep(0)
+    execution.cancel()
+    await asyncio.sleep(0)
+
+    try:
+        assert not execution.done()
+        second = _offline_orchestrator(
+            store=RunStore(root),
+            scenarios=(scenario,),
+            resetter=lambda **kwargs: _verification(kwargs["system"]),
+            runners={system: runner for system in MeasuredSystem},
+        )
+        with pytest.raises(RunConflict, match="active"):
+            await second.start(
+                StartRunRequest(
+                    request_id=UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+                    scenario_ids=(scenario.scenario_id,),
+                )
+            )
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await execution
+
+    terminal = owner.status(run_id)
+    assert terminal.status is RunStatus.PARTIAL_FAILURE
+    outcome = terminal.pairs[0].outcomes[0]
+    assert outcome.status is OutcomeStatus.FAILURE
+    assert outcome.late_completion is not None
+    assert outcome.late_completion.status is OutcomeStatus.SUCCESS
+
+
+@pytest.mark.anyio
+async def test_cancellation_before_observer_handoff_joins_side_and_persists_outcome(
+    tmp_path,
+) -> None:
+    scenario = _scenario()
+    handoff = asyncio.Event()
+    release = asyncio.Event()
+
+    async def runner(*, run_id, system, scheduled, **_kwargs):
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            await release.wait()
+            return SideRunOutput(
+                status=OutcomeStatus.SUCCESS,
+                model_id="openai/gpt-4.1-mini",
+                results=(_result(run_id, system, scheduled.pair_id),),
+            )
+
+    class HandoffOrchestrator(PairedRunOrchestrator):
+        async def _schedule_late_monitor(self, *args, **kwargs):
+            handoff.set()
+            await asyncio.Event().wait()
+
+    root = tmp_path / ".lab" / "runs"
+    owner = HandoffOrchestrator(
+        store=RunStore(root),
+        scenarios=(scenario,),
+        resetter=lambda **kwargs: _verification(kwargs["system"]),
+        runners={system: runner for system in MeasuredSystem},
+        execution_mode=ExecutionMode.OFFLINE_FAKE,
+        snapshot_contracts={"standard-100": _snapshot_contract()},
+        side_timeout_seconds=0.001,
+        late_completion_grace_seconds=0,
+    )
+    run_id = (
+        await owner.start(
+            StartRunRequest(request_id=REQUEST_ID, scenario_ids=(scenario.scenario_id,))
+        )
+    ).run_id
+    execution = asyncio.create_task(owner.execute(run_id))
+    await handoff.wait()
+    execution.cancel()
+    await asyncio.sleep(0)
+
+    try:
+        assert not execution.done()
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await execution
+    terminal = owner.status(run_id)
+    assert terminal.status is RunStatus.PARTIAL_FAILURE
+    assert terminal.pairs[0].outcomes[0].status is OutcomeStatus.FAILURE
+    assert RunStore(root).execution_lease() is None
+
+
+@pytest.mark.anyio
 async def test_synchronous_runner_is_supervised_without_blocking_event_loop(tmp_path) -> None:
     scenario = _scenario()
 
@@ -621,6 +749,87 @@ async def test_malformed_budget_authorization_blocks_before_transport(tmp_path) 
 
     assert result.status is RunStatus.BLOCKED
     assert transports == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("record_mode", "controller_mode"),
+    (
+        (ExecutionMode.OFFLINE_FAKE, ExecutionMode.MEASURED),
+        (ExecutionMode.MEASURED, ExecutionMode.OFFLINE_FAKE),
+    ),
+)
+async def test_cross_mode_controller_cannot_execute_queued_record(
+    tmp_path, record_mode, controller_mode
+) -> None:
+    scenario = _scenario()
+    resets = 0
+    transports = 0
+
+    async def resetter(**kwargs):
+        nonlocal resets
+        resets += 1
+        return _verification(kwargs["system"])
+
+    async def runner(**_kwargs):
+        nonlocal transports
+        transports += 1
+        raise AssertionError("incompatible controller must not execute")
+
+    root = tmp_path / ".lab" / "runs"
+    creator = PairedRunOrchestrator(
+        store=RunStore(root),
+        scenarios=(scenario,),
+        resetter=resetter,
+        runners={},
+        execution_mode=record_mode,
+        snapshot_contracts={"standard-100": _snapshot_contract()},
+    )
+    request = StartRunRequest(
+        request_id=REQUEST_ID, scenario_ids=(scenario.scenario_id,)
+    )
+    run_id = (await creator.start(request)).run_id
+    controller = PairedRunOrchestrator(
+        store=RunStore(root),
+        scenarios=(scenario,),
+        resetter=resetter,
+        runners={system: runner for system in MeasuredSystem},
+        execution_mode=controller_mode,
+        snapshot_contracts={"standard-100": _snapshot_contract()},
+    )
+
+    with pytest.raises(RunConflict, match="mode"):
+        await controller.execute(run_id)
+
+    assert resets == transports == 0
+    assert controller.status(run_id).status is RunStatus.QUEUED
+
+
+@pytest.mark.anyio
+async def test_duplicate_start_rejects_controller_mode_mismatch(tmp_path) -> None:
+    scenario = _scenario()
+    root = tmp_path / ".lab" / "runs"
+    request = StartRunRequest(
+        request_id=REQUEST_ID, scenario_ids=(scenario.scenario_id,)
+    )
+    offline = _offline_orchestrator(
+        store=RunStore(root),
+        scenarios=(scenario,),
+        resetter=lambda **kwargs: _verification(kwargs["system"]),
+        runners={},
+    )
+    await offline.start(request)
+    measured = PairedRunOrchestrator(
+        store=RunStore(root),
+        scenarios=(scenario,),
+        resetter=lambda **kwargs: _verification(kwargs["system"]),
+        runners={},
+        execution_mode=ExecutionMode.MEASURED,
+        snapshot_contracts={"standard-100": _snapshot_contract()},
+    )
+
+    with pytest.raises(RunConflict, match="mode"):
+        await measured.start(request)
 
 
 @pytest.mark.anyio
@@ -935,7 +1144,89 @@ def test_restart_recovery_terminalizes_interrupted_run_without_retry(tmp_path) -
     assert recovered is not None
     assert recovered.status is RunStatus.BLOCKED
     assert "restart" in (recovered.blocked_reason or "")
+    assert "incompatible" in (recovered.blocked_reason or "")
     assert recovered.generation == 2
+
+
+@pytest.mark.anyio
+async def test_dead_controller_with_live_descendant_retains_durable_orphan_block(
+    tmp_path,
+) -> None:
+    scenario = _scenario()
+    root = tmp_path / ".lab" / "runs"
+    store = RunStore(root)
+    record = PairedRunOrchestrator.new_record(
+        StartRunRequest(request_id=REQUEST_ID, scenario_ids=(scenario.scenario_id,)),
+        scenarios=(scenario,),
+        execution_mode=ExecutionMode.OFFLINE_FAKE,
+        snapshot_contracts=(_snapshot_contract(),),
+    )
+    store.create(record)
+    worker_source = """
+import os
+import subprocess
+import sys
+from pathlib import Path
+from uuid import UUID, uuid4
+from server.services.evaluation_lab.orchestrator import RunStatus
+from server.services.evaluation_lab.run_store import RunStore
+
+store = RunStore(Path(sys.argv[1]))
+run_id = UUID(sys.argv[2])
+owner_id = uuid4()
+store.acquire_execution(run_id, owner_id)
+record = store.get(run_id)
+store.save(record.model_copy(update={"generation": 1, "status": RunStatus.BASELINE_RUNNING}))
+child = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(30)"],
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    start_new_session=True,
+    close_fds=True,
+)
+print(child.pid, flush=True)
+os._exit(0)
+"""
+    worker = subprocess.Popen(
+        [sys.executable, "-c", worker_source, str(root), str(record.run_id)],
+        cwd=Path(__file__).parents[4],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert worker.stdout is not None
+    child_pid = int(worker.stdout.readline().strip())
+    worker.wait(timeout=5)
+    assert worker.returncode == 0
+
+    try:
+        os.kill(child_pid, 0)
+        replacement = _offline_orchestrator(
+            store=RunStore(root),
+            scenarios=(scenario,),
+            resetter=lambda **kwargs: _verification(kwargs["system"]),
+            runners={},
+        )
+        recovered = replacement.status(record.run_id)
+        lease = RunStore(root).execution_lease()
+
+        assert recovered.status is RunStatus.BLOCKED
+        assert any(event.kind == "recovery" for event in recovered.trace)
+        assert lease is not None
+        assert lease.orphaned is True
+        with pytest.raises(RunConflict, match="active"):
+            await replacement.start(
+                StartRunRequest(
+                    request_id=UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+                    scenario_ids=(scenario.scenario_id,),
+                )
+            )
+    finally:
+        try:
+            os.kill(child_pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
 
 
 def test_run_store_rejects_traversal_and_symlink_root(tmp_path) -> None:

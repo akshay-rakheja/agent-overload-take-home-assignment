@@ -305,7 +305,7 @@ class PairedRunOrchestrator:
         self._resetter = resetter
         self._runners = MappingProxyType(dict(runners))
         self._budget_guard = budget_guard
-        self._execution_mode = execution_mode
+        self._execution_mode = ExecutionMode(execution_mode)
         self._snapshot_contracts = MappingProxyType(dict(snapshot_contracts or {}))
         self._side_timeout = side_timeout_seconds
         self._late_grace = late_completion_grace_seconds
@@ -370,14 +370,21 @@ class PairedRunOrchestrator:
         )
 
     def _recover_interrupted(self) -> None:
+        lease = self.store.execution_lease()
+        if lease is not None and not self.store.execution_owner_is_alive(lease.run_id):
+            self.store.retain_orphaned_execution(lease.run_id)
         for record in self.store.list_records():
             if record.status in {RunStatus.QUEUED, RunStatus.COMPLETE, RunStatus.PARTIAL_FAILURE, RunStatus.BLOCKED}:
                 continue
             if self.store.execution_owner_is_alive(record.run_id):
                 continue
+            if not self.store.execution_block_exists(record.run_id):
+                self.store.retain_orphaned_execution(record.run_id)
             now = self._clock()
             terminal = RunStatus.PARTIAL_FAILURE if any(pair.outcomes for pair in record.pairs) else RunStatus.BLOCKED
             reason = "run interrupted by process restart; no side was retried"
+            if record.execution_mode is not self._execution_mode:
+                reason += "; persisted execution mode is incompatible with controller mode"
             recovered = record.model_copy(
                 update={
                     "status": terminal,
@@ -405,7 +412,6 @@ class PairedRunOrchestrator:
                 }
             )
             self.store.save(recovered)
-            self.store.clear_stale_execution(record.run_id)
 
     def _handle(self, record: PairedRunResult) -> RunHandle:
         return RunHandle(
@@ -413,6 +419,12 @@ class PairedRunOrchestrator:
             request_id=record.request.request_id,
             status=record.status,
         )
+
+    def _require_compatible_mode(self, record: PairedRunResult) -> None:
+        if record.execution_mode is not self._execution_mode:
+            raise RunConflict(
+                "persisted run execution mode is incompatible with controller mode"
+            )
 
     async def start(self, request: StartRunRequest) -> RunHandle:
         candidate = self.new_record(
@@ -426,11 +438,12 @@ class PairedRunOrchestrator:
         if existing is not None:
             if existing.request != request:
                 raise RunConflict("idempotency key belongs to a different request")
+            self._require_compatible_mode(existing)
             return self._handle(existing)
         if (
             self._state_lock.locked()
             or self.active_tasks
-            or self.store.execution_owner_is_alive()
+            or self.store.execution_block_exists()
         ):
             raise RunConflict("a state-changing Evaluation Lab run is active")
         await self._state_lock.acquire()
@@ -761,10 +774,49 @@ class PairedRunOrchestrator:
             name=f"lab-{record.run_id}-{scheduled.pair_id}-{system.value}",
         )
         self._watch_task(task)
+        cancellation_sent = False
         try:
             done, _pending = await asyncio.wait({task}, timeout=self._side_timeout)
-        except asyncio.CancelledError:
+            if done:
+                return self._completed_outcome(
+                    task,
+                    record=record,
+                    scenario=scenario,
+                    system=system,
+                )
+
             if runner_is_async:
+                task.cancel()
+                cancellation_sent = True
+            late: LateCompletion | None = None
+            if self._late_grace:
+                late_done, _ = await asyncio.wait({task}, timeout=self._late_grace)
+                if late_done:
+                    late = self._late_from_outcome(
+                        self._completed_outcome(
+                            task,
+                            record=record,
+                            scenario=scenario,
+                            system=system,
+                        )
+                    )
+            if not task.done():
+                await self._schedule_late_monitor(
+                    task,
+                    record=record,
+                    scenario=scenario,
+                    scheduled=scheduled,
+                    system=system,
+                    owner_id=owner_id,
+                )
+            return PersistedSideOutcome(
+                system=system,
+                status=OutcomeStatus.TIMEOUT,
+                reason="side exceeded the configured timeout; no retry was attempted",
+                late_completion=late,
+            )
+        except asyncio.CancelledError:
+            if runner_is_async and not cancellation_sent:
                 task.cancel()
             await self._join_supervised_task(task)
             completed = self._completed_outcome(
@@ -781,46 +833,10 @@ class PairedRunOrchestrator:
                     late_completion=self._late_from_outcome(completed),
                 )
             )
-        if done:
-            return self._completed_outcome(
-                task,
-                record=record,
-                scenario=scenario,
-                system=system,
-            )
-
-        if runner_is_async:
-            task.cancel()
-        late: LateCompletion | None = None
-        if self._late_grace:
-            late_done, _ = await asyncio.wait({task}, timeout=self._late_grace)
-            if late_done:
-                late = self._late_from_outcome(
-                    self._completed_outcome(
-                        task,
-                        record=record,
-                        scenario=scenario,
-                        system=system,
-                    )
-                )
-        if not task.done():
-            await self._schedule_late_monitor(
-                task,
-                record=record,
-                scenario=scenario,
-                scheduled=scheduled,
-                system=system,
-                owner_id=owner_id,
-            )
-        return PersistedSideOutcome(
-            system=system,
-            status=OutcomeStatus.TIMEOUT,
-            reason="side exceeded the configured timeout; no retry was attempted",
-            late_completion=late,
-        )
 
     async def execute(self, run_id: UUID) -> PairedRunResult:
         record = self.status(run_id)
+        self._require_compatible_mode(record)
         if record.status.terminal:
             return record
         if record.status is not RunStatus.QUEUED:

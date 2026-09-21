@@ -12,7 +12,7 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict
 
@@ -33,6 +33,8 @@ class ExecutionLease(BaseModel):
     owner_id: UUID
     pid: int
     acquired_at: datetime
+    orphaned: bool = False
+    orphaned_at: datetime | None = None
 
 
 class RunStore:
@@ -268,7 +270,11 @@ class RunStore:
         lease = self.execution_lease()
         if lease is None or (run_id is not None and lease.run_id != run_id):
             return False
-        return self._pid_alive(lease.pid)
+        return not lease.orphaned and self._pid_alive(lease.pid)
+
+    def execution_block_exists(self, run_id: UUID | None = None) -> bool:
+        lease = self.execution_lease()
+        return lease is not None and (run_id is None or lease.run_id == run_id)
 
     def acquire_execution(self, run_id: UUID, owner_id: UUID) -> ExecutionLease:
         lease = ExecutionLease(
@@ -289,10 +295,11 @@ class RunStore:
                     lease.run_id,
                     lease.owner_id,
                     lease.pid,
-                ):
+                ) and not current.orphaned:
                     return current
-                if self._pid_alive(current.pid):
-                    raise RuntimeError("a live execution owner already holds the run store")
+                raise RuntimeError(
+                    "an execution owner or orphaned execution block holds the run store"
+                )
             self._atomic_write(
                 root_fd,
                 _EXECUTION_LEASE_NAME,
@@ -313,28 +320,46 @@ class RunStore:
                 raise ValueError("execution lease is malformed") from exc
             if (current.run_id, current.owner_id) != (run_id, owner_id):
                 raise RuntimeError("execution lease belongs to another owner")
+            if current.orphaned:
+                raise RuntimeError("orphaned execution ownership cannot be auto-released")
             os.unlink(_EXECUTION_LEASE_NAME, dir_fd=root_fd)
             os.fsync(root_fd)
             return True
 
-    def clear_stale_execution(self, run_id: UUID) -> bool:
-        with self._locked_root(create=False, exclusive=True) as root_fd:
-            if root_fd is None:
-                return False
+    def retain_orphaned_execution(self, run_id: UUID) -> ExecutionLease:
+        with self._locked_root(create=True, exclusive=True) as root_fd:
+            assert root_fd is not None
             payload = self._read_file(root_fd, _EXECUTION_LEASE_NAME)
+            now = datetime.now(UTC)
             if payload is None:
-                return False
-            try:
-                current = ExecutionLease.model_validate_json(payload)
-            except Exception as exc:
-                raise ValueError("execution lease is malformed") from exc
-            if current.run_id != run_id:
-                return False
-            if self._pid_alive(current.pid):
-                raise RuntimeError("cannot clear a live execution owner")
-            os.unlink(_EXECUTION_LEASE_NAME, dir_fd=root_fd)
-            os.fsync(root_fd)
-            return True
+                orphaned = ExecutionLease(
+                    run_id=run_id,
+                    owner_id=uuid4(),
+                    pid=0,
+                    acquired_at=now,
+                    orphaned=True,
+                    orphaned_at=now,
+                )
+            else:
+                try:
+                    current = ExecutionLease.model_validate_json(payload)
+                except Exception as exc:
+                    raise ValueError("execution lease is malformed") from exc
+                if current.run_id != run_id:
+                    raise RuntimeError("execution block belongs to another run")
+                if current.orphaned:
+                    return current
+                if self._pid_alive(current.pid):
+                    raise RuntimeError("cannot orphan a live execution owner")
+                orphaned = current.model_copy(
+                    update={"orphaned": True, "orphaned_at": now}
+                )
+            self._atomic_write(
+                root_fd,
+                _EXECUTION_LEASE_NAME,
+                orphaned.model_dump_json().encode("utf-8") + b"\n",
+            )
+            return orphaned
 
     def create(self, record: "PairedRunResult") -> None:
         from .orchestrator import PairedRunResult

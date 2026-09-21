@@ -134,6 +134,43 @@ def test_run_creation_validation_errors_are_bounded_and_redacted(tmp_path) -> No
     assert len(response.content) < 256
 
 
+def test_run_creation_redacts_framework_body_shape_and_json_errors(tmp_path) -> None:
+    client = _client(_settings(tmp_path))
+    synthetic_token = "sk-fakeONLY_REVIEW_12345678"
+    synthetic_email = "review-secret@example.invalid"
+    responses = (
+        client.post("/api/v1/lab/runs", json=[synthetic_token]),
+        client.post("/api/v1/lab/runs", json=synthetic_email),
+        client.post("/api/v1/lab/runs", json=42),
+        client.post("/api/v1/lab/runs", json=None),
+        client.post(
+            "/api/v1/lab/runs",
+            content=f'{{"secret":"{synthetic_token}"'.encode(),
+            headers={"content-type": "application/json"},
+        ),
+    )
+
+    for response in responses:
+        assert response.status_code == 422
+        assert synthetic_token.encode() not in response.content
+        assert synthetic_email.encode() not in response.content
+        assert len(response.content) < 256
+
+
+def test_run_creation_rejects_oversized_body_without_echoing_it(tmp_path) -> None:
+    client = _client(_settings(tmp_path))
+    synthetic_token = "sk-fakeONLY_REVIEW_12345678"
+    response = client.post(
+        "/api/v1/lab/runs",
+        content=(synthetic_token * 2_000).encode(),
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    assert synthetic_token.encode() not in response.content
+    assert len(response.content) < 256
+
+
 def test_start_request_rejects_duplicate_scenario_ids() -> None:
     scenario_id = "exact-instagram-security"
     try:

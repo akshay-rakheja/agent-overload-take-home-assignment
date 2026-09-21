@@ -29,6 +29,7 @@ from ..services.evaluation_lab.trace import JsonlTraceStore, consolidate_trace
 router = APIRouter(prefix="/lab", tags=["lab"])
 _ORCHESTRATORS: dict[Path, Any] = {}
 _ORCHESTRATORS_LOCK = threading.Lock()
+_MAX_RUN_REQUEST_BYTES = 16 * 1024
 
 
 def _require_lab(
@@ -141,13 +142,19 @@ def scenarios(settings: Settings = Depends(_require_lab)) -> Response:
 
 @router.post("/runs", status_code=status.HTTP_202_ACCEPTED)
 async def create_run(
-    request: dict[str, object],
+    request: Request,
     settings: Settings = Depends(_require_lab),
 ) -> Response:
     from ..services.evaluation_lab.orchestrator import RunConflict, StartRunRequest
 
     try:
-        validated = StartRunRequest.model_validate(request)
+        body = await request.body()
+        if len(body) > _MAX_RUN_REQUEST_BYTES:
+            raise ValueError("run request is too large")
+        payload = json.loads(body)
+        if not isinstance(payload, dict):
+            raise ValueError("run request must be a JSON object")
+        validated = StartRunRequest.model_validate(payload)
         handle = await _run_orchestrator(settings).start(validated)
     except RunConflict as exc:
         raise HTTPException(
