@@ -326,7 +326,12 @@ class RunStore:
             os.fsync(root_fd)
             return True
 
-    def retain_orphaned_execution(self, run_id: UUID) -> ExecutionLease:
+    def retain_orphaned_execution(
+        self,
+        run_id: UUID,
+        *,
+        owner_id: UUID | None = None,
+    ) -> ExecutionLease:
         with self._locked_root(create=True, exclusive=True) as root_fd:
             assert root_fd is not None
             payload = self._read_file(root_fd, _EXECUTION_LEASE_NAME)
@@ -334,7 +339,7 @@ class RunStore:
             if payload is None:
                 orphaned = ExecutionLease(
                     run_id=run_id,
-                    owner_id=uuid4(),
+                    owner_id=owner_id or uuid4(),
                     pid=0,
                     acquired_at=now,
                     orphaned=True,
@@ -349,7 +354,9 @@ class RunStore:
                     raise RuntimeError("execution block belongs to another run")
                 if current.orphaned:
                     return current
-                if self._pid_alive(current.pid):
+                if owner_id is not None and current.owner_id != owner_id:
+                    raise RuntimeError("execution lease belongs to another owner")
+                if self._pid_alive(current.pid) and owner_id is None:
                     raise RuntimeError("cannot orphan a live execution owner")
                 orphaned = current.model_copy(
                     update={"orphaned": True, "orphaned_at": now}

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import threading
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from concurrent.futures import Future
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from types import MappingProxyType
@@ -271,6 +274,28 @@ class _SideAttemptCancelled(asyncio.CancelledError):
     def __init__(self, outcome: PersistedSideOutcome) -> None:
         self.outcome = outcome
         super().__init__("paired run execution was cancelled")
+
+
+@dataclass(frozen=True)
+class _SideWork:
+    task: asyncio.Task[Any]
+    thread: threading.Thread | None = None
+    thread_result: Future[Any] | None = None
+
+    @property
+    def done(self) -> bool:
+        return self.task.done() if self.thread is None else not self.thread.is_alive()
+
+    def cancel(self) -> None:
+        if self.thread is None:
+            self.task.cancel()
+
+    def result(self) -> object:
+        if self.thread is None:
+            return self.task.result()
+        if self.thread.is_alive() or self.thread_result is None:
+            raise asyncio.InvalidStateError("synchronous side work is still running")
+        return self.thread_result.result()
 
 
 async def _await(value: Any) -> Any:
@@ -596,14 +621,14 @@ class PairedRunOrchestrator:
     @classmethod
     def _completed_outcome(
         cls,
-        task: asyncio.Task[Any],
+        work: _SideWork,
         *,
         record: PairedRunResult,
         scenario: ScenarioDefinition,
         system: MeasuredSystem,
     ) -> PersistedSideOutcome:
         try:
-            output = cls._normalize_output(task.result())
+            output = cls._normalize_output(work.result())
         except asyncio.CancelledError:
             return PersistedSideOutcome(
                 system=system,
@@ -630,11 +655,39 @@ class PairedRunOrchestrator:
         )
 
     @staticmethod
-    async def _invoke_runner(runner: Runner, kwargs: dict[str, object]) -> object:
+    def _start_side_work(
+        runner: Runner,
+        kwargs: dict[str, object],
+        *,
+        name: str,
+    ) -> _SideWork:
         if inspect.iscoroutinefunction(runner):
-            return await runner(**kwargs)
-        value = await asyncio.to_thread(runner, **kwargs)
-        return await value if inspect.isawaitable(value) else value
+            return _SideWork(task=asyncio.create_task(runner(**kwargs), name=name))
+
+        result: Future[Any] = Future()
+
+        def _invoke() -> None:
+            try:
+                value = runner(**kwargs)
+                if inspect.isawaitable(value):
+                    value = asyncio.run(value)
+                result.set_result(value)
+            except BaseException as exc:
+                result.set_exception(exc)
+
+        thread = threading.Thread(target=_invoke, name=f"{name}-thread")
+        thread.start()
+
+        async def _observe_thread() -> object:
+            while thread.is_alive():
+                await asyncio.sleep(0.005)
+            return result.result()
+
+        return _SideWork(
+            task=asyncio.create_task(_observe_thread(), name=name),
+            thread=thread,
+            thread_result=result,
+        )
 
     def _watch_task(self, task: asyncio.Task[Any]) -> None:
         self._active_tasks.add(task)
@@ -650,12 +703,15 @@ class PairedRunOrchestrator:
         task.add_done_callback(_done)
 
     @staticmethod
-    async def _join_supervised_task(task: asyncio.Task[Any]) -> None:
+    async def _join_supervised_work(work: _SideWork) -> None:
         """Retain ownership until work ends, even if the observer is cancelled."""
 
-        while not task.done():
+        while not work.done:
             try:
-                await asyncio.shield(task)
+                if work.task.done():
+                    await asyncio.sleep(0.005)
+                else:
+                    await asyncio.shield(work.task)
             except asyncio.CancelledError:
                 continue
             except Exception:
@@ -672,7 +728,7 @@ class PairedRunOrchestrator:
 
     async def _schedule_late_monitor(
         self,
-        task: asyncio.Task[Any],
+        work: _SideWork,
         *,
         record: PairedRunResult,
         scenario: ScenarioDefinition,
@@ -686,10 +742,11 @@ class PairedRunOrchestrator:
 
         async def _observe() -> None:
             started.set()
+            evidence_persisted = False
             try:
-                await self._join_supervised_task(task)
+                await self._join_supervised_work(work)
                 outcome = self._completed_outcome(
-                    task,
+                    work,
                     record=record,
                     scenario=scenario,
                     system=system,
@@ -707,6 +764,11 @@ class PairedRunOrchestrator:
                         None,
                     )
                     if pair is not None:
+                        matching_timeout = any(
+                            item.system is system
+                            and item.status is OutcomeStatus.TIMEOUT
+                            for item in pair.outcomes
+                        )
                         outcomes = tuple(
                             item.model_copy(update={"late_completion": late})
                             if item.system is system
@@ -714,25 +776,40 @@ class PairedRunOrchestrator:
                             else item
                             for item in pair.outcomes
                         )
-                        updated_pair = pair.model_copy(update={"outcomes": outcomes})
-                        event = OrchestrationTraceEvent(
-                            sequence=len(current.trace) + 1,
-                            kind="late",
-                            occurred_at=self._clock(),
-                            pair_id=scheduled.pair_id,
-                            system=system,
-                            detail=f"late_{late.status.value}",
+                        already_persisted = any(
+                            item.system is system
+                            and item.late_completion is not None
+                            for item in pair.outcomes
                         )
-                        self._persist(
-                            current,
-                            pairs=self._replace_pair(current, updated_pair),
-                            trace=current.trace + (event,),
-                        )
+                        if matching_timeout:
+                            updated_pair = pair.model_copy(update={"outcomes": outcomes})
+                            event = OrchestrationTraceEvent(
+                                sequence=len(current.trace) + 1,
+                                kind="late",
+                                occurred_at=self._clock(),
+                                pair_id=scheduled.pair_id,
+                                system=system,
+                                detail=f"late_{late.status.value}",
+                            )
+                            self._persist(
+                                current,
+                                pairs=self._replace_pair(current, updated_pair),
+                                trace=current.trace + (event,),
+                            )
+                            evidence_persisted = True
+                        elif already_persisted:
+                            evidence_persisted = True
                 finally:
                     self._state_lock.release()
             finally:
                 try:
-                    self.store.release_execution(record.run_id, owner_id)
+                    if evidence_persisted and work.done:
+                        self.store.release_execution(record.run_id, owner_id)
+                    else:
+                        self.store.retain_orphaned_execution(
+                            record.run_id,
+                            owner_id=owner_id,
+                        )
                 finally:
                     self._deferred_leases.discard(lease_key)
 
@@ -760,49 +837,46 @@ class PairedRunOrchestrator:
                 status=OutcomeStatus.UNAVAILABLE,
                 reason="side runner is not configured",
             )
-        runner_is_async = inspect.iscoroutinefunction(runner)
-        task = asyncio.create_task(
-            self._invoke_runner(
-                runner,
-                {
-                    "run_id": record.run_id,
-                    "system": system,
-                    "scheduled": scheduled,
-                    "scenario": scenario,
-                },
-            ),
+        work = self._start_side_work(
+            runner,
+            {
+                "run_id": record.run_id,
+                "system": system,
+                "scheduled": scheduled,
+                "scenario": scenario,
+            },
             name=f"lab-{record.run_id}-{scheduled.pair_id}-{system.value}",
         )
-        self._watch_task(task)
+        self._watch_task(work.task)
         cancellation_sent = False
         try:
-            done, _pending = await asyncio.wait({task}, timeout=self._side_timeout)
-            if done:
+            await asyncio.wait({work.task}, timeout=self._side_timeout)
+            if work.done:
                 return self._completed_outcome(
-                    task,
+                    work,
                     record=record,
                     scenario=scenario,
                     system=system,
                 )
 
-            if runner_is_async:
-                task.cancel()
+            if work.thread is None:
+                work.cancel()
                 cancellation_sent = True
             late: LateCompletion | None = None
             if self._late_grace:
-                late_done, _ = await asyncio.wait({task}, timeout=self._late_grace)
-                if late_done:
+                await asyncio.wait({work.task}, timeout=self._late_grace)
+                if work.done:
                     late = self._late_from_outcome(
                         self._completed_outcome(
-                            task,
+                            work,
                             record=record,
                             scenario=scenario,
                             system=system,
                         )
                     )
-            if not task.done():
+            if not work.done:
                 await self._schedule_late_monitor(
-                    task,
+                    work,
                     record=record,
                     scenario=scenario,
                     scheduled=scheduled,
@@ -816,11 +890,11 @@ class PairedRunOrchestrator:
                 late_completion=late,
             )
         except asyncio.CancelledError:
-            if runner_is_async and not cancellation_sent:
-                task.cancel()
-            await self._join_supervised_task(task)
+            if work.thread is None and not cancellation_sent:
+                work.cancel()
+            await self._join_supervised_work(work)
             completed = self._completed_outcome(
-                task,
+                work,
                 record=record,
                 scenario=scenario,
                 system=system,

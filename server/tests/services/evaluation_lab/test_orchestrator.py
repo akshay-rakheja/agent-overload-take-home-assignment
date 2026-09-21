@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -647,6 +648,288 @@ async def test_synchronous_runner_is_supervised_without_blocking_event_loop(tmp_
     assert result.status is RunStatus.BLOCKED
     if orchestrator.active_tasks:
         await asyncio.gather(*orchestrator.active_tasks, return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_synchronous_success_and_failure_are_terminalized_normally(tmp_path) -> None:
+    scenario = _scenario()
+
+    def runner(*, run_id, system, scheduled, **_kwargs):
+        if system is MeasuredSystem.ENHANCED:
+            raise RuntimeError("synthetic synchronous failure")
+        return SideRunOutput(
+            status=OutcomeStatus.SUCCESS,
+            model_id="fake/model",
+            results=(_result(run_id, system, scheduled.pair_id),),
+        )
+
+    orchestrator = _offline_orchestrator(
+        store=RunStore(tmp_path / ".lab" / "runs"),
+        scenarios=(scenario,),
+        resetter=lambda **kwargs: _verification(kwargs["system"]),
+        runners={system: runner for system in MeasuredSystem},
+        side_timeout_seconds=1,
+    )
+    run_id = (
+        await orchestrator.start(
+            StartRunRequest(request_id=REQUEST_ID, scenario_ids=(scenario.scenario_id,))
+        )
+    ).run_id
+
+    result = await orchestrator.execute(run_id)
+
+    assert result.status is RunStatus.PARTIAL_FAILURE
+    assert {
+        outcome.status for pair in result.pairs for outcome in pair.outcomes
+    } == {OutcomeStatus.SUCCESS, OutcomeStatus.FAILURE}
+    assert not orchestrator.active_tasks
+
+
+def _blocking_sync_runner(started, release, finished):
+    def runner(*, run_id, system, scheduled, **_kwargs):
+        started.set()
+        release.wait(5)
+        finished.set()
+        return SideRunOutput(
+            status=OutcomeStatus.SUCCESS,
+            model_id="fake/model",
+            results=(_result(run_id, system, scheduled.pair_id),),
+        )
+
+    return runner
+
+
+@pytest.mark.anyio
+async def test_cancelling_sync_wrapper_and_observer_retains_actual_thread_ownership(
+    tmp_path,
+) -> None:
+    scenario = _scenario()
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    root = tmp_path / ".lab" / "runs"
+    runner = _blocking_sync_runner(started, release, finished)
+    owner = _offline_orchestrator(
+        store=RunStore(root),
+        scenarios=(scenario,),
+        resetter=lambda **kwargs: _verification(kwargs["system"]),
+        runners={system: runner for system in MeasuredSystem},
+        side_timeout_seconds=0.001,
+        late_completion_grace_seconds=0.001,
+    )
+    run_id = (
+        await owner.start(
+            StartRunRequest(request_id=REQUEST_ID, scenario_ids=(scenario.scenario_id,))
+        )
+    ).run_id
+    result = await owner.execute(run_id)
+    assert result.status is RunStatus.BLOCKED
+    assert started.is_set() and not finished.is_set()
+    tasks = owner.active_tasks
+    assert len(tasks) == 2
+    for task in tasks:
+        task.cancel()
+    joined = asyncio.gather(*tasks, return_exceptions=True)
+    await asyncio.sleep(0)
+
+    try:
+        assert not finished.is_set()
+        assert not joined.done()
+        assert RunStore(root).execution_lease() is not None
+        assert any(not task.done() for task in tasks)
+        second = _offline_orchestrator(
+            store=RunStore(root),
+            scenarios=(scenario,),
+            resetter=lambda **kwargs: _verification(kwargs["system"]),
+            runners={system: runner for system in MeasuredSystem},
+        )
+        with pytest.raises(RunConflict, match="active"):
+            await second.start(
+                StartRunRequest(
+                    request_id=UUID("ffffffff-ffff-4fff-8fff-ffffffffffff"),
+                    scenario_ids=(scenario.scenario_id,),
+                )
+            )
+    finally:
+        release.set()
+        await joined
+
+    observed = owner.status(run_id).pairs[0].outcomes[0]
+    assert finished.is_set()
+    assert observed.status is OutcomeStatus.TIMEOUT
+    assert observed.late_completion is not None
+    assert observed.late_completion.status is OutcomeStatus.SUCCESS
+    assert RunStore(root).execution_lease() is None
+
+
+@pytest.mark.anyio
+async def test_event_loop_shutdown_waits_for_actual_sync_work_before_releasing_lease(
+    tmp_path,
+) -> None:
+    scenario = _scenario()
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    shutdown_started = threading.Event()
+    shutdown_finished = threading.Event()
+    root = tmp_path / ".lab" / "runs"
+    runner = _blocking_sync_runner(started, release, finished)
+    state: dict[str, object] = {}
+    errors: list[BaseException] = []
+
+    def run_controller_loop() -> None:
+        async def launch() -> None:
+            owner = _offline_orchestrator(
+                store=RunStore(root),
+                scenarios=(scenario,),
+                resetter=lambda **kwargs: _verification(kwargs["system"]),
+                runners={system: runner for system in MeasuredSystem},
+                side_timeout_seconds=0.001,
+                late_completion_grace_seconds=0,
+            )
+            run_id = (
+                await owner.start(
+                    StartRunRequest(
+                        request_id=REQUEST_ID,
+                        scenario_ids=(scenario.scenario_id,),
+                    )
+                )
+            ).run_id
+            state["run_id"] = run_id
+            await owner.execute(run_id)
+            for task in owner.active_tasks:
+                task.cancel()
+            shutdown_started.set()
+
+        try:
+            asyncio.run(launch())
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            shutdown_finished.set()
+
+    controller = threading.Thread(target=run_controller_loop)
+    controller.start()
+    assert await asyncio.to_thread(shutdown_started.wait, 2)
+    await asyncio.sleep(0.02)
+
+    try:
+        assert started.is_set() and not finished.is_set()
+        assert not shutdown_finished.is_set()
+        assert RunStore(root).execution_lease() is not None
+        second = _offline_orchestrator(
+            store=RunStore(root),
+            scenarios=(scenario,),
+            resetter=lambda **kwargs: _verification(kwargs["system"]),
+            runners={system: runner for system in MeasuredSystem},
+        )
+        with pytest.raises(RunConflict, match="active"):
+            await second.start(
+                StartRunRequest(
+                    request_id=UUID("ffffffff-ffff-4fff-8fff-fffffffffff0"),
+                    scenario_ids=(scenario.scenario_id,),
+                )
+            )
+    finally:
+        release.set()
+        await asyncio.to_thread(controller.join, 2)
+
+    assert not controller.is_alive()
+    assert not errors
+    assert finished.is_set()
+    run_id = state["run_id"]
+    assert isinstance(run_id, UUID)
+    observed = RunStore(root).get(run_id)
+    assert observed is not None
+    assert observed.pairs[0].outcomes[0].late_completion is not None
+    assert RunStore(root).execution_lease() is None
+
+
+@pytest.mark.anyio
+async def test_cancelling_only_sync_wrapper_keeps_observer_and_lease_live(tmp_path) -> None:
+    scenario = _scenario()
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    root = tmp_path / ".lab" / "runs"
+    runner = _blocking_sync_runner(started, release, finished)
+    owner = _offline_orchestrator(
+        store=RunStore(root),
+        scenarios=(scenario,),
+        resetter=lambda **kwargs: _verification(kwargs["system"]),
+        runners={system: runner for system in MeasuredSystem},
+        side_timeout_seconds=0.001,
+        late_completion_grace_seconds=0,
+    )
+    run_id = (
+        await owner.start(
+            StartRunRequest(request_id=REQUEST_ID, scenario_ids=(scenario.scenario_id,))
+        )
+    ).run_id
+    await owner.execute(run_id)
+    wrapper = next(
+        task for task in owner.active_tasks if not task.get_name().startswith("lab-late-")
+    )
+    wrapper.cancel()
+    await asyncio.gather(wrapper, return_exceptions=True)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    try:
+        assert not finished.is_set()
+        assert RunStore(root).execution_lease() is not None
+        assert any(
+            task.get_name().startswith("lab-late-") and not task.done()
+            for task in owner.active_tasks
+        )
+    finally:
+        release.set()
+        await asyncio.gather(*owner.active_tasks, return_exceptions=True)
+
+    assert finished.is_set()
+    assert RunStore(root).execution_lease() is None
+
+
+@pytest.mark.anyio
+async def test_sync_late_persistence_failure_retains_orphan_block(
+    tmp_path, monkeypatch
+) -> None:
+    scenario = _scenario()
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    root = tmp_path / ".lab" / "runs"
+    runner = _blocking_sync_runner(started, release, finished)
+    store = RunStore(root)
+    owner = _offline_orchestrator(
+        store=store,
+        scenarios=(scenario,),
+        resetter=lambda **kwargs: _verification(kwargs["system"]),
+        runners={system: runner for system in MeasuredSystem},
+        side_timeout_seconds=0.001,
+        late_completion_grace_seconds=0,
+    )
+    run_id = (
+        await owner.start(
+            StartRunRequest(request_id=REQUEST_ID, scenario_ids=(scenario.scenario_id,))
+        )
+    ).run_id
+    await owner.execute(run_id)
+    real_save = store.save
+
+    def fail_late_save(record):
+        if record.trace and record.trace[-1].kind == "late":
+            raise OSError("synthetic late persistence failure")
+        real_save(record)
+
+    monkeypatch.setattr(store, "save", fail_late_save)
+    release.set()
+    await asyncio.gather(*owner.active_tasks, return_exceptions=True)
+    lease = RunStore(root).execution_lease()
+
+    assert finished.is_set()
+    assert lease is not None
+    assert lease.orphaned is True
 
 
 @pytest.mark.anyio
