@@ -633,8 +633,8 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
     gmail_evidence: list[JsonValue] = []
     timings: list[JsonValue] = []
     errors: list[JsonValue] = []
-    usage: dict[str, ObservedValue[int]] = {}
-    cost: dict[str, ObservedValue[Any]] = {}
+    usage: dict[str, dict[str, Any]] = {}
+    cost: dict[str, dict[str, Any]] = {}
 
     for event in validated_events:
         payload = redact_value(event.payload)
@@ -683,11 +683,32 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
         elif event.kind is TraceEventKind.USAGE:
             for key in ("input_tokens", "output_tokens", "cached_tokens", "total_tokens"):
                 if key in payload:
-                    usage[key] = _available(payload[key])
+                    observed = payload[key]
+                    usage[key] = (
+                        observed
+                        if isinstance(observed, dict) and "availability" in observed
+                        else _available(observed).model_dump()
+                    )
+            for source, target in (
+                ("prompt_tokens", "input_tokens"),
+                ("completion_tokens", "output_tokens"),
+            ):
+                observed = payload.get(source)
+                if isinstance(observed, dict) and "availability" in observed:
+                    usage[target] = observed
         elif event.kind is TraceEventKind.COST:
             for key in ("amount", "currency"):
                 if key in payload:
-                    cost[key] = _available(payload[key])
+                    observed = payload[key]
+                    cost[key] = (
+                        observed
+                        if isinstance(observed, dict) and "availability" in observed
+                        else _available(observed).model_dump()
+                    )
+            provider_cost = payload.get("provider_cost_usd")
+            if isinstance(provider_cost, dict) and "availability" in provider_cost:
+                cost["amount"] = provider_cost
+                cost["currency"] = _available("USD").model_dump()
         elif event.kind in {TraceEventKind.ERROR, TraceEventKind.OBSERVABILITY_WARNING}:
             errors.append(payload)
 
@@ -704,7 +725,10 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
         system=first.system,
         usage=UsagePlaceholder(**usage),
         cost=CostPlaceholder(**cost),
-        **values,
+        **{
+            key: value.model_dump() if isinstance(value, ObservedValue) else value
+            for key, value in values.items()
+        },
     )
     availability = {
         field: observed.availability

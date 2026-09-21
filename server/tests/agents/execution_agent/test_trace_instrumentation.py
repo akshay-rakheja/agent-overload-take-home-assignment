@@ -253,13 +253,15 @@ def test_execution_tool_timing_excludes_nested_gmail_trace_sink_latency(
     assert success is True
     assert result == {"items": []}
     assert [
-        (event.kind.value, event.payload["stage"])
+        (event.kind.value, event.payload.get("stage", event.payload.get("phase")))
         for event in sink.events
     ] == [
         ("tool_call", "started"),
         ("gmail_evidence", "completed"),
+        ("phase_timing", "gmail_tool"),
         ("tool_call", "completed"),
     ]
+    assert _events(sink, TraceEventKind.PHASE_TIMING)[0].payload["elapsed_ns"] == 13
     assert sink.events[-1].payload["elapsed_ns"] == 13
 
 

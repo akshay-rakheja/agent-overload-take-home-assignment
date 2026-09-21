@@ -8,6 +8,7 @@ from ...agents.interaction_agent.runtime import InteractionAgentRuntime
 from ...logging_config import logger
 from ...models import ChatMessage, ChatRequest
 from ...utils import error_response
+from ..evaluation_lab.usage import PhaseName, monotonic_phase
 
 
 # Extract the most recent user message from the chat request payload
@@ -40,7 +41,8 @@ async def handle_chat_request(payload: ChatRequest) -> Union[PlainTextResponse, 
 
     async def _run_interaction() -> None:
         try:
-            await runtime.execute(user_message=user_content)
+            with monotonic_phase(PhaseName.TOTAL_RUN):
+                await runtime.execute(user_message=user_content)
         except Exception as exc:  # pragma: no cover - defensive
             logger.error("chat task failed", extra={"error": str(exc)})
 

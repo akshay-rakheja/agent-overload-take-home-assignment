@@ -8,6 +8,7 @@ from typing import Dict, List
 from ...config import MAX_AGENT_CANDIDATES, get_settings
 from ...services.evaluation_lab.models import TraceEventKind
 from ...services.evaluation_lab.trace import emit_trace
+from ...services.evaluation_lab.usage import PhaseName, monotonic_phase
 from ...services.execution import (
     AgentCandidate,
     AgentDirectory,
@@ -85,8 +86,9 @@ def build_candidate_context(
     context_limit = get_settings().agent_routing_context_max_characters
     bounded_transcript = transcript[-context_limit:]
     query = RetrievalQuery(text=latest_text, conversation_context=bounded_transcript)
-    candidates = AgentRetriever(resolved_directory.list_records).retrieve(query)
-    decision = AgentRouter().route(query, candidates)
+    with monotonic_phase(PhaseName.RETRIEVAL_ROUTING):
+        candidates = AgentRetriever(resolved_directory.list_records).retrieve(query)
+        decision = AgentRouter().route(query, candidates)
     context = CandidateContext(candidates=tuple(candidates), decision=decision)
     emit_trace(
         TraceEventKind.CANDIDATES,

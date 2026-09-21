@@ -132,7 +132,13 @@ def adapt_baseline(observation: BaselineObservation) -> SystemRunResult:
     added_names, removed_names = _ordered_multiset_delta(
         observation.roster_before, observation.roster_after
     )
-    timings = [call.model_dump(mode="json") for call in observation.raw_model_calls]
+    timings = [
+        {
+            **call.model_dump(mode="json", exclude_defaults=True),
+            "error_type": call.error_type,
+        }
+        for call in observation.raw_model_calls
+    ]
     errors = [error.model_dump(mode="json") for error in observation.errors]
     values: dict[str, Any] = {
         "revision": _unavailable("baseline observation does not carry revision metadata"),
@@ -206,7 +212,10 @@ def adapt_baseline(observation: BaselineObservation) -> SystemRunResult:
         run_id=run_id,
         turn_id=turn_id,
         system="baseline",
-        **values,
+        **{
+            key: value.model_dump() if isinstance(value, ObservedValue) else value
+            for key, value in values.items()
+        },
     )
     availability = {
         field: observed.availability

@@ -22,7 +22,7 @@ from server.agents.interaction_agent import agent as interaction_agent
 from server.agents.interaction_agent import runtime as interaction_runtime
 from server.agents.interaction_agent import tools as interaction_tools
 from server.agents.interaction_agent.runtime import InteractionAgentRuntime
-from server.config import Settings
+from server.config import ModelCallConfig, ModelRole, Settings
 from server.services.evaluation_lab.models import TraceContext
 from server.services.evaluation_lab.trace import JsonlTraceStore, NullTraceSink, trace_scope
 from server.services.execution.directory import AgentDirectory
@@ -69,16 +69,20 @@ class DeterministicInteractionTransport:
     async def __call__(
         self,
         *,
-        model: str,
+        model: str | None = None,
+        config: ModelCallConfig | None = None,
+        role: ModelRole | None = None,
         messages: list[dict[str, Any]],
         system: str,
         api_key: str,
         tools: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        del api_key
+        del api_key, role
+        effective_model = config.model_id if config is not None else model
+        assert effective_model is not None
         self.requests.append(
             {
-                "model": model,
+                "model": effective_model,
                 "messages": copy.deepcopy(messages),
                 "system": system,
                 "tools": copy.deepcopy(tools),
@@ -151,16 +155,20 @@ class DeterministicExecutionTransport:
     async def __call__(
         self,
         *,
-        model: str,
+        model: str | None = None,
+        config: ModelCallConfig | None = None,
+        role: ModelRole | None = None,
         messages: list[dict[str, Any]],
         system: str,
         api_key: str,
         tools: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
-        del api_key
+        del api_key, role
+        effective_model = config.model_id if config is not None else model
+        assert effective_model is not None
         self.requests.append(
             {
-                "model": model,
+                "model": effective_model,
                 "messages": copy.deepcopy(messages),
                 "system": system,
                 "tools": copy.deepcopy(tools),
