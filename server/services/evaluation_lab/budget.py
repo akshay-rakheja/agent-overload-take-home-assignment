@@ -129,6 +129,8 @@ class _LedgerState(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_version: Literal[1] = 1
     ledger_id: UUID
+    generation: int = Field(ge=0)
+    previous_state_sha256: str | None
     cap_usd: Decimal
     entries: tuple[LedgerEntry, ...] = ()
 
@@ -137,6 +139,26 @@ class _LedgerState(BaseModel):
     def _valid_cap(cls, value: object) -> Decimal:
         return _amount(value, name="cap_usd", positive=True)
 
+    @field_validator("previous_state_sha256")
+    @classmethod
+    def _valid_previous_hash(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.casefold()
+        if len(normalized) != 64 or any(
+            character not in "0123456789abcdef" for character in normalized
+        ):
+            raise ValueError("previous state digest must be SHA-256")
+        return normalized
+
+    @model_validator(mode="after")
+    def _valid_chain_position(self) -> "_LedgerState":
+        if self.generation == 0 and self.previous_state_sha256 is not None:
+            raise ValueError("initial ledger state cannot have a predecessor")
+        if self.generation > 0 and self.previous_state_sha256 is None:
+            raise ValueError("committed ledger state requires a predecessor digest")
+        return self
+
 
 class _LedgerOwner(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -144,6 +166,18 @@ class _LedgerOwner(BaseModel):
     ledger_id: UUID
     root_device: int = Field(ge=0)
     root_inode: int = Field(gt=0)
+    state_generation: int = Field(ge=0)
+    state_sha256: str
+
+    @field_validator("state_sha256")
+    @classmethod
+    def _valid_state_hash(cls, value: str) -> str:
+        normalized = value.casefold()
+        if len(normalized) != 64 or any(
+            character not in "0123456789abcdef" for character in normalized
+        ):
+            raise ValueError("owner state digest must be SHA-256")
+        return normalized
 
 
 _THREAD_LOCKS: dict[Path, threading.RLock] = {}
@@ -181,6 +215,7 @@ class CostLedger:
         self._owner_key = hashlib.sha256(identity_path).hexdigest()
         self._lock = _thread_lock(self.root)
         self._bound_owner: _LedgerOwner | None = None
+        self._active_owners_fd: int | None = None
 
     def _open_lab(self, *, create: bool) -> int | None:
         flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -309,6 +344,14 @@ class CostLedger:
             owner.model_dump_json().encode("utf-8") + b"\n",
         )
 
+    @staticmethod
+    def _state_payload(state: _LedgerState) -> bytes:
+        return state.model_dump_json(indent=None).encode("utf-8") + b"\n"
+
+    @classmethod
+    def _state_digest(cls, state: _LedgerState) -> str:
+        return hashlib.sha256(cls._state_payload(state)).hexdigest()
+
     def _assert_current_root(self, root_fd: int, owner: _LedgerOwner) -> None:
         metadata = os.fstat(root_fd)
         if (metadata.st_dev, metadata.st_ino) != (
@@ -340,20 +383,38 @@ class CostLedger:
         with self._lock:
             lab_fd = self._open_lab(create=True)
             assert lab_fd is not None
-            owners_fd = self._open_directory(lab_fd, _OWNER_DIRECTORY, create=True)
-            assert owners_fd is not None
-            lock_name = f"{self._owner_key}.lock"
-            lock_fd = os.open(
-                lock_name,
-                os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
-                0o600,
-                dir_fd=owners_fd,
-            )
+            owners_fd: int | None = None
+            lock_fd: int | None = None
             root_fd: int | None = None
+            lab_locked = False
             try:
+                fcntl.flock(lab_fd, fcntl.LOCK_EX)
+                lab_locked = True
+                owners_fd = self._open_directory(
+                    lab_fd, _OWNER_DIRECTORY, create=True
+                )
+                assert owners_fd is not None
+                lock_name = f"{self._owner_key}.lock"
+                try:
+                    lock_fd = os.open(
+                        lock_name,
+                        os.O_RDWR
+                        | os.O_CREAT
+                        | getattr(os, "O_NOFOLLOW", 0),
+                        0o600,
+                        dir_fd=owners_fd,
+                    )
+                except OSError as exc:
+                    if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+                        raise ValueError(
+                            "ledger identity lock must not be a symlink"
+                        ) from exc
+                    raise
                 if not stat.S_ISREG(os.fstat(lock_fd).st_mode):
                     raise ValueError("ledger identity lock must be a regular file")
                 fcntl.flock(lock_fd, fcntl.LOCK_EX)
+                fcntl.flock(lab_fd, fcntl.LOCK_UN)
+                lab_locked = False
                 owner = self._read_owner(owners_fd)
                 if owner is None:
                     if self._bound_owner is not None:
@@ -365,18 +426,24 @@ class CostLedger:
                     root_fd = self._open_root_from_lab(lab_fd, create=True)
                     assert root_fd is not None
                     root_metadata = os.fstat(root_fd)
-                    owner = _LedgerOwner(
+                    state = _LedgerState(
                         ledger_id=uuid4(),
+                        generation=0,
+                        previous_state_sha256=None,
+                        cap_usd=self.cap_usd,
+                    )
+                    owner = _LedgerOwner(
+                        ledger_id=state.ledger_id,
                         root_device=root_metadata.st_dev,
                         root_inode=root_metadata.st_ino,
+                        state_generation=state.generation,
+                        state_sha256=self._state_digest(state),
                     )
                     self._bound_owner = owner
-                    self._write_state(
+                    self._atomic_write(
                         root_fd,
-                        _LedgerState(
-                            ledger_id=owner.ledger_id,
-                            cap_usd=self.cap_usd,
-                        ),
+                        _STATE_NAME,
+                        self._state_payload(state),
                     )
                     self._write_owner(owners_fd, owner)
                 else:
@@ -390,20 +457,31 @@ class CostLedger:
                         raise ValueError("ledger root identity disappeared")
                     self._bound_owner = owner
                     self._assert_current_root(root_fd, owner)
-                    state = self._read_state(root_fd)
-                    if state.ledger_id != owner.ledger_id:
-                        raise ValueError("ledger state identity changed")
+                    _, owner = self._recover_or_validate_state(
+                        root_fd, owners_fd, owner
+                    )
+                    self._bound_owner = owner
+                self._active_owners_fd = owners_fd
                 yield root_fd
-                self._assert_current_root(root_fd, owner)
+                current_owner = self._bound_owner
+                if current_owner is None:
+                    raise ValueError("ledger identity disappeared")
+                self._assert_current_root(root_fd, current_owner)
+                self._read_state(root_fd)
             finally:
+                self._active_owners_fd = None
                 if root_fd is not None:
                     os.close(root_fd)
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                os.close(lock_fd)
-                os.close(owners_fd)
+                if lock_fd is not None:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                    os.close(lock_fd)
+                if owners_fd is not None:
+                    os.close(owners_fd)
+                if lab_locked:
+                    fcntl.flock(lab_fd, fcntl.LOCK_UN)
                 os.close(lab_fd)
 
-    def _read_state(self, root_fd: int) -> _LedgerState:
+    def _load_state(self, root_fd: int) -> tuple[_LedgerState, str]:
         try:
             metadata = os.stat(_STATE_NAME, dir_fd=root_fd, follow_symlinks=False)
         except FileNotFoundError:
@@ -429,22 +507,77 @@ class CostLedger:
             raise ValueError("persisted ledger cap differs from configured cap")
         if len({entry.call_id for entry in state.entries}) != len(state.entries):
             raise ValueError("ledger state contains duplicate call ids")
+        return state, hashlib.sha256(b"".join(chunks)).hexdigest()
+
+    @staticmethod
+    def _state_matches_owner(
+        state: _LedgerState, digest: str, owner: _LedgerOwner
+    ) -> bool:
+        return (
+            state.ledger_id == owner.ledger_id
+            and state.generation == owner.state_generation
+            and digest == owner.state_sha256
+        )
+
+    def _recover_or_validate_state(
+        self,
+        root_fd: int,
+        owners_fd: int,
+        owner: _LedgerOwner,
+    ) -> tuple[_LedgerState, _LedgerOwner]:
+        state, digest = self._load_state(root_fd)
+        if self._state_matches_owner(state, digest, owner):
+            return state, owner
+        if (
+            state.ledger_id == owner.ledger_id
+            and state.generation == owner.state_generation + 1
+            and state.previous_state_sha256 == owner.state_sha256
+        ):
+            recovered = owner.model_copy(
+                update={
+                    "state_generation": state.generation,
+                    "state_sha256": digest,
+                }
+            )
+            self._write_owner(owners_fd, recovered)
+            return state, recovered
+        raise ValueError("ledger state rollback or digest mismatch")
+
+    def _read_state(self, root_fd: int) -> _LedgerState:
+        owner = self._bound_owner
+        if owner is None:
+            raise ValueError("ledger identity disappeared")
+        state, digest = self._load_state(root_fd)
+        if not self._state_matches_owner(state, digest, owner):
+            raise ValueError("ledger state rollback or digest mismatch")
         return state
 
-    def _write_state(self, root_fd: int, state: _LedgerState) -> None:
+    def _write_state(self, root_fd: int, state: _LedgerState) -> _LedgerState:
         owner = self._bound_owner
-        if owner is None or state.ledger_id != owner.ledger_id:
+        owners_fd = self._active_owners_fd
+        if owner is None or owners_fd is None or state.ledger_id != owner.ledger_id:
             raise ValueError("ledger state identity changed")
         self._assert_current_root(root_fd, owner)
-        try:
-            metadata = os.stat(_STATE_NAME, dir_fd=root_fd, follow_symlinks=False)
-        except FileNotFoundError:
-            metadata = None
-        if metadata is not None and not stat.S_ISREG(metadata.st_mode):
-            raise ValueError("ledger state path must be a regular file")
-        payload = state.model_dump_json(indent=None).encode("utf-8") + b"\n"
+        self._read_state(root_fd)
+        committed = state.model_copy(
+            update={
+                "generation": owner.state_generation + 1,
+                "previous_state_sha256": owner.state_sha256,
+            }
+        )
+        payload = self._state_payload(committed)
+        digest = hashlib.sha256(payload).hexdigest()
         self._atomic_write(root_fd, _STATE_NAME, payload)
-        self._assert_current_root(root_fd, owner)
+        updated_owner = owner.model_copy(
+            update={
+                "state_generation": committed.generation,
+                "state_sha256": digest,
+            }
+        )
+        self._write_owner(owners_fd, updated_owner)
+        self._bound_owner = updated_owner
+        self._assert_current_root(root_fd, updated_owner)
+        return committed
 
     @staticmethod
     def _snapshot_for(state: _LedgerState) -> LedgerSnapshot:
@@ -499,6 +632,8 @@ class CostLedger:
                 root_fd,
                 _LedgerState(
                     ledger_id=state.ledger_id,
+                    generation=state.generation,
+                    previous_state_sha256=state.previous_state_sha256,
                     cap_usd=state.cap_usd,
                     entries=(*state.entries, entry),
                 ),
@@ -548,6 +683,8 @@ class CostLedger:
             )
             new_state = _LedgerState(
                 ledger_id=state.ledger_id,
+                generation=state.generation,
+                previous_state_sha256=state.previous_state_sha256,
                 cap_usd=state.cap_usd,
                 entries=tuple(entries),
             )
@@ -581,6 +718,8 @@ class CostLedger:
             )
             new_state = _LedgerState(
                 ledger_id=state.ledger_id,
+                generation=state.generation,
+                previous_state_sha256=state.previous_state_sha256,
                 cap_usd=state.cap_usd,
                 entries=tuple(entries),
             )
@@ -612,6 +751,8 @@ class CostLedger:
                 )
             new_state = _LedgerState(
                 ledger_id=state.ledger_id,
+                generation=state.generation,
+                previous_state_sha256=state.previous_state_sha256,
                 cap_usd=state.cap_usd,
                 entries=tuple(entries),
             )

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal, localcontext
 from pathlib import Path
@@ -46,6 +46,18 @@ def _pricing(*, alternatives: tuple[PriceSchedule, ...] = ()) -> PricingSnapshot
         response_sha256="a" * 64,
         alternative_prices=alternatives,
     )
+
+
+def _reserve_in_process(
+    root: str, amount: str, call_id: str
+) -> tuple[str, str | None]:
+    try:
+        CostLedger(Path(root)).reserve(Decimal(amount), call_id=UUID(call_id))
+    except BudgetExceeded:
+        return "budget_exceeded", None
+    except BaseException as exc:
+        return "unexpected", f"{type(exc).__name__}: {exc}"
+    return "accepted", None
 
 
 def test_pricing_snapshot_sanitizes_metadata_and_persists_only_bounded_fields(
@@ -491,6 +503,114 @@ def test_ledger_fails_closed_if_initialized_state_disappears(tmp_path: Path) -> 
         CostLedger(root).snapshot()
 
 
+def test_ledger_rejects_rollback_to_valid_earlier_same_identity_state(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / ".lab" / "runs" / "cost-ledger"
+    ledger = CostLedger(root)
+    ledger.snapshot()
+    state_path = root / "cost-ledger.json"
+    initial_state = state_path.read_bytes()
+    reservation = ledger.reserve(Decimal("10"), call_id=uuid4())
+    ledger.reconcile(
+        reservation,
+        Decimal("10"),
+        source=CostSource.PROVIDER_REPORTED,
+        outcome="success",
+    )
+    assert ledger.snapshot().spent_usd == Decimal("10")
+    rollback = root / ".rollback.json"
+    rollback.write_bytes(initial_state)
+    rollback.replace(state_path)
+
+    with pytest.raises(ValueError, match="state.*(rollback|identity|digest)"):
+        ledger.snapshot()
+    with pytest.raises(ValueError, match="state.*(rollback|identity|digest)"):
+        ledger.reserve(Decimal("0.01"), call_id=uuid4())
+    with pytest.raises(ValueError, match="state.*(rollback|identity|digest)"):
+        CostLedger(root).reserve(Decimal("10"), call_id=uuid4())
+
+
+def test_ledger_detects_valid_same_identity_rollback_during_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / ".lab" / "runs" / "cost-ledger"
+    ledger = CostLedger(root)
+    ledger.snapshot()
+    state_path = root / "cost-ledger.json"
+    initial_state = state_path.read_bytes()
+    reservation = ledger.reserve(Decimal("10"), call_id=uuid4())
+    reached_write = threading.Event()
+    continue_write = threading.Event()
+    real_write = ledger._write_state
+    outcome: list[BaseException | str] = []
+
+    def pause_before_write(root_fd: int, state) -> None:
+        reached_write.set()
+        assert continue_write.wait(timeout=5)
+        real_write(root_fd, state)
+
+    monkeypatch.setattr(ledger, "_write_state", pause_before_write)
+
+    def reconcile() -> None:
+        try:
+            ledger.reconcile(
+                reservation,
+                Decimal("10"),
+                source=CostSource.PROVIDER_REPORTED,
+                outcome="success",
+            )
+        except BaseException as exc:
+            outcome.append(exc)
+        else:
+            outcome.append("accepted")
+
+    worker = threading.Thread(target=reconcile)
+    worker.start()
+    assert reached_write.wait(timeout=5)
+    rollback = root / ".in-flight-rollback.json"
+    rollback.write_bytes(initial_state)
+    rollback.replace(state_path)
+    continue_write.set()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], ValueError)
+    assert "state" in str(outcome[0])
+    with pytest.raises(ValueError, match="state.*(rollback|identity|digest)"):
+        CostLedger(root).reserve(Decimal("0.01"), call_id=uuid4())
+
+
+def test_interrupted_owner_update_recovers_newer_committed_charge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / ".lab" / "runs" / "cost-ledger"
+    ledger = CostLedger(root)
+    reservation = ledger.reserve(Decimal("0.25"), call_id=uuid4())
+    real_write_owner = ledger._write_owner
+
+    def fail_owner_update(_owners_fd: int, _owner) -> None:
+        raise OSError("fixture owner update interruption")
+
+    monkeypatch.setattr(ledger, "_write_owner", fail_owner_update)
+    with pytest.raises(OSError, match="owner update interruption"):
+        ledger.reconcile(
+            reservation,
+            Decimal("0.10"),
+            source=CostSource.PROVIDER_REPORTED,
+            outcome="success",
+        )
+    monkeypatch.setattr(ledger, "_write_owner", real_write_owner)
+
+    recovered = CostLedger(root).snapshot()
+    assert recovered.spent_usd == Decimal("0.10")
+    assert recovered.reserved_usd == Decimal("0")
+    assert recovered.entries[0].source is CostSource.PROVIDER_REPORTED
+
+
 def test_ledger_reopen_preserves_one_initialized_identity(tmp_path: Path) -> None:
     root = tmp_path / ".lab" / "runs" / "cost-ledger"
     first = CostLedger(root)
@@ -603,6 +723,30 @@ def test_concurrent_reservations_are_serialized_across_ledger_instances(
     assert rejected == 0
     assert snapshot.reserved_usd == Decimal("10.00")
     assert len(snapshot.entries) == 40
+
+
+def test_fresh_root_first_initialization_is_race_safe_across_processes(
+    tmp_path: Path,
+) -> None:
+    for trial in range(3):
+        trial_root = tmp_path / f"trial-{trial}"
+        trial_root.mkdir()
+        root = trial_root / ".lab" / "runs" / "cost-ledger"
+        call_ids = [uuid4() for _ in range(40)]
+        with ProcessPoolExecutor(max_workers=12) as pool:
+            outcomes = list(
+                pool.map(
+                    _reserve_in_process,
+                    [str(root)] * 40,
+                    ["0.25"] * 40,
+                    [str(call_id) for call_id in call_ids],
+                )
+            )
+
+        assert outcomes == [("accepted", None)] * 40
+        snapshot = CostLedger(root).snapshot()
+        assert snapshot.reserved_usd == Decimal("10.00")
+        assert len(snapshot.entries) == 40
 
 
 def test_concurrent_reservations_cannot_race_past_cap(tmp_path: Path) -> None:
