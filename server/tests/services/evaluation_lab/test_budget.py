@@ -293,6 +293,51 @@ def test_concurrent_reservations_are_serialized_across_ledger_instances(
     assert len(snapshot.entries) == 40
 
 
+def test_concurrent_reservations_cannot_race_past_cap(tmp_path: Path) -> None:
+    root = tmp_path / ".lab" / "runs" / "cost-ledger"
+
+    def reserve(call_id: UUID) -> bool:
+        try:
+            CostLedger(root).reserve(Decimal("0.30"), call_id=call_id)
+        except BudgetExceeded:
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        accepted = list(pool.map(reserve, [uuid4() for _ in range(40)]))
+
+    snapshot = CostLedger(root).snapshot()
+    assert accepted.count(True) == 33
+    assert accepted.count(False) == 7
+    assert snapshot.reserved_usd == Decimal("9.90")
+    assert snapshot.spent_usd + snapshot.reserved_usd <= Decimal("10.00")
+
+
+def test_failed_atomic_replace_leaves_last_committed_ledger_readable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services.evaluation_lab import budget as budget_module
+
+    root = tmp_path / ".lab" / "runs" / "cost-ledger"
+    ledger = CostLedger(root)
+    first = ledger.reserve(Decimal("0.20"), call_id=uuid4())
+    real_replace = budget_module.os.replace
+
+    def fail_replace(*_args, **_kwargs):
+        raise OSError("fixture atomic replace failure")
+
+    monkeypatch.setattr(budget_module.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="fixture atomic replace failure"):
+        ledger.reserve(Decimal("0.30"), call_id=uuid4())
+    monkeypatch.setattr(budget_module.os, "replace", real_replace)
+
+    snapshot = CostLedger(root).snapshot()
+    assert snapshot.reserved_usd == Decimal("0.20")
+    assert [entry.call_id for entry in snapshot.entries] == [first.call_id]
+    assert not list(root.glob("*.tmp"))
+
+
 def test_ledger_rejects_symlinked_root_and_state_file(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -449,3 +494,32 @@ def test_budget_stop_occurs_before_http_and_offline_snapshot_stays_available(
 
     assert _FakeAsyncClient.calls == 0
     assert ledger.snapshot().spent_usd == Decimal("10.00")
+
+
+def test_client_rejects_model_without_matching_pricing_snapshot_before_http(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.openrouter_client import client as client_module
+
+    _FakeAsyncClient.calls = 0
+    _FakeAsyncClient.response = _response({"choices": []})
+    monkeypatch.setattr(client_module.httpx, "AsyncClient", _FakeAsyncClient)
+    ledger = CostLedger(tmp_path / ".lab" / "runs" / "cost-ledger")
+    controller = CostController(ledger=ledger, pricing=_pricing())
+
+    with budget_scope(controller), pytest.raises(ValueError, match="pricing snapshot"):
+        asyncio.run(
+            request_chat_completion(
+                config=ModelCallConfig(
+                    model_id="google/gemini-2.5-flash", max_tokens=1000
+                ),
+                role=ModelRole.INTERACTION,
+                messages=[{"role": "user", "content": "fixture prompt"}],
+                api_key="fixture-key",
+                base_url="https://router.test",
+            )
+        )
+
+    assert _FakeAsyncClient.calls == 0
+    assert ledger.snapshot().entries == ()

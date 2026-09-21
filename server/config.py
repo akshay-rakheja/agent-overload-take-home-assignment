@@ -403,6 +403,18 @@ class Settings(BaseModel):
         """Flag indicating conversation summarisation is active."""
         return self.conversation_summary_threshold > 0
 
+    @property
+    def background_model_activity_enabled(self) -> bool:
+        """Keep unrequested watcher/scheduler model calls out of measured runs."""
+
+        return not self.lab_enabled
+
+    @property
+    def automatic_summarization_enabled(self) -> bool:
+        """Automatic summaries are background work; explicit calls remain usable."""
+
+        return self.summarization_enabled and self.background_model_activity_enabled
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

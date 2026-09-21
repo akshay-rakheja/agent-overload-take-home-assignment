@@ -152,7 +152,7 @@ class ConversationLog:
 
     def _notify_summarization(self) -> None:
         settings = get_settings()
-        if not settings.summarization_enabled:
+        if not settings.automatic_summarization_enabled:
             return
 
         try:

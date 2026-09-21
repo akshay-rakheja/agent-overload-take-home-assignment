@@ -449,6 +449,9 @@ class CostController:
         logical_call_id: UUID,
         attempt: int,
     ) -> Reservation:
+        requested_model = payload.get("model")
+        if requested_model != self.pricing.model_id:
+            raise ValueError("paid call model does not match pricing snapshot")
         serialized = json.dumps(
             payload,
             ensure_ascii=False,
