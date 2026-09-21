@@ -43,6 +43,30 @@ describe('Python serialization boundary', () => {
   ])('rejects authorization codes and contextual OAuth codes recursively: %j', (value) => {
     expect(SystemRunResultSchema.safeParse({ ...backend.system_result, decision: { availability: 'available', value, reason: null } }).success).toBe(false);
   });
+  it.each([
+    { authorization_code: { value: 'fixture-code' } },
+    { authorizationCode: ['fixture-code'] },
+    { nested: [{ 'AUTHORIZATION-CODE': { value: 'fixture-code' } }] },
+    { oauth_code: { value: 'fixture-code' } },
+    { authorization_client_secret: { value: 'fixture-secret' } },
+    { Authorization_Response: [{ CODE: 'fixture-code' }] },
+  ])('rejects secret-shaped keys regardless of object, array, nesting or casing: %j', (value) => {
+    expect(SystemRunResultSchema.safeParse({
+      ...backend.system_result,
+      gmail_evidence: { availability: 'available', value: [value], reason: null },
+    }).success).toBe(false);
+  });
+  it.each([
+    { Authorization: 'Bearer fixture-private' },
+    { 'Proxy-Authorization': 'Basic fixture-private' },
+    { 'X-Api-Key': 'fixture-private' },
+    { Cookie: 'session=fixture-private' },
+  ])('rejects raw values inside recognized header collections: %j', (headers) => {
+    expect(SystemRunResultSchema.safeParse({
+      ...backend.system_result,
+      gmail_evidence: { availability: 'available', value: [{ headers }], reason: null },
+    }).success).toBe(false);
+  });
   it('preserves ordinary diagnostic codes and OAuth status without a code', () => {
     const value = { code: 'timeout', oauth: { status: 'connected' } };
     expect(SystemRunResultSchema.safeParse({ ...backend.system_result, decision: { availability: 'available', value, reason: null } }).success).toBe(true);
@@ -66,7 +90,12 @@ describe('Python serialization boundary', () => {
       body: '[REDACTED]',
       message_id: '[REDACTED]',
       thread_id: '[REDACTED]',
-      headers: { Cookie: '[REDACTED]' },
+      headers: {
+        Authorization: '[REDACTED]',
+        'Proxy-Authorization': '[REDACTED]',
+        'X-Api-Key': '[REDACTED]',
+        Cookie: '[REDACTED]',
+      },
       tool: 'gmail.search',
       count: 2,
       code: 'timeout',

@@ -8,40 +8,54 @@ const uuid = z.string().uuid();
 const integer = z.number().int();
 const system = z.enum(['baseline', 'enhanced']);
 const nullableText = text.nullable();
-const secretKey = /(?:authorization|authorizationcode|authcode|apikey|authconfigid|oauthcode|accesstoken|refreshtoken|idtoken|clientsecret|password|secret|token)$/i;
+const secretKey = /(?:authorizationcode|authcode|apikey|authconfigid|oauthcode|accesstoken|refreshtoken|idtoken|clientsecret|password|secret|token)$/i;
 const mailKeys = new Set(['email', 'emailaddress', 'address', 'from', 'to', 'cc', 'bcc', 'sender', 'recipient', 'messageid', 'threadid', 'gmailmessageid', 'gmailthreadid', 'snippet', 'body', 'rawbody', 'htmlbody']);
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 const normalizedKey = (key: string) => key.replace(/[^a-z0-9]/gi, '').toLowerCase();
 const isRedacted = (value: JsonValue) => value === '[REDACTED]' || value === '[REDACTED_EMAIL]';
 const hasRedactedHeaders = (value: JsonValue) => {
-  if (isRedacted(value)) return true;
+  if (value === '[REDACTED]') return true;
   return value !== null && !Array.isArray(value) && typeof value === 'object'
-    && Object.values(value).every(isRedacted);
+    && Object.values(value).every((item) => item === '[REDACTED]');
 };
 function containsCodeField(value: JsonValue): boolean {
   if (Array.isArray(value)) return value.some(containsCodeField);
   if (value === null || typeof value !== 'object') return false;
   return Object.entries(value).some(([key, item]) => normalizedKey(key) === 'code' || containsCodeField(item));
 }
-const jsonValue: z.ZodType<JsonValue> = z.lazy(() => z.union([
-  text, z.number().finite(), z.boolean(), z.null(), z.array(jsonValue),
-  z.record(jsonValue).superRefine((value, ctx) => {
-    for (const [key, item] of Object.entries(value)) {
-      const normalized = normalizedKey(key);
-      const authorizationWrapper = (normalized.includes('oauth') || normalized.includes('authorization'))
-        && item !== null && typeof item === 'object';
-      const mailKey = mailKeys.has(normalized) || normalized.includes('address')
-        || normalized.endsWith('messageid') || normalized.endsWith('threadid');
-      const headerKey = normalized === 'headers' || normalized.endsWith('headers');
-      if ((authorizationWrapper && containsCodeField(item))
-        || (!authorizationWrapper && secretKey.test(normalized))
-        || (mailKey && !isRedacted(item))
-        || (headerKey && !hasRedactedHeaders(item))) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Unexpected private field' });
-      }
+function containsPrivateField(value: JsonValue): boolean {
+  if (Array.isArray(value)) return value.some(containsPrivateField);
+  if (value === null || typeof value !== 'object') return false;
+  for (const [key, item] of Object.entries(value)) {
+    const normalized = normalizedKey(key);
+    const mailKey = mailKeys.has(normalized) || normalized.includes('address')
+      || normalized.endsWith('messageid') || normalized.endsWith('threadid');
+    const headerKey = normalized === 'headers' || normalized.endsWith('headers');
+    const authorizationWrapper = (normalized.includes('oauth') || normalized.startsWith('authorization'))
+      && item !== null && typeof item === 'object';
+    if (headerKey) {
+      if (!hasRedactedHeaders(item)) return true;
+      continue;
     }
-  }),
+    if (mailKey) {
+      if (!isRedacted(item)) return true;
+      continue;
+    }
+    if (secretKey.test(normalized) || normalized === 'proxyauthorization'
+      || (normalized === 'authorization' && !authorizationWrapper)
+      || (authorizationWrapper && containsCodeField(item))) return true;
+    if (containsPrivateField(item)) return true;
+  }
+  return false;
+}
+const jsonShape: z.ZodType<JsonValue> = z.lazy(() => z.union([
+  text, z.number().finite(), z.boolean(), z.null(), z.array(jsonShape), z.record(jsonShape),
 ]));
+const jsonValue: z.ZodType<JsonValue> = jsonShape.superRefine((value, ctx) => {
+  if (containsPrivateField(value)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Unexpected private field' });
+  }
+});
 
 export function observedValue<T extends z.ZodTypeAny>(value: T) {
   return z.object({ availability: AvailabilitySchema, value: value.nullable(), reason: nullableText }).strict()

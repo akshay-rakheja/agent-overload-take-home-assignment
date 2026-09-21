@@ -85,6 +85,14 @@ it.each([
   ['authorization response code', { authorization_response: { code: 'fixture-code' } }, 'fixture-code'],
   ['nested authorization code', { nested: { authorization_result: { payload: { code: 'fixture-nested-code' } } } }, 'fixture-nested-code'],
   ['free-text key', { text: 'key=fixture-private' }, 'fixture-private'],
+  ['nested mixed-case authorization code key', { nested: [{ 'AUTHORIZATION-CODE': { value: 'fixture-private' } }] }, 'fixture-private'],
+  ['OAuth code object', { oauth_code: { value: 'fixture-private' } }, 'fixture-private'],
+  ['authorization client-secret object', { authorization_client_secret: { value: 'fixture-private' } }, 'fixture-private'],
+  ['authorization wrapper array code', { Authorization_Response: [{ CODE: 'fixture-private' }] }, 'fixture-private'],
+  ['raw Authorization header', { headers: { Authorization: 'Bearer fixture-private' } }, 'fixture-private'],
+  ['raw Proxy-Authorization header', { headers: { 'Proxy-Authorization': 'Basic fixture-private' } }, 'fixture-private'],
+  ['raw X-Api-Key header', { headers: { 'X-Api-Key': 'fixture-private' } }, 'fixture-private'],
+  ['raw Cookie header variant', { headers: { Cookie: 'session=fixture-private' } }, 'fixture-private'],
 ])('fails closed when the backend returns raw %s evidence', async (_label, value, privateText) => {
   const payload = runWithGmailEvidence([value]);
   vi.stubGlobal('fetch', async () => json(payload));
@@ -97,12 +105,38 @@ it.each([
   expect(responseBody).not.toContain(privateText);
 });
 
+it('returns 502, 502 and 200 for secret object, secret array and redacted headers', async () => {
+  const values = [
+    { authorization_code: { value: 'fixture-object-code' } },
+    { authorizationCode: ['fixture-array-code'] },
+    {
+      headers: {
+        Authorization: '[REDACTED]',
+        'Proxy-Authorization': '[REDACTED]',
+        'X-Api-Key': '[REDACTED]',
+        Cookie: '[REDACTED]',
+      },
+    },
+  ];
+  const statuses: number[] = [];
+  for (const value of values) {
+    vi.stubGlobal('fetch', async () => json(runWithGmailEvidence([value])));
+    statuses.push((await readRun(request(), { params: { runId: backend.handle.run_id } })).status);
+  }
+  expect(statuses).toEqual([502, 502, 200]);
+});
+
 it('forwards redacted mail fields and safe diagnostic evidence unchanged', async () => {
   const value = [{
     body: '[REDACTED]',
     message_id: '[REDACTED]',
     thread_id: '[REDACTED]',
-    headers: { Cookie: '[REDACTED]' },
+    headers: {
+      Authorization: '[REDACTED]',
+      'Proxy-Authorization': '[REDACTED]',
+      'X-Api-Key': '[REDACTED]',
+      Cookie: '[REDACTED]',
+    },
     tool: 'gmail.search',
     count: 2,
     code: 'timeout',
