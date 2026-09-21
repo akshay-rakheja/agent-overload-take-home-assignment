@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -61,6 +62,15 @@ def test_pricing_snapshot_sanitizes_metadata_and_persists_only_bounded_fields(
                     "input_cache_read": "0.0000001",
                 },
                 "description": "Bearer metadata-secret-that-must-not-persist",
+                "endpoints": [
+                    {
+                        "provider": "Bearer provider-secret-that-must-not-persist",
+                        "pricing": {
+                            "prompt": "0.0000005",
+                            "completion": "0.0000017",
+                        },
+                    }
+                ],
             }
         ],
         "api_key": "metadata-key-that-must-not-persist",
@@ -92,6 +102,7 @@ def test_pricing_snapshot_sanitizes_metadata_and_persists_only_bounded_fields(
     assert "metadata-key" not in raw_disk
     assert "metadata-password" not in raw_disk
     assert "metadata-query-secret" not in raw_disk
+    assert "provider-secret" not in raw_disk
 
 
 def test_calculate_cost_prefers_exact_provider_reported_charge() -> None:
@@ -165,6 +176,190 @@ def test_conservative_reservation_uses_characters_max_tokens_and_highest_prices(
     assert estimate.completion_token_upper_bound == 7
     assert estimate.amount_usd == Decimal("0.000043")
     assert estimate.source is CostSource.CONSERVATIVE_ESTIMATE
+
+
+@pytest.mark.parametrize("missing", ["prompt", "completion"])
+def test_reservation_requires_normal_prices_for_every_applicable_schedule(
+    missing: str,
+) -> None:
+    primary_values = _pricing().model_dump()
+    primary_values[f"{missing}_price_per_token"] = None
+    incomplete_primary = PricingSnapshot(**primary_values)
+    incomplete_alternative = PriceSchedule(
+        provider="partial-provider",
+        prompt_price_per_token=(None if missing == "prompt" else Decimal("0.01")),
+        completion_price_per_token=(
+            None if missing == "completion" else Decimal("0.01")
+        ),
+        cached_prompt_price_per_token=Decimal("99"),
+    )
+
+    for snapshot in (
+        incomplete_primary,
+        _pricing(alternatives=(incomplete_alternative,)),
+    ):
+        estimate = conservative_reservation(
+            serialized_prompt="fixture",
+            max_tokens=3,
+            pricing=snapshot,
+        )
+        assert estimate.amount_usd is None
+        assert estimate.source is CostSource.UNAVAILABLE
+
+
+def test_incomplete_pricing_rejects_before_ledger_or_transport(tmp_path: Path) -> None:
+    values = _pricing().model_dump()
+    values["prompt_price_per_token"] = None
+    root = tmp_path / ".lab" / "runs" / "cost-ledger"
+    controller = CostController(
+        ledger=CostLedger(root),
+        pricing=PricingSnapshot(**values),
+    )
+
+    with pytest.raises(ValueError, match="complete reservation pricing"):
+        controller.reserve_call(
+            payload={"model": "openai/gpt-4.1-mini", "messages": []},
+            max_tokens=1,
+            logical_call_id=uuid4(),
+            attempt=0,
+        )
+
+    assert not root.exists()
+
+
+def test_client_with_incomplete_pricing_never_reserves_or_reaches_http(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.openrouter_client import client as client_module
+
+    values = _pricing().model_dump()
+    values["prompt_price_per_token"] = None
+    root = tmp_path / ".lab" / "runs" / "cost-ledger"
+    controller = CostController(
+        ledger=CostLedger(root),
+        pricing=PricingSnapshot(**values),
+    )
+    _FakeAsyncClient.calls = 0
+    _FakeAsyncClient.response = _response({"choices": []})
+    monkeypatch.setattr(client_module.httpx, "AsyncClient", _FakeAsyncClient)
+
+    with budget_scope(controller), pytest.raises(
+        ValueError, match="complete reservation pricing"
+    ):
+        asyncio.run(
+            request_chat_completion(
+                config=ModelCallConfig(
+                    model_id="openai/gpt-4.1-mini",
+                    max_tokens=1,
+                    max_retries=0,
+                ),
+                role=ModelRole.INTERACTION,
+                messages=[{"role": "user", "content": "fixture"}],
+                api_key="fixture-key",
+                base_url="https://router.test",
+            )
+        )
+
+    assert _FakeAsyncClient.calls == 0
+    assert not root.exists()
+
+
+@pytest.mark.parametrize(
+    ("cached_price", "expected"),
+    [
+        (Decimal("0.20"), Decimal("2.00")),
+        (Decimal("0.05"), Decimal("1.00")),
+    ],
+)
+@pytest.mark.parametrize("cached_value", [None, "malformed"])
+def test_missing_or_malformed_cache_split_prices_all_prompt_tokens_conservatively(
+    cached_price: Decimal,
+    expected: Decimal,
+    cached_value: object,
+) -> None:
+    response: dict[str, object] = {
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 0,
+        }
+    }
+    if cached_value is not None:
+        response["usage"]["cached_tokens"] = cached_value  # type: ignore[index]
+    pricing = PricingSnapshot(
+        model_id="openai/gpt-4.1-mini",
+        prompt_price_per_token=Decimal("0.10"),
+        completion_price_per_token=Decimal("0.30"),
+        cached_prompt_price_per_token=cached_price,
+        context_limit=100,
+        source_url="https://router.test/models",
+        retrieved_at=NOW,
+        response_sha256="b" * 64,
+    )
+
+    cost = calculate_cost(normalize_usage(response), pricing)
+
+    assert cost.amount_usd == expected
+    assert cost.source is CostSource.CONSERVATIVE_ESTIMATE
+
+
+def test_decimal_cap_comparison_is_exact_beyond_ambient_precision(tmp_path: Path) -> None:
+    ledger = CostLedger(tmp_path / ".lab" / "runs" / "cost-ledger")
+    ledger.reserve(Decimal("10"), call_id=uuid4())
+
+    with localcontext() as context:
+        context.prec = 3
+        with pytest.raises(BudgetExceeded):
+            ledger.reserve(Decimal("1e-30"), call_id=uuid4())
+
+
+def test_unsupported_money_scale_is_rejected_before_state_change(tmp_path: Path) -> None:
+    root = tmp_path / ".lab" / "runs" / "cost-ledger"
+    ledger = CostLedger(root)
+
+    with pytest.raises(ValueError, match="decimal places"):
+        ledger.reserve(Decimal("1e-31"), call_id=uuid4())
+
+    assert not root.exists()
+    with pytest.raises(ValueError, match="decimal places"):
+        PricingSnapshot(
+            model_id="openai/gpt-4.1-mini",
+            prompt_price_per_token=Decimal("1e-31"),
+            completion_price_per_token=Decimal("0.1"),
+            context_limit=10,
+            source_url="https://router.test/models",
+            retrieved_at=NOW,
+            response_sha256="d" * 64,
+        )
+
+
+def test_repeated_small_amounts_and_price_products_ignore_decimal_context(
+    tmp_path: Path,
+) -> None:
+    ledger = CostLedger(
+        tmp_path / ".lab" / "runs" / "cost-ledger",
+        cap_usd=Decimal("0.000100"),
+    )
+    with localcontext() as context:
+        context.prec = 2
+        for _ in range(100):
+            ledger.reserve(Decimal("0.000001"), call_id=uuid4())
+        estimate = conservative_reservation(
+            serialized_prompt="x" * 123,
+            max_tokens=77,
+            pricing=PricingSnapshot(
+                model_id="openai/gpt-4.1-mini",
+                prompt_price_per_token=Decimal("0.000000000123456789"),
+                completion_price_per_token=Decimal("0.000000000987654321"),
+                context_limit=1000,
+                source_url="https://router.test/models",
+                retrieved_at=NOW,
+                response_sha256="c" * 64,
+            ),
+        )
+
+    assert ledger.snapshot().reserved_usd == Decimal("0.000100")
+    assert estimate.amount_usd == Decimal("0.000000091234567764")
 
 
 def test_ledger_refuses_only_when_next_reservation_would_cross_ten_dollars(
@@ -265,6 +460,123 @@ def test_crash_recovery_conservatively_moves_active_reservations_to_spent(
     assert entry.outcome == "crash_recovered"
 
 
+def test_ledger_fails_closed_if_initialized_root_is_renamed_or_replaced(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / ".lab" / "runs" / "cost-ledger"
+    ledger = CostLedger(root)
+    ledger.reserve(Decimal("0.25"), call_id=uuid4())
+    moved = root.with_name("cost-ledger-moved")
+    root.rename(moved)
+
+    with pytest.raises(ValueError, match="identity"):
+        ledger.snapshot()
+    with pytest.raises(ValueError, match="identity"):
+        CostLedger(root).reserve(Decimal("0.01"), call_id=uuid4())
+
+    root.mkdir()
+    with pytest.raises(ValueError, match="identity"):
+        CostLedger(root).snapshot()
+
+
+def test_ledger_fails_closed_if_initialized_state_disappears(tmp_path: Path) -> None:
+    root = tmp_path / ".lab" / "runs" / "cost-ledger"
+    ledger = CostLedger(root)
+    ledger.snapshot()
+    (root / "cost-ledger.json").unlink()
+
+    with pytest.raises(ValueError, match="identity"):
+        ledger.reserve(Decimal("0.01"), call_id=uuid4())
+    with pytest.raises(ValueError, match="identity"):
+        CostLedger(root).snapshot()
+
+
+def test_ledger_reopen_preserves_one_initialized_identity(tmp_path: Path) -> None:
+    root = tmp_path / ".lab" / "runs" / "cost-ledger"
+    first = CostLedger(root)
+    initial = first.snapshot()
+    reopened = CostLedger(root)
+
+    assert initial.entries == ()
+    assert reopened.snapshot() == initial
+    reopened.reserve(Decimal("0.01"), call_id=uuid4())
+    assert first.snapshot().reserved_usd == Decimal("0.01")
+
+
+def test_ledger_detects_root_swap_during_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / ".lab" / "runs" / "cost-ledger"
+    ledger = CostLedger(root)
+    ledger.snapshot()
+    real_write = ledger._write_state
+
+    def swap_before_write(root_fd: int, state) -> None:
+        moved = root.with_name("cost-ledger-in-flight")
+        root.rename(moved)
+        root.mkdir()
+        real_write(root_fd, state)
+
+    monkeypatch.setattr(ledger, "_write_state", swap_before_write)
+
+    with pytest.raises(ValueError, match="identity"):
+        ledger.reserve(Decimal("0.01"), call_id=uuid4())
+
+
+def test_concurrent_old_and_replacement_roots_share_one_fail_closed_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / ".lab" / "runs" / "cost-ledger"
+    old_ledger = CostLedger(root)
+    old_ledger.snapshot()
+    reached_write = threading.Event()
+    continue_write = threading.Event()
+    real_write = old_ledger._write_state
+    outcomes: list[BaseException | str] = []
+
+    def pause_before_write(root_fd: int, state) -> None:
+        reached_write.set()
+        assert continue_write.wait(timeout=5)
+        real_write(root_fd, state)
+
+    monkeypatch.setattr(old_ledger, "_write_state", pause_before_write)
+
+    def reserve_old() -> None:
+        try:
+            old_ledger.reserve(Decimal("0.01"), call_id=uuid4())
+        except BaseException as exc:
+            outcomes.append(exc)
+        else:
+            outcomes.append("old accepted")
+
+    def reserve_replacement() -> None:
+        try:
+            CostLedger(root).reserve(Decimal("0.01"), call_id=uuid4())
+        except BaseException as exc:
+            outcomes.append(exc)
+        else:
+            outcomes.append("replacement accepted")
+
+    old_thread = threading.Thread(target=reserve_old)
+    old_thread.start()
+    assert reached_write.wait(timeout=5)
+    root.rename(root.with_name("cost-ledger-old"))
+    root.mkdir()
+    replacement_thread = threading.Thread(target=reserve_replacement)
+    replacement_thread.start()
+    continue_write.set()
+    old_thread.join(timeout=5)
+    replacement_thread.join(timeout=5)
+
+    assert not old_thread.is_alive()
+    assert not replacement_thread.is_alive()
+    assert len(outcomes) == 2
+    assert all(isinstance(outcome, ValueError) for outcome in outcomes)
+    assert all("identity" in str(outcome) for outcome in outcomes)
+
+
 def test_concurrent_reservations_are_serialized_across_ledger_instances(
     tmp_path: Path,
 ) -> None:
@@ -352,8 +664,9 @@ def test_ledger_rejects_symlinked_root_and_state_file(tmp_path: Path) -> None:
     ledger = CostLedger(root)
     ledger.snapshot()
     state_path = root / "cost-ledger.json"
+    state_path.unlink()
     state_path.symlink_to(outside / "stolen.json")
-    with pytest.raises(ValueError, match="regular file"):
+    with pytest.raises(ValueError, match="identity|regular file"):
         ledger.reserve(Decimal("0.01"), call_id=uuid4())
 
 

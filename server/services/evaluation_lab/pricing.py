@@ -20,6 +20,12 @@ from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .decimal_math import (
+    exact_add,
+    exact_multiply,
+    exact_subtract,
+    validate_exact_decimal,
+)
 from .models import Availability
 from .usage import UsageRecord
 
@@ -38,14 +44,14 @@ def _decimal(value: object, *, field: str) -> Decimal:
         raise ValueError(f"{field} must be a decimal number") from exc
     if not result.is_finite() or result < 0:
         raise ValueError(f"{field} must be finite and non-negative")
-    return result
+    return validate_exact_decimal(result, field=field)
 
 
 class PriceSchedule(BaseModel):
     """One sanitized candidate schedule used for conservative routing prices."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    provider: str | None = None
+    provider_sha256: str | None = None
     prompt_price_per_token: Decimal | None = None
     completion_price_per_token: Decimal | None = None
     cached_prompt_price_per_token: Decimal | None = None
@@ -60,14 +66,38 @@ class PriceSchedule(BaseModel):
     def _valid_price(cls, value: object, info):
         return None if value is None else _decimal(value, field=info.field_name)
 
-    @field_validator("provider")
+    @model_validator(mode="before")
     @classmethod
-    def _safe_provider(cls, value: str | None) -> str | None:
+    def _sanitize_provider(cls, value: object) -> object:
+        if not isinstance(value, Mapping):
+            return value
+        normalized = dict(value)
+        raw_provider = normalized.pop("provider", None)
+        if raw_provider is not None:
+            if not isinstance(raw_provider, str):
+                raise ValueError("provider must be a text label")
+            label = raw_provider.strip()
+            if (
+                not label
+                or len(label) > 128
+                or any(not character.isprintable() for character in label)
+            ):
+                raise ValueError("provider must be a bounded printable label")
+            normalized["provider_sha256"] = hashlib.sha256(
+                label.encode("utf-8")
+            ).hexdigest()
+        return normalized
+
+    @field_validator("provider_sha256")
+    @classmethod
+    def _valid_provider_hash(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        normalized = value.strip()
-        if not normalized or len(normalized) > 128:
-            raise ValueError("provider must be a bounded non-empty label")
+        normalized = value.casefold()
+        if len(normalized) != 64 or any(
+            character not in "0123456789abcdef" for character in normalized
+        ):
+            raise ValueError("provider_sha256 must be a SHA-256 digest")
         return normalized
 
 
@@ -282,14 +312,14 @@ def calculate_cost(usage: UsageRecord, pricing: PricingSnapshot) -> CostRecord:
 
     prompt = _available_decimal(usage.prompt_tokens)
     completion = _available_decimal(usage.completion_tokens)
-    cached = _available_decimal(usage.cached_tokens) or Decimal("0")
+    cached = _available_decimal(usage.cached_tokens)
     if prompt is None or completion is None:
         return CostRecord(
             amount_usd=None,
             source=CostSource.UNAVAILABLE,
             reason="token usage required for estimation is unavailable",
         )
-    if cached > prompt:
+    if cached is not None and cached > prompt:
         return CostRecord(
             amount_usd=None,
             source=CostSource.UNAVAILABLE,
@@ -302,16 +332,41 @@ def calculate_cost(usage: UsageRecord, pricing: PricingSnapshot) -> CostRecord:
             schedule.prompt_price_per_token is None
             or schedule.completion_price_per_token is None
         ):
-            continue
-        cached_price = (
-            schedule.cached_prompt_price_per_token
-            if schedule.cached_prompt_price_per_token is not None
-            else schedule.prompt_price_per_token
-        )
+            return CostRecord(
+                amount_usd=None,
+                source=CostSource.UNAVAILABLE,
+                reason="required token pricing is unavailable",
+            )
+        cached_price = schedule.cached_prompt_price_per_token
+        if cached is None:
+            prompt_cost = exact_multiply(
+                prompt,
+                max(
+                    schedule.prompt_price_per_token,
+                    cached_price or schedule.prompt_price_per_token,
+                ),
+            )
+        else:
+            applicable_cached_price = (
+                cached_price
+                if cached_price is not None
+                else schedule.prompt_price_per_token
+            )
+            prompt_cost = exact_add(
+                exact_multiply(
+                    exact_subtract(prompt, cached),
+                    schedule.prompt_price_per_token,
+                ),
+                exact_multiply(
+                    cached,
+                    applicable_cached_price,
+                ),
+            )
         totals.append(
-            (prompt - cached) * schedule.prompt_price_per_token
-            + cached * cached_price
-            + completion * schedule.completion_price_per_token
+            exact_add(
+                prompt_cost,
+                exact_multiply(completion, schedule.completion_price_per_token),
+            )
         )
     if not totals:
         return CostRecord(
@@ -338,18 +393,25 @@ def conservative_reservation(
     prompt_prices: list[Decimal] = []
     completion_prices: list[Decimal] = []
     for schedule in pricing.schedules():
-        candidates = [
-            price
-            for price in (
-                schedule.prompt_price_per_token,
-                schedule.cached_prompt_price_per_token,
+        if (
+            schedule.prompt_price_per_token is None
+            or schedule.completion_price_per_token is None
+        ):
+            return ReservationEstimate(
+                amount_usd=None,
+                source=CostSource.UNAVAILABLE,
+                reason="required normal token pricing is unavailable",
+                prompt_token_upper_bound=prompt_tokens,
+                completion_token_upper_bound=max_tokens,
             )
-            if price is not None
-        ]
-        if candidates:
-            prompt_prices.append(max(candidates))
-        if schedule.completion_price_per_token is not None:
-            completion_prices.append(schedule.completion_price_per_token)
+        prompt_prices.append(
+            max(
+                schedule.prompt_price_per_token,
+                schedule.cached_prompt_price_per_token
+                or schedule.prompt_price_per_token,
+            )
+        )
+        completion_prices.append(schedule.completion_price_per_token)
     if not prompt_prices or not completion_prices:
         return ReservationEstimate(
             amount_usd=None,
@@ -359,9 +421,9 @@ def conservative_reservation(
             completion_token_upper_bound=max_tokens,
         )
     return ReservationEstimate(
-        amount_usd=(
-            Decimal(prompt_tokens) * max(prompt_prices)
-            + Decimal(max_tokens) * max(completion_prices)
+        amount_usd=exact_add(
+            exact_multiply(Decimal(prompt_tokens), max(prompt_prices)),
+            exact_multiply(Decimal(max_tokens), max(completion_prices)),
         ),
         source=CostSource.CONSERVATIVE_ESTIMATE,
         prompt_token_upper_bound=prompt_tokens,

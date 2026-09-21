@@ -20,6 +20,7 @@ from server.services.evaluation_lab.repetitions import (
     OutcomeStatus,
     PairOrder,
     PairResult,
+    PreflightUnavailableCode,
     PreflightIncompatibility,
     SideResult,
     aggregate_repetitions,
@@ -36,7 +37,18 @@ def _success_response(
     *,
     provider: str = "fixture-provider",
     arguments: str = '{"resource_name":"people/me"}',
+    call_id: str | None = "fixture-call-1",
+    call_type: str = "function",
 ) -> dict[str, object]:
+    call: dict[str, object] = {
+        "type": call_type,
+        "function": {
+            "name": "gmail_get_contacts",
+            "arguments": arguments,
+        },
+    }
+    if call_id is not None:
+        call["id"] = call_id
     return {
         "model": model_id,
         "provider": provider,
@@ -44,13 +56,7 @@ def _success_response(
             {
                 "message": {
                     "tool_calls": [
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": "gmail_get_contacts",
-                                "arguments": arguments,
-                            },
-                        }
+                        call
                     ]
                 }
             }
@@ -250,10 +256,15 @@ def test_primary_preflight_records_config_provider_usage_and_read_only_tool_call
     assert len(result.attempts) == 1
     record = result.attempts[0]
     assert record.compatible is True
-    assert record.provider == "fixture-provider"
+    assert record.provider is not None
+    assert len(record.provider.label_sha256) == 64
     assert record.usage.prompt_tokens.value == 8
     assert record.tool_name == "gmail_get_contacts"
-    assert record.tool_arguments == {"resource_name": "people/me"}
+    assert record.tool_argument_keys == ("resource_name",)
+    assert len(record.tool_arguments_sha256 or "") == 64
+    serialized = result.model_dump_json()
+    assert "fixture-provider" not in serialized
+    assert "people/me" not in serialized
     assert calls[0][0] == PRIMARY_MODEL_ID
     assert calls[0][1]["function"]["name"] == "gmail_get_contacts"
     assert set(result.role_models) == {
@@ -271,7 +282,9 @@ def test_recorded_tool_incompatibility_requires_full_reset_before_fallback() -> 
     async def attempt(config, _tool_schema):
         order.append(f"attempt:{config.model_id}")
         if config.model_id == PRIMARY_MODEL_ID:
-            return _success_response(config.model_id, arguments="not-json")
+            raise PreflightIncompatibility(
+                CompatibilityFailureCode.TOOL_SCHEMA_INCOMPATIBLE
+            )
         return _success_response(config.model_id, provider="Google")
 
     def reset_both() -> FullResetEvidence:
@@ -351,7 +364,7 @@ def test_timeout_is_unavailable_and_cannot_trigger_fallback() -> None:
     assert result.ready is False
     assert result.selected_model_id is None
     assert result.attempts[0].incompatibility is None
-    assert result.attempts[0].error_type == "TimeoutError"
+    assert result.attempts[0].unavailable_code is PreflightUnavailableCode.TRANSPORT
     assert "private timeout detail" not in result.model_dump_json()
 
 
@@ -378,7 +391,9 @@ def test_incomplete_reset_blocks_fallback_attempt(reset: FullResetEvidence) -> N
     async def attempt(config, _tool_schema):
         nonlocal calls
         calls += 1
-        return _success_response(config.model_id, arguments="[]")
+        raise PreflightIncompatibility(
+            CompatibilityFailureCode.TOOL_SCHEMA_INCOMPATIBLE
+        )
 
     result = asyncio.run(
         run_compatibility_preflight(attempt=attempt, reset_both=lambda: reset)
@@ -387,6 +402,108 @@ def test_incomplete_reset_blocks_fallback_attempt(reset: FullResetEvidence) -> N
     assert calls == 1
     assert result.ready is False
     assert result.selected_model_id is None
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"error": {"code": 429, "message": "private rate limit detail"}},
+        {"error": {"code": 401, "message": "private auth detail"}},
+        {"model": PRIMARY_MODEL_ID, "choices": []},
+        {"provider": "fixture-provider", "choices": []},
+        ["malformed-envelope"],
+    ],
+)
+def test_provider_errors_missing_identity_and_malformed_envelopes_never_fallback(
+    response: object,
+) -> None:
+    calls = 0
+
+    async def attempt(_config, _tool_schema):
+        nonlocal calls
+        calls += 1
+        return response
+
+    def forbidden_reset() -> FullResetEvidence:
+        pytest.fail("unavailable response must not reset or select fallback")
+
+    result = asyncio.run(
+        run_compatibility_preflight(attempt=attempt, reset_both=forbidden_reset)
+    )
+
+    assert calls == 1
+    assert result.ready is False
+    assert result.attempts[0].incompatibility is None
+    assert result.attempts[0].unavailable_code is not None
+    assert "private rate limit detail" not in result.model_dump_json()
+    assert "private auth detail" not in result.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        _success_response(PRIMARY_MODEL_ID, call_id=None),
+        _success_response(PRIMARY_MODEL_ID, call_type="tool"),
+        _success_response(PRIMARY_MODEL_ID, arguments="not-json"),
+        {
+            **_success_response(PRIMARY_MODEL_ID),
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "fixture-call-1",
+                                "type": "function",
+                                "function": {
+                                    "name": "gmail_get_contacts",
+                                    "arguments": {"resource_name": "people/me"},
+                                },
+                            }
+                        ]
+                    }
+                }
+            ],
+        },
+    ],
+)
+def test_tool_call_wire_envelope_must_be_complete_and_arguments_json_string(
+    response: dict[str, object],
+) -> None:
+    async def attempt(_config, _tool_schema):
+        return response
+
+    result = asyncio.run(run_compatibility_preflight(attempt=attempt))
+
+    assert result.ready is False
+    assert result.attempts[0].incompatibility is None
+    assert (
+        result.attempts[0].unavailable_code
+        is PreflightUnavailableCode.MALFORMED_TOOL_CALL
+    )
+
+
+def test_preflight_serialization_never_persists_raw_provider_or_argument_values() -> None:
+    private_provider = "provider-private-marker.example"
+    private_token = "private-page-token-marker"
+
+    async def attempt(config, _tool_schema):
+        return _success_response(
+            config.model_id,
+            provider=private_provider,
+            arguments=(
+                '{"resource_name":"people/me","page_token":"'
+                + private_token
+                + '"}'
+            ),
+        )
+
+    result = asyncio.run(run_compatibility_preflight(attempt=attempt))
+    serialized = result.model_dump_json()
+
+    assert result.ready is True
+    assert private_provider not in serialized
+    assert private_token not in serialized
+    assert "people/me" not in serialized
 
 
 def test_lab_mode_disables_background_services_and_automatic_summarization(

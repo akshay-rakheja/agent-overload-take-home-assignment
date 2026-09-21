@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import fcntl
+import hashlib
 import json
 import os
 import secrets
@@ -15,10 +16,11 @@ from contextvars import ContextVar, Token
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
-from uuid import UUID, uuid5
+from uuid import UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .decimal_math import exact_add, exact_subtract, exact_sum, validate_exact_decimal
 from .pricing import (
     CostSource,
     PricingSnapshot,
@@ -31,6 +33,7 @@ from .usage import normalize_usage
 DEFAULT_COST_CAP_USD = Decimal("10.00")
 _STATE_NAME = "cost-ledger.json"
 _STATE_VERSION = 1
+_OWNER_DIRECTORY = ".cost-ledger-owners"
 
 
 def _amount(value: object, *, name: str, positive: bool = False) -> Decimal:
@@ -41,7 +44,7 @@ def _amount(value: object, *, name: str, positive: bool = False) -> Decimal:
     if not result.is_finite() or result < 0 or (positive and result == 0):
         qualifier = "positive" if positive else "non-negative"
         raise ValueError(f"{name} must be finite and {qualifier}")
-    return result
+    return validate_exact_decimal(result, field=name)
 
 
 class BudgetExceeded(RuntimeError):
@@ -125,6 +128,7 @@ class LedgerSnapshot(BaseModel):
 class _LedgerState(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_version: Literal[1] = 1
+    ledger_id: UUID
     cap_usd: Decimal
     entries: tuple[LedgerEntry, ...] = ()
 
@@ -132,6 +136,14 @@ class _LedgerState(BaseModel):
     @classmethod
     def _valid_cap(cls, value: object) -> Decimal:
         return _amount(value, name="cap_usd", positive=True)
+
+
+class _LedgerOwner(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    schema_version: Literal[1] = 1
+    ledger_id: UUID
+    root_device: int = Field(ge=0)
+    root_inode: int = Field(gt=0)
 
 
 _THREAD_LOCKS: dict[Path, threading.RLock] = {}
@@ -163,10 +175,14 @@ class CostLedger:
             raise ValueError("ledger root must be below the ignored .lab directory")
         index = indexes[-1]
         self._trusted_parent = Path(*parts[:index]) if parts[:index] else Path(".")
-        self._components = parts[index:]
+        self._lab_component = parts[index]
+        self._root_components = parts[index + 1 :]
+        identity_path = "/".join(self._root_components).encode("utf-8")
+        self._owner_key = hashlib.sha256(identity_path).hexdigest()
         self._lock = _thread_lock(self.root)
+        self._bound_owner: _LedgerOwner | None = None
 
-    def _open_root(self, *, create: bool) -> int | None:
+    def _open_lab(self, *, create: bool) -> int | None:
         flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
         try:
             descriptor = os.open(self._trusted_parent, flags)
@@ -175,7 +191,7 @@ class CostLedger:
                 raise ValueError("ledger root must not contain a symlink") from exc
             raise
         try:
-            for component in self._components:
+            for component in (self._lab_component,):
                 if create:
                     try:
                         os.mkdir(component, 0o700, dir_fd=descriptor)
@@ -199,23 +215,199 @@ class CostLedger:
             os.close(descriptor)
             raise
 
+    @staticmethod
+    def _open_directory(parent_fd: int, name: str, *, create: bool) -> int | None:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        if create:
+            try:
+                os.mkdir(name, 0o700, dir_fd=parent_fd)
+            except FileExistsError:
+                pass
+        try:
+            return os.open(name, flags, dir_fd=parent_fd)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+                raise ValueError("ledger root must not contain a symlink") from exc
+            raise
+
+    def _open_root_from_lab(self, lab_fd: int, *, create: bool) -> int | None:
+        descriptor = os.dup(lab_fd)
+        try:
+            for component in self._root_components:
+                child = self._open_directory(descriptor, component, create=create)
+                if child is None:
+                    os.close(descriptor)
+                    return None
+                os.close(descriptor)
+                descriptor = child
+            return descriptor
+        except BaseException:
+            os.close(descriptor)
+            raise
+
+    @staticmethod
+    def _read_json_file(parent_fd: int, name: str) -> bytes | None:
+        try:
+            metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("ledger identity path must be a regular file")
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=parent_fd,
+        )
+        try:
+            chunks: list[bytes] = []
+            while chunk := os.read(descriptor, 64 * 1024):
+                chunks.append(chunk)
+            return b"".join(chunks)
+        finally:
+            os.close(descriptor)
+
+    @staticmethod
+    def _atomic_write(parent_fd: int, name: str, payload: bytes) -> None:
+        temporary = f".{name}.{secrets.token_hex(8)}.tmp"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(temporary, flags, 0o600, dir_fd=parent_fd)
+        try:
+            view = memoryview(payload)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise OSError("short ledger write")
+                view = view[written:]
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        try:
+            os.replace(temporary, name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+            os.fsync(parent_fd)
+        except BaseException:
+            try:
+                os.unlink(temporary, dir_fd=parent_fd)
+            except FileNotFoundError:
+                pass
+            raise
+
+    def _read_owner(self, owners_fd: int) -> _LedgerOwner | None:
+        payload = self._read_json_file(owners_fd, f"{self._owner_key}.json")
+        if payload is None:
+            return None
+        try:
+            return _LedgerOwner.model_validate_json(payload)
+        except Exception as exc:
+            raise ValueError("ledger identity is malformed") from exc
+
+    def _write_owner(self, owners_fd: int, owner: _LedgerOwner) -> None:
+        self._atomic_write(
+            owners_fd,
+            f"{self._owner_key}.json",
+            owner.model_dump_json().encode("utf-8") + b"\n",
+        )
+
+    def _assert_current_root(self, root_fd: int, owner: _LedgerOwner) -> None:
+        metadata = os.fstat(root_fd)
+        if (metadata.st_dev, metadata.st_ino) != (
+            owner.root_device,
+            owner.root_inode,
+        ):
+            raise ValueError("ledger root identity changed")
+        lab_fd = self._open_lab(create=False)
+        if lab_fd is None:
+            raise ValueError("ledger root identity disappeared")
+        try:
+            current_fd = self._open_root_from_lab(lab_fd, create=False)
+            if current_fd is None:
+                raise ValueError("ledger root identity disappeared")
+            try:
+                current = os.fstat(current_fd)
+            finally:
+                os.close(current_fd)
+        finally:
+            os.close(lab_fd)
+        if (current.st_dev, current.st_ino) != (
+            owner.root_device,
+            owner.root_inode,
+        ):
+            raise ValueError("ledger root identity changed")
+
     @contextmanager
     def _locked_root(self, *, exclusive: bool) -> Iterator[int]:
         with self._lock:
-            descriptor = self._open_root(create=True)
-            assert descriptor is not None
+            lab_fd = self._open_lab(create=True)
+            assert lab_fd is not None
+            owners_fd = self._open_directory(lab_fd, _OWNER_DIRECTORY, create=True)
+            assert owners_fd is not None
+            lock_name = f"{self._owner_key}.lock"
+            lock_fd = os.open(
+                lock_name,
+                os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=owners_fd,
+            )
+            root_fd: int | None = None
             try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
-                yield descriptor
+                if not stat.S_ISREG(os.fstat(lock_fd).st_mode):
+                    raise ValueError("ledger identity lock must be a regular file")
+                fcntl.flock(lock_fd, fcntl.LOCK_EX)
+                owner = self._read_owner(owners_fd)
+                if owner is None:
+                    if self._bound_owner is not None:
+                        raise ValueError("ledger identity disappeared")
+                    existing = self._open_root_from_lab(lab_fd, create=False)
+                    if existing is not None:
+                        os.close(existing)
+                        raise ValueError("ledger root exists without an identity")
+                    root_fd = self._open_root_from_lab(lab_fd, create=True)
+                    assert root_fd is not None
+                    root_metadata = os.fstat(root_fd)
+                    owner = _LedgerOwner(
+                        ledger_id=uuid4(),
+                        root_device=root_metadata.st_dev,
+                        root_inode=root_metadata.st_ino,
+                    )
+                    self._bound_owner = owner
+                    self._write_state(
+                        root_fd,
+                        _LedgerState(
+                            ledger_id=owner.ledger_id,
+                            cap_usd=self.cap_usd,
+                        ),
+                    )
+                    self._write_owner(owners_fd, owner)
+                else:
+                    if (
+                        self._bound_owner is not None
+                        and self._bound_owner.ledger_id != owner.ledger_id
+                    ):
+                        raise ValueError("ledger identity changed")
+                    root_fd = self._open_root_from_lab(lab_fd, create=False)
+                    if root_fd is None:
+                        raise ValueError("ledger root identity disappeared")
+                    self._bound_owner = owner
+                    self._assert_current_root(root_fd, owner)
+                    state = self._read_state(root_fd)
+                    if state.ledger_id != owner.ledger_id:
+                        raise ValueError("ledger state identity changed")
+                yield root_fd
+                self._assert_current_root(root_fd, owner)
             finally:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-                os.close(descriptor)
+                if root_fd is not None:
+                    os.close(root_fd)
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
+                os.close(owners_fd)
+                os.close(lab_fd)
 
     def _read_state(self, root_fd: int) -> _LedgerState:
         try:
             metadata = os.stat(_STATE_NAME, dir_fd=root_fd, follow_symlinks=False)
         except FileNotFoundError:
-            return _LedgerState(cap_usd=self.cap_usd)
+            raise ValueError("ledger state identity disappeared")
         if not stat.S_ISREG(metadata.st_mode):
             raise ValueError("ledger state path must be a regular file")
         descriptor = os.open(
@@ -239,8 +431,11 @@ class CostLedger:
             raise ValueError("ledger state contains duplicate call ids")
         return state
 
-    @staticmethod
-    def _write_state(root_fd: int, state: _LedgerState) -> None:
+    def _write_state(self, root_fd: int, state: _LedgerState) -> None:
+        owner = self._bound_owner
+        if owner is None or state.ledger_id != owner.ledger_id:
+            raise ValueError("ledger state identity changed")
+        self._assert_current_root(root_fd, owner)
         try:
             metadata = os.stat(_STATE_NAME, dir_fd=root_fd, follow_symlinks=False)
         except FileNotFoundError:
@@ -248,57 +443,31 @@ class CostLedger:
         if metadata is not None and not stat.S_ISREG(metadata.st_mode):
             raise ValueError("ledger state path must be a regular file")
         payload = state.model_dump_json(indent=None).encode("utf-8") + b"\n"
-        temporary = f".{_STATE_NAME}.{secrets.token_hex(8)}.tmp"
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(temporary, flags, 0o600, dir_fd=root_fd)
-        try:
-            view = memoryview(payload)
-            while view:
-                written = os.write(descriptor, view)
-                if written <= 0:
-                    raise OSError("short ledger write")
-                view = view[written:]
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        try:
-            os.replace(
-                temporary,
-                _STATE_NAME,
-                src_dir_fd=root_fd,
-                dst_dir_fd=root_fd,
-            )
-            os.fsync(root_fd)
-        except BaseException:
-            try:
-                os.unlink(temporary, dir_fd=root_fd)
-            except FileNotFoundError:
-                pass
-            raise
+        self._atomic_write(root_fd, _STATE_NAME, payload)
+        self._assert_current_root(root_fd, owner)
 
     @staticmethod
     def _snapshot_for(state: _LedgerState) -> LedgerSnapshot:
-        spent = sum(
+        spent = exact_sum(
             (
                 entry.settled_usd or Decimal("0")
                 for entry in state.entries
                 if entry.state == "reconciled"
             ),
-            Decimal("0"),
         )
-        reserved = sum(
+        reserved = exact_sum(
             (
                 entry.reserved_usd
                 for entry in state.entries
                 if entry.state == "reserved"
             ),
-            Decimal("0"),
         )
+        committed = exact_add(spent, reserved)
         return LedgerSnapshot(
             cap_usd=state.cap_usd,
             spent_usd=spent,
             reserved_usd=reserved,
-            remaining_usd=max(state.cap_usd - spent - reserved, Decimal("0")),
+            remaining_usd=max(exact_subtract(state.cap_usd, committed), Decimal("0")),
             entries=tuple(sorted(state.entries, key=lambda item: str(item.call_id))),
         )
 
@@ -318,7 +487,8 @@ class CostLedger:
                     return Reservation(call_id=call_id, amount_usd=requested)
                 raise ValueError("call_id is already finalized or reserved for a different amount")
             snapshot = self._snapshot_for(state)
-            if snapshot.spent_usd + snapshot.reserved_usd + requested > state.cap_usd:
+            projected = exact_add(snapshot.spent_usd, snapshot.reserved_usd, requested)
+            if projected > state.cap_usd:
                 raise BudgetExceeded(snapshot, requested)
             entry = LedgerEntry(
                 call_id=call_id,
@@ -327,7 +497,11 @@ class CostLedger:
             )
             self._write_state(
                 root_fd,
-                _LedgerState(cap_usd=state.cap_usd, entries=(*state.entries, entry)),
+                _LedgerState(
+                    ledger_id=state.ledger_id,
+                    cap_usd=state.cap_usd,
+                    entries=(*state.entries, entry),
+                ),
             )
             return Reservation(call_id=call_id, amount_usd=requested)
 
@@ -372,7 +546,11 @@ class CostLedger:
                 source=source,
                 outcome=outcome,
             )
-            new_state = _LedgerState(cap_usd=state.cap_usd, entries=tuple(entries))
+            new_state = _LedgerState(
+                ledger_id=state.ledger_id,
+                cap_usd=state.cap_usd,
+                entries=tuple(entries),
+            )
             self._write_state(root_fd, new_state)
             return self._snapshot_for(new_state)
 
@@ -401,7 +579,11 @@ class CostLedger:
                 state="abandoned",
                 reason=reason,
             )
-            new_state = _LedgerState(cap_usd=state.cap_usd, entries=tuple(entries))
+            new_state = _LedgerState(
+                ledger_id=state.ledger_id,
+                cap_usd=state.cap_usd,
+                entries=tuple(entries),
+            )
             self._write_state(root_fd, new_state)
             return self._snapshot_for(new_state)
 
@@ -428,7 +610,11 @@ class CostLedger:
                         reason=reason,
                     )
                 )
-            new_state = _LedgerState(cap_usd=state.cap_usd, entries=tuple(entries))
+            new_state = _LedgerState(
+                ledger_id=state.ledger_id,
+                cap_usd=state.cap_usd,
+                entries=tuple(entries),
+            )
             if changed:
                 self._write_state(root_fd, new_state)
             return self._snapshot_for(new_state)

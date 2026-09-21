@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import math
@@ -378,17 +379,53 @@ class RecordedIncompatibility(BaseModel):
     reason: str
 
 
+class PreflightUnavailableCode(str, Enum):
+    TRANSPORT = "transport_unavailable"
+    PROVIDER_ERROR = "provider_error"
+    RESPONSE_IDENTITY = "response_identity_unavailable"
+    MALFORMED_ENVELOPE = "malformed_response_envelope"
+    MALFORMED_TOOL_CALL = "malformed_tool_call_envelope"
+
+
+class ProviderEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    label_sha256: str
+
+    @field_validator("label_sha256")
+    @classmethod
+    def _valid_hash(cls, value: str) -> str:
+        normalized = value.casefold()
+        if len(normalized) != 64 or any(
+            character not in "0123456789abcdef" for character in normalized
+        ):
+            raise ValueError("provider evidence must be a SHA-256 digest")
+        return normalized
+
+
 class CompatibilityAttemptRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, protected_namespaces=())
     model_id: str
     config: ModelCallConfig
-    provider: str | None = None
+    provider: ProviderEvidence | None = None
     usage: UsageRecord
     compatible: bool
     tool_name: str | None = None
-    tool_arguments: Mapping[str, str | bool] | None = None
+    tool_argument_keys: tuple[str, ...] | None = None
+    tool_arguments_sha256: str | None = None
     incompatibility: RecordedIncompatibility | None = None
-    error_type: str | None = None
+    unavailable_code: PreflightUnavailableCode | None = None
+
+    @field_validator("tool_arguments_sha256")
+    @classmethod
+    def _valid_argument_hash(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.casefold()
+        if len(normalized) != 64 or any(
+            character not in "0123456789abcdef" for character in normalized
+        ):
+            raise ValueError("tool argument evidence must be a SHA-256 digest")
+        return normalized
 
     @model_validator(mode="after")
     def _coherent(self) -> "CompatibilityAttemptRecord":
@@ -396,13 +433,19 @@ class CompatibilityAttemptRecord(BaseModel):
             if (
                 self.provider is None
                 or self.tool_name != "gmail_get_contacts"
-                or self.tool_arguments is None
+                or self.tool_argument_keys is None
+                or self.tool_arguments_sha256 is None
                 or self.incompatibility is not None
-                or self.error_type is not None
+                or self.unavailable_code is not None
             ):
                 raise ValueError("compatible preflight is missing required evidence")
-        elif self.incompatibility is not None and self.error_type is not None:
+        elif (
+            self.incompatibility is not None
+            and self.unavailable_code is not None
+        ):
             raise ValueError("preflight failure cannot be both incompatible and unavailable")
+        elif self.incompatibility is None and self.unavailable_code is None:
+            raise ValueError("unready preflight requires a typed terminal fact")
         return self
 
 
@@ -488,12 +531,10 @@ def _incompatibility_record(
     code: CompatibilityFailureCode,
     *,
     response: object = None,
-    provider: str | None = None,
 ) -> CompatibilityAttemptRecord:
     return CompatibilityAttemptRecord(
         model_id=model_id,
         config=config,
-        provider=provider,
         usage=normalize_usage(response),
         compatible=False,
         incompatibility=RecordedIncompatibility(
@@ -503,12 +544,37 @@ def _incompatibility_record(
     )
 
 
+def _provider_evidence(provider: object) -> ProviderEvidence | None:
+    if not isinstance(provider, str):
+        return None
+    label = provider.strip()
+    if (
+        not label
+        or len(label) > 128
+        or any(not character.isprintable() for character in label)
+    ):
+        return None
+    return ProviderEvidence(
+        label_sha256=hashlib.sha256(label.encode("utf-8")).hexdigest()
+    )
+
+
 def _validate_tool_arguments(arguments: object) -> dict[str, str | bool] | None:
-    if isinstance(arguments, str):
-        try:
-            arguments = json.loads(arguments)
-        except json.JSONDecodeError:
-            return None
+    if not isinstance(arguments, str):
+        return None
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON object key")
+            result[key] = value
+        return result
+
+    try:
+        arguments = json.loads(arguments, object_pairs_hook=unique_object)
+    except (json.JSONDecodeError, ValueError):
+        return None
     if not isinstance(arguments, Mapping):
         return None
     types: dict[str, type] = {
@@ -519,31 +585,66 @@ def _validate_tool_arguments(arguments: object) -> dict[str, str | bool] | None:
     }
     normalized: dict[str, str | bool] = {}
     for key, value in arguments.items():
-        if key not in types or not isinstance(value, types[key]):
+        if (
+            key not in types
+            or not isinstance(value, types[key])
+            or (types[key] is not bool and isinstance(value, bool))
+        ):
+            return None
+        if isinstance(value, str) and (
+            len(value) > 2048 or any(not character.isprintable() for character in value)
+        ):
             return None
         normalized[str(key)] = value
+    if (
+        "resource_name" in normalized
+        and normalized["resource_name"] != "people/me"
+    ):
+        return None
     return normalized
+
+
+def _unavailable_record(
+    model_id: str,
+    config: ModelCallConfig,
+    code: PreflightUnavailableCode,
+    *,
+    response: object = None,
+) -> CompatibilityAttemptRecord:
+    return CompatibilityAttemptRecord(
+        model_id=model_id,
+        config=config,
+        usage=normalize_usage(response),
+        compatible=False,
+        unavailable_code=code,
+    )
 
 
 def _validate_preflight_response(
     response: object, *, model_id: str, config: ModelCallConfig
 ) -> CompatibilityAttemptRecord:
     if not isinstance(response, Mapping):
-        return _incompatibility_record(
+        return _unavailable_record(
             model_id,
             config,
-            CompatibilityFailureCode.CHAT_COMPLETIONS_INCOMPATIBLE,
+            PreflightUnavailableCode.MALFORMED_ENVELOPE,
+            response=response,
+        )
+    if response.get("error") is not None:
+        return _unavailable_record(
+            model_id,
+            config,
+            PreflightUnavailableCode.PROVIDER_ERROR,
             response=response,
         )
     response_model = response.get("model")
-    provider = response.get("provider")
-    if response_model != model_id or not isinstance(provider, str) or not provider.strip():
-        return _incompatibility_record(
+    provider = _provider_evidence(response.get("provider"))
+    if response_model != model_id or provider is None:
+        return _unavailable_record(
             model_id,
             config,
-            CompatibilityFailureCode.CHAT_COMPLETIONS_INCOMPATIBLE,
+            PreflightUnavailableCode.RESPONSE_IDENTITY,
             response=response,
-            provider=provider.strip() if isinstance(provider, str) and provider.strip() else None,
         )
     choices = response.get("choices")
     calls: object = None
@@ -554,31 +655,45 @@ def _validate_preflight_response(
     valid_call: Mapping[str, object] | None = None
     if isinstance(calls, list) and len(calls) == 1 and isinstance(calls[0], Mapping):
         valid_call = calls[0]
+    call_id = valid_call.get("id") if valid_call is not None else None
+    call_type = valid_call.get("type") if valid_call is not None else None
     function = valid_call.get("function") if valid_call is not None else None
     name = function.get("name") if isinstance(function, Mapping) else None
     arguments = function.get("arguments") if isinstance(function, Mapping) else None
     normalized_arguments = _validate_tool_arguments(arguments)
     decision = LabToolPolicy().decide_model_tool(str(name or ""))
     if (
-        name != "gmail_get_contacts"
+        call_type != "function"
+        or not isinstance(call_id, str)
+        or not call_id.strip()
+        or len(call_id.strip()) > 128
+        or any(not character.isprintable() for character in call_id)
+        or name != "gmail_get_contacts"
         or normalized_arguments is None
         or not decision.allowed
     ):
-        return _incompatibility_record(
+        return _unavailable_record(
             model_id,
             config,
-            CompatibilityFailureCode.TOOL_SCHEMA_INCOMPATIBLE,
+            PreflightUnavailableCode.MALFORMED_TOOL_CALL,
             response=response,
-            provider=provider.strip(),
         )
+    canonical_arguments = json.dumps(
+        normalized_arguments,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
     return CompatibilityAttemptRecord(
         model_id=model_id,
         config=config,
-        provider=provider.strip(),
+        provider=provider,
         usage=normalize_usage(response),
         compatible=True,
         tool_name=name,
-        tool_arguments=normalized_arguments,
+        tool_argument_keys=tuple(sorted(normalized_arguments)),
+        tool_arguments_sha256=hashlib.sha256(canonical_arguments).hexdigest(),
     )
 
 
@@ -594,13 +709,11 @@ async def _attempt_once(
         response = await attempt(config, READ_ONLY_PREFLIGHT_TOOL)
     except PreflightIncompatibility as exc:
         return _incompatibility_record(model_id, config, exc.code)
-    except Exception as exc:
-        return CompatibilityAttemptRecord(
-            model_id=model_id,
-            config=config,
-            usage=normalize_usage(None),
-            compatible=False,
-            error_type=type(exc).__name__,
+    except Exception:
+        return _unavailable_record(
+            model_id,
+            config,
+            PreflightUnavailableCode.TRANSPORT,
         )
     return _validate_preflight_response(response, model_id=model_id, config=config)
 
@@ -667,6 +780,8 @@ __all__ = [
     "PairOrder",
     "PairResult",
     "PreflightIncompatibility",
+    "PreflightUnavailableCode",
+    "ProviderEvidence",
     "READ_ONLY_PREFLIGHT_TOOL",
     "RepetitionAggregate",
     "ScheduledPair",
