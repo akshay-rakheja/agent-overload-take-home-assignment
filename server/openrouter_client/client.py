@@ -4,12 +4,13 @@ import asyncio
 import json
 import re
 from typing import Any, Dict, List, Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 
 from ..config import ModelCallConfig, ModelRole, get_settings
 from ..services.evaluation_lab.models import TraceEventKind
+from ..services.evaluation_lab.budget import current_cost_controller
 from ..services.evaluation_lab.routing_evidence import safe_provider_routing
 from ..services.evaluation_lab.trace import emit_trace
 from ..services.evaluation_lab.usage import (
@@ -392,6 +393,17 @@ async def request_chat_completion(
         for attempt in range(max_retries + 1):
             if attempt:
                 _emit_retry_attempt_start(call_id=call_id, attempt=attempt)
+            cost_controller = current_cost_controller()
+            reservation = (
+                cost_controller.reserve_call(
+                    payload=payload,
+                    max_tokens=config.max_tokens if config is not None else 1000,
+                    logical_call_id=UUID(call_id),
+                    attempt=attempt,
+                )
+                if cost_controller is not None
+                else None
+            )
             try:
                 response = await client.post(
                     url,
@@ -400,6 +412,8 @@ async def request_chat_completion(
                     timeout=timeout_seconds,
                 )
             except asyncio.CancelledError as exc:
+                if cost_controller is not None and reservation is not None:
+                    cost_controller.settle_unreported(reservation, outcome="cancelled")
                 _emit_usage_best_effort(
                     None,
                     role=role,
@@ -418,6 +432,8 @@ async def request_chat_completion(
                 )
                 raise
             except httpx.HTTPError as exc:
+                if cost_controller is not None and reservation is not None:
+                    cost_controller.settle_unreported(reservation, outcome="failed")
                 _emit_usage_best_effort(
                     None,
                     role=role,
@@ -444,6 +460,15 @@ async def request_chat_completion(
                     error_payload = response.json()
                 except Exception:
                     error_payload = None
+                if cost_controller is not None and reservation is not None:
+                    if error_payload is not None:
+                        cost_controller.settle_response(
+                            reservation, error_payload, outcome="failed"
+                        )
+                    else:
+                        cost_controller.settle_unreported(
+                            reservation, outcome="failed"
+                        )
                 if error_payload is not None:
                     _emit_usage_best_effort(
                         error_payload,
@@ -484,6 +509,8 @@ async def request_chat_completion(
             try:
                 raw_response = response.json()
             except asyncio.CancelledError as exc:
+                if cost_controller is not None and reservation is not None:
+                    cost_controller.settle_unreported(reservation, outcome="cancelled")
                 _emit_usage_best_effort(
                     None,
                     role=role,
@@ -503,6 +530,8 @@ async def request_chat_completion(
                 )
                 raise
             except Exception as exc:
+                if cost_controller is not None and reservation is not None:
+                    cost_controller.settle_unreported(reservation, outcome="failed")
                 _emit_usage_best_effort(
                     None,
                     role=role,
@@ -522,6 +551,10 @@ async def request_chat_completion(
                 )
                 raise
             if not isinstance(raw_response, dict):
+                if cost_controller is not None and reservation is not None:
+                    cost_controller.settle_response(
+                        reservation, raw_response, outcome="failed"
+                    )
                 error = OpenRouterError("OpenRouter response must be a JSON object")
                 _emit_error_evidence(
                     role=role,
@@ -558,6 +591,10 @@ async def request_chat_completion(
                 attempt=attempt,
                 observation_status="success",
             )
+            if cost_controller is not None and reservation is not None:
+                cost_controller.settle_response(
+                    reservation, raw_response, outcome="success"
+                )
             return raw_response
 
     raise OpenRouterError("OpenRouter request failed: unknown error")
