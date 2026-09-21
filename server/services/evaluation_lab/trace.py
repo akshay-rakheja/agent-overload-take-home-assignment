@@ -27,6 +27,7 @@ from .models import (
     TraceContext,
     TraceEvent,
     TraceEventKind,
+    TraceRunStatus,
     UsagePlaceholder,
 )
 from .redaction import redact_value
@@ -446,6 +447,38 @@ class JsonlTraceStore:
                 with self._store_lock(root_fd, exclusive=False):
                     events, _ = self._read_from_root(root_fd, safe_id)
                     return events
+            finally:
+                os.close(root_fd)
+
+    def status(self, run_id: UUID | str) -> TraceRunStatus | None:
+        """Return direct append-stream facts without creating storage."""
+
+        safe_id = _coerce_run_id(run_id)
+        with self._lock:
+            root_fd = self._open_root(create=False)
+            if root_fd is None:
+                return None
+            try:
+                with self._store_lock(root_fd, exclusive=False):
+                    try:
+                        metadata = os.stat(
+                            f"{safe_id}.jsonl",
+                            dir_fd=root_fd,
+                            follow_symlinks=False,
+                        )
+                    except FileNotFoundError:
+                        return None
+                    if not stat.S_ISREG(metadata.st_mode):
+                        raise ValueError(
+                            "trace run path must be a regular file, not a symlink"
+                        )
+                    events, truncated = self._read_from_root(root_fd, safe_id)
+                    return TraceRunStatus(
+                        run_id=safe_id,
+                        event_count=len(events),
+                        last_sequence=events[-1].sequence if events else None,
+                        complete=not truncated,
+                    )
             finally:
                 os.close(root_fd)
 

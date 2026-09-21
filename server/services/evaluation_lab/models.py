@@ -222,9 +222,33 @@ class TraceResponse(_FrozenModel):
     result: SystemRunResult
 
 
+class LabDirectoryAgentSummary(_FrozenModel):
+    agent_id: UUID
+    name: str
+    purpose: str
+    aliases: tuple[str, ...]
+    status: str
+    use_count: int = Field(ge=0)
+
+
+class LabDirectoryResponse(_FrozenModel):
+    schema_version: Literal[1] = 1
+    revision: ObservedValue[str]
+    agent_count: int = Field(ge=0)
+    agents: tuple[LabDirectoryAgentSummary, ...]
+
+
+class LabTraceDeleteResponse(_FrozenModel):
+    run_id: UUID
+    deleted: Literal[True] = True
+
+
 __all__ = [
     "Availability",
     "CostPlaceholder",
+    "LabDirectoryAgentSummary",
+    "LabDirectoryResponse",
+    "LabTraceDeleteResponse",
     "ObservedValue",
     "SystemRunResult",
     "TraceContext",

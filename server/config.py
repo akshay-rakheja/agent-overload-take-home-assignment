@@ -92,6 +92,17 @@ class Settings(BaseModel):
     lab_composio_user_id: Optional[str] = Field(
         default_factory=lambda: _env_optional("OPENPOKE_LAB_COMPOSIO_USER_ID")
     )
+    lab_trace_root: Path = Field(
+        default_factory=lambda: Path(
+            os.getenv(
+                "OPENPOKE_LAB_TRACE_ROOT",
+                str(Path(__file__).resolve().parent.parent / ".lab" / "traces"),
+            )
+        )
+    )
+    lab_revision: Optional[str] = Field(
+        default_factory=lambda: _env_optional("OPENPOKE_LAB_REVISION")
+    )
 
     # HTTP behaviour
     cors_allow_origins_raw: str = Field(default=os.getenv("OPENPOKE_CORS_ALLOW_ORIGINS", "*"))
