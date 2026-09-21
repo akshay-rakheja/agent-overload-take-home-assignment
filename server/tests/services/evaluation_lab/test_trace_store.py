@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import multiprocessing
 import os
 import threading
@@ -379,6 +380,20 @@ def test_store_revalidates_copied_event_schema_version(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match="schema_version"):
         store.emit(bypassed)
     assert store.read(RUN_A) == ()
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+def test_store_never_persists_non_standard_json_numbers(
+    tmp_path: Path, value: float
+) -> None:
+    store = JsonlTraceStore(tmp_path / ".lab" / "traces")
+    bypassed = _event().model_copy(update={"payload": {"metric": value}})
+
+    with pytest.raises(ValueError, match="finite|JSON"):
+        store.emit(bypassed)
+
+    path = store.path_for(RUN_A)
+    assert not path.exists()
 
 
 def test_emit_outside_scope_and_null_sink_are_no_ops() -> None:

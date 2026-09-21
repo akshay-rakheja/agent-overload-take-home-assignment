@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -77,7 +78,7 @@ _SECRET_SUFFIXES = (
     "password",
     "secret",
 )
-_MAIL_SUFFIXES = ("emailaddress", "messageid", "threadid")
+_MAIL_SUFFIXES = ("address", "emailaddress", "messageid", "threadid")
 
 
 def _canonical_key(key: object) -> str:
@@ -88,6 +89,12 @@ def _matches_key(
     key: str | None, exact: frozenset[str], suffixes: tuple[str, ...] = ()
 ) -> bool:
     return key is not None and (key in exact or key.endswith(suffixes))
+
+
+def _is_oauth_wrapper(key: str | None) -> bool:
+    return key is not None and (
+        key == "authorization" or key.endswith(("oauth", "oauthresponse"))
+    )
 
 
 def _redact_url(value: str) -> str:
@@ -131,7 +138,7 @@ def redact_value(
         or _matches_key(key, _QUERY_KEYS)
     ):
         return REDACTED
-    if key == "code" and parent_key in {"authorization", "oauth", "oauthresponse"}:
+    if key == "code" and _is_oauth_wrapper(parent_key):
         return REDACTED
     if _matches_key(key, _HEADER_KEYS, ("headers",)):
         return _redact_headers(value)
@@ -149,6 +156,8 @@ def redact_value(
         return [redact_value(item) for item in sorted(value, key=repr)]
     if isinstance(value, str):
         return _redact_string(value)
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("JSON numbers must be finite")
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, BaseException):

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import math
+
+import pytest
+
 from server.services.evaluation_lab.redaction import REDACTED, redact_value
 
 
@@ -148,3 +152,28 @@ def test_redaction_canonicalizes_camelcase_mixed_case_and_uppercase_urls() -> No
         "prefixed-message-id",
     ):
         assert marker not in exported
+
+
+def test_redaction_covers_address_suffixes_and_provider_oauth_codes() -> None:
+    source = {
+        "billingAddress": "123 Private Street",
+        "order": {"shippingAddress": {"line1": "456 Hidden Avenue"}},
+        "providerOAuth": {"code": "opaque-provider-code", "granted": True},
+    }
+
+    redacted = redact_value(source)
+
+    assert redacted == {
+        "billingAddress": REDACTED,
+        "order": {"shippingAddress": REDACTED},
+        "providerOAuth": {"code": REDACTED, "granted": True},
+    }
+    assert "Private Street" not in repr(redacted)
+    assert "Hidden Avenue" not in repr(redacted)
+    assert "opaque-provider-code" not in repr(redacted)
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+def test_redaction_rejects_non_finite_floats(value: float) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        redact_value({"metric": value})

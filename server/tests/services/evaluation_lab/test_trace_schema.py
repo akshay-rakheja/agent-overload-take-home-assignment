@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -97,6 +98,15 @@ def test_trace_event_payload_is_deeply_immutable_and_detached() -> None:
     }
 
 
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+def test_trace_event_rejects_non_finite_json_values(value: float) -> None:
+    with pytest.raises(ValidationError, match="finite"):
+        TraceEvent(
+            **_event().model_dump(exclude={"payload"}),
+            payload={"metric": value},
+        )
+
+
 @pytest.mark.parametrize(
     "availability", [Availability.NOT_APPLICABLE, Availability.UNAVAILABLE]
 )
@@ -166,4 +176,12 @@ def test_consolidation_revalidates_copied_event_schema_version() -> None:
     bypassed = _event().model_copy(update={"schema_version": 2})
 
     with pytest.raises(ValidationError, match="schema_version"):
+        consolidate_trace([bypassed])
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+def test_consolidation_rejects_copied_non_finite_payloads(value: float) -> None:
+    bypassed = _event().model_copy(update={"payload": {"metric": value}})
+
+    with pytest.raises(ValueError, match="finite|JSON"):
         consolidate_trace([bypassed])

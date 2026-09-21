@@ -299,7 +299,12 @@ class JsonlTraceStore:
     def emit(self, event: TraceEvent) -> None:
         safe_event_payload = redact_value(event.model_dump(mode="json"))
         safe_event = TraceEvent.model_validate_json(
-            json.dumps(safe_event_payload, sort_keys=True, separators=(",", ":"))
+            json.dumps(
+                safe_event_payload,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
         )
         with self._lock:
             root_fd = self._open_root(create=True)
@@ -331,6 +336,7 @@ class JsonlTraceStore:
                     serialized = (
                         json.dumps(
                             safe_event.model_dump(mode="json"),
+                            allow_nan=False,
                             sort_keys=True,
                             separators=(",", ":"),
                         ).encode("utf-8")
@@ -406,7 +412,15 @@ def _validate_event_stream(events: Sequence[TraceEvent]) -> tuple[TraceEvent, ..
     if not events:
         raise ValueError("trace must contain at least one event")
     validated = tuple(
-        TraceEvent.model_validate_json(event.model_dump_json()) for event in events
+        TraceEvent.model_validate_json(
+            json.dumps(
+                event.model_dump(mode="json"),
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        for event in events
     )
     first = validated[0]
     if any(

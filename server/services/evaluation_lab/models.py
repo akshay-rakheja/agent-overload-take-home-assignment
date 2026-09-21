@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from enum import Enum
 from types import MappingProxyType
@@ -20,10 +21,14 @@ from pydantic import (
 
 
 class _FrozenModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        allow_inf_nan=False, extra="forbid", frozen=True, strict=True
+    )
 
 
 def _freeze_json(value: JsonValue) -> JsonValue:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("JSON numbers must be finite")
     if isinstance(value, dict):
         return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})  # type: ignore[return-value]
     if isinstance(value, list):
