@@ -96,6 +96,7 @@ def build_candidate_context(
             "candidate_count": len(context.prompt_candidates),
             "candidates": [
                 {
+                    "rank": rank,
                     "agent_id": str(candidate.agent_id),
                     "name": candidate.name,
                     "purpose": candidate.purpose,
@@ -104,7 +105,7 @@ def build_candidate_context(
                     "score_components": candidate.score_components,
                     "reasons": candidate.reasons,
                 }
-                for candidate in context.prompt_candidates
+                for rank, candidate in enumerate(context.prompt_candidates, start=1)
             ],
         },
     )

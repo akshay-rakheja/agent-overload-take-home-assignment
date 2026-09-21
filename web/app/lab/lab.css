@@ -88,6 +88,10 @@
 .repetition-nav button span { color: var(--muted); font-size: 10px; font-weight: 500; }
 .repetition-nav button[aria-current='true'] { color: white; background: var(--blue); }
 .repetition-nav button[aria-current='true'] span { color: white; }
+.turn-nav { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
+.turn-nav > span { color: var(--muted); font-size: 12px; font-weight: 650; }
+.turn-nav button { padding: 6px 10px; color: var(--blue); background: white; }
+.turn-nav button[aria-current='true'] { color: white; background: var(--blue); }
 .comparison-grid { display: grid; grid-template-columns: minmax(0, 1fr) 116px minmax(0, 1fr); grid-template-rows: auto repeat(10, auto); align-items: stretch; gap: 0 14px; }
 .comparison-side { min-width: 0; display: grid; grid-template-rows: subgrid; grid-row: 1 / span 11; gap: 12px 0; }
 .comparison-side.baseline { grid-column: 1; }
@@ -132,6 +136,7 @@
 .metric-grid dt, .routing-field dt { color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .metric-grid dd, .routing-field dd { margin: 2px 0 0; font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .metric-grid.compact { margin-top: 8px; }
+.prompt-xml { max-height: 130px; margin-top: 8px; padding: 8px; overflow: auto; background: #f8fafc; white-space: pre-wrap; overflow-wrap: anywhere; }
 .observed-value .availability-tag { display: block; color: var(--muted); font-size: 9px; font-weight: 700; text-transform: uppercase; }
 .observed-value[data-availability='inferred'] .availability-tag { color: var(--muted); }
 .observed-value[data-availability='unavailable'] .availability-tag, .observed-value[data-availability='not_applicable'] .availability-tag { color: var(--caution); }

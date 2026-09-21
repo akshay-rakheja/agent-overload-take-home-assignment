@@ -11,6 +11,40 @@ describe('Python serialization boundary', () => {
     expect(PairedRunResultSchema.parse(backend.run).scorecards[0].passed).toBe(false);
     expect(SystemRunResultSchema.parse(backend.system_result).selected_identity.availability).toBe('inferred');
   });
+  it('requires every sequence scorecard to identify its exact pair and repetition', () => {
+    const run = structuredClone(backend.evidence_run);
+    expect(PairedRunResultSchema.safeParse(run).success).toBe(true);
+    expect(run.scorecards.map((scorecard) => [scorecard.pair_id, scorecard.repetition])).toEqual([
+      [run.pairs[0].scheduled.pair_id, run.pairs[0].scheduled.repetition],
+      [run.pairs[0].scheduled.pair_id, run.pairs[0].scheduled.repetition],
+    ]);
+    delete (run.scorecards[0] as { pair_id?: string }).pair_id;
+    expect(PairedRunResultSchema.safeParse(run).success).toBe(false);
+  });
+  it('preserves producer field names without accepting the removed UI-only aliases', () => {
+    const result = backend.evidence_run.pairs[0].outcomes[1].results[0] as unknown as {
+      prompt_exposure: { value: Record<string, unknown> };
+      candidates: { value: Array<Record<string, unknown> & { rank: number }> };
+      context_metrics: { value: Record<string, unknown> };
+      timings: { value: Array<Record<string, unknown>> };
+    };
+    expect(Object.keys(result.prompt_exposure.value).sort()).toEqual(['candidate_count', 'candidate_ids', 'candidate_xml', 'routing_action', 'surface']);
+    expect(Object.keys(result.candidates.value[0]).sort()).toEqual(['agent_id', 'name', 'purpose', 'rank', 'reasons', 'score', 'score_components', 'status']);
+    expect(result.candidates.value.map((candidate) => candidate.rank)).toEqual([1, 2, 3]);
+    expect(result.context_metrics.value.preserved_raw_history).toBeUndefined();
+    expect(result.context_metrics.value.contamination_detected).toBeUndefined();
+    expect(result.timings.value.at(-1)!.provider).toBeUndefined();
+  });
+  it('rejects more than five enhanced candidates at the display boundary', () => {
+    const result = structuredClone(backend.evidence_run.pairs[0].outcomes[1].results[0]) as unknown as {
+      candidates: { value: Array<Record<string, unknown>> };
+    };
+    result.candidates.value = Array.from({ length: 6 }, (_, index) => ({
+      ...structuredClone(result.candidates.value[index % result.candidates.value.length]),
+      rank: index + 1,
+    }));
+    expect(SystemRunResultSchema.safeParse(result).success).toBe(false);
+  });
   it('requires the backend-authored scenario track enum', () => {
     const scenario = backend.scenarios.scenarios[0];
     const { track: _track, ...withoutTrack } = scenario;

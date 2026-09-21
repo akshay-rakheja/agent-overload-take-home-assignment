@@ -113,6 +113,21 @@ def _captured_fixture_fact_ids(emails: Sequence[GmailSearchEmail]) -> list[str]:
     return sorted(captured)
 
 
+def _controlled_fixture_evidence(fact_ids: Sequence[str]) -> list[dict[str, object]]:
+    manifest = _ACTIVE_FIXTURE_MANIFEST.get()
+    if manifest is None or not fact_ids:
+        return []
+    content_by_fact = {
+        message.fact_id: message.body
+        for message in render_fixture_messages(manifest.run_id)
+    }
+    return [
+        {"fact_id": fact_id, "fabricated": True, "content": content_by_fact[fact_id]}
+        for fact_id in fact_ids
+        if fact_id in manifest.facts and fact_id in content_by_fact
+    ]
+
+
 # Create standardized error response for tool calls
 def _create_error_response(call_id: str, query: Optional[str], error: str) -> Tuple[str, str]:
     """Create standardized error response for tool calls."""
@@ -455,6 +470,8 @@ async def _perform_search(
         next_page_token=next_page_token,
         messages=parsed_emails,
     )
+    captured_fact_ids = _captured_fixture_fact_ids(result_model.messages)
+    controlled_fixture_evidence = _controlled_fixture_evidence(captured_fact_ids)
     emit_trace(
         TraceEventKind.GMAIL_EVIDENCE,
         {
@@ -467,7 +484,12 @@ async def _perform_search(
                 email.attachment_count for email in result_model.messages
             ),
             "query_sha256": _query_sha256(query),
-            "fact_ids": _captured_fixture_fact_ids(result_model.messages),
+            "fact_ids": captured_fact_ids,
+            **(
+                {"controlled_fixture_evidence": controlled_fixture_evidence}
+                if controlled_fixture_evidence
+                else {}
+            ),
         },
     )
     return result_model

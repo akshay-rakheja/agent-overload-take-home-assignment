@@ -460,6 +460,13 @@ def test_email_search_traces_sanitized_facts_from_exact_processed_result(
             b"from:private@example.invalid"
         ).hexdigest(),
         "fact_ids": ("SEC-7419",),
+        "controlled_fixture_evidence": (
+            {
+                "fact_id": "SEC-7419",
+                "fabricated": True,
+                "content": fixture_message.body,
+            },
+        ),
     }
     for marker in private_markers:
         assert marker not in serialized_event

@@ -16,30 +16,48 @@
               {
                 "accepted_dispatch": {
                   "availability": "unavailable",
-                  "reason": "Baseline dispatch acceptance was not emitted.",
+                  "reason": "raw baseline observation does not expose exact dispatch acceptance",
                   "value": null
                 },
                 "attempted_dispatch": {
                   "availability": "unavailable",
-                  "reason": "Baseline dispatch attempt was not emitted.",
+                  "reason": "raw baseline observation does not expose exact dispatch acceptance",
                   "value": null
                 },
                 "authorized_ids": {
                   "availability": "not_applicable",
-                  "reason": "Baseline has no dispatch authorization boundary.",
+                  "reason": "historical baseline has no deterministic authorization set",
                   "value": null
                 },
                 "availability_metadata": {
-                  "decision": "inferred"
+                  "accepted_dispatch": "unavailable",
+                  "attempted_dispatch": "unavailable",
+                  "authorized_ids": "not_applicable",
+                  "candidates": "not_applicable",
+                  "context_metrics": "unavailable",
+                  "created_identity": "not_applicable",
+                  "decision": "inferred",
+                  "duplicates": "not_applicable",
+                  "errors": "available",
+                  "final_response": "available",
+                  "gmail_evidence": "unavailable",
+                  "identity_delta": "available",
+                  "mode": "inferred",
+                  "prompt_exposure": "available",
+                  "recommendation": "not_applicable",
+                  "revision": "unavailable",
+                  "roster_count": "available",
+                  "selected_identity": "inferred",
+                  "timings": "available"
                 },
                 "candidates": {
                   "availability": "not_applicable",
-                  "reason": "Baseline exposes the full roster without a ranked candidate list.",
+                  "reason": "historical full-roster selection has no ranked candidate set",
                   "value": null
                 },
                 "context_metrics": {
                   "availability": "unavailable",
-                  "reason": "Historical baseline has no bounded enhanced context metrics.",
+                  "reason": "historical baseline has no bounded enhanced context metrics",
                   "value": null
                 },
                 "cost": {
@@ -54,27 +72,27 @@
                     "value": "USD"
                   },
                   "known_amount_subtotal": {
-                    "availability": "not_applicable",
-                    "reason": "Complete subtotal not available.",
+                    "availability": "unavailable",
+                    "reason": "baseline provider cost has no partial known subtotal",
                     "value": null
                   }
                 },
                 "created_identity": {
                   "availability": "not_applicable",
-                  "reason": "No identity was created.",
+                  "reason": "baseline did not infer one new historical roster name",
                   "value": null
                 },
                 "decision": {
                   "availability": "inferred",
-                  "reason": "Baseline decision inferred from state.",
+                  "reason": "one observed historical journal append",
                   "value": {
                     "action": "reuse",
-                    "reason": "Selected name observed after the turn."
+                    "reason": "one observed historical journal append"
                   }
                 },
                 "duplicates": {
                   "availability": "not_applicable",
-                  "reason": "Baseline has no stable-identity duplicate detector.",
+                  "reason": "historical baseline has no enhanced stable identity contract",
                   "value": null
                 },
                 "errors": {
@@ -85,11 +103,11 @@
                 "final_response": {
                   "availability": "available",
                   "reason": null,
-                  "value": "Atlas found the controlled fixture and summarized the security alert."
+                  "value": "reference: SEC-7419; timestamp: 2026-09-18 04:12 UTC; location: Lisbon; device: Pixel 10; verification phrase: indigo-orbit"
                 },
                 "gmail_evidence": {
                   "availability": "unavailable",
-                  "reason": "Raw baseline observation has no normalized Gmail evidence.",
+                  "reason": "raw baseline observation has no normalized Gmail evidence",
                   "value": null
                 },
                 "identity_delta": {
@@ -98,100 +116,149 @@
                   "value": {
                     "added_names": [],
                     "removed_names": [],
-                    "roster_after_count": 6,
-                    "roster_before_count": 6
+                    "roster_after_count": 100,
+                    "roster_before_count": 100
                   }
                 },
                 "mode": {
                   "availability": "inferred",
-                  "reason": "Historical path observed from the baseline prompt.",
+                  "reason": "historical baseline observer captures the full-roster selection path",
                   "value": "full_roster"
                 },
                 "prompt_exposure": {
                   "availability": "available",
                   "reason": null,
                   "value": {
-                    "exposed_name_count": 6,
+                    "exposed_name_count": 100,
                     "exposed_names": [
-                      "Atlas",
-                      "Beacon",
-                      "Cedar",
-                      "Delta",
-                      "Ember",
-                      "Flint"
-                    ],
-                    "full_roster": true,
-                    "identities": [
-                      {
-                        "agent_id": "00000000-0000-4000-8000-000000000001",
-                        "name": "Atlas",
-                        "purpose": "Account security",
-                        "status": "hot",
-                        "use_count": 1
-                      },
-                      {
-                        "agent_id": "00000000-0000-4000-8000-000000000002",
-                        "name": "Beacon",
-                        "purpose": "Calendar planning",
-                        "status": "warm",
-                        "use_count": 2
-                      },
-                      {
-                        "agent_id": "00000000-0000-4000-8000-000000000003",
-                        "name": "Cedar",
-                        "purpose": "Research synthesis",
-                        "status": "cold",
-                        "use_count": 3
-                      },
-                      {
-                        "agent_id": "00000000-0000-4000-8000-000000000004",
-                        "name": "Delta",
-                        "purpose": "Draft review",
-                        "status": "cold",
-                        "use_count": 4
-                      },
-                      {
-                        "agent_id": "00000000-0000-4000-8000-000000000005",
-                        "name": "Ember",
-                        "purpose": "Expense lookup",
-                        "status": "warm",
-                        "use_count": 5
-                      },
-                      {
-                        "agent_id": "00000000-0000-4000-8000-000000000006",
-                        "name": "Flint",
-                        "purpose": "File organization",
-                        "status": "cold",
-                        "use_count": 6
-                      }
+                      "Instagram Security Monitor",
+                      "AI Video Newsletter Curator",
+                      "AI Video Receipt Reconciler",
+                      "Account Security Auditor",
+                      "Controlled Fixture Researcher",
+                      "Draft Review Assistant",
+                      "Fixture Agent 007",
+                      "Fixture Agent 008",
+                      "Fixture Agent 009",
+                      "Fixture Agent 010",
+                      "Fixture Agent 011",
+                      "Fixture Agent 012",
+                      "Fixture Agent 013",
+                      "Fixture Agent 014",
+                      "Fixture Agent 015",
+                      "Fixture Agent 016",
+                      "Fixture Agent 017",
+                      "Fixture Agent 018",
+                      "Fixture Agent 019",
+                      "Fixture Agent 020",
+                      "Fixture Agent 021",
+                      "Fixture Agent 022",
+                      "Fixture Agent 023",
+                      "Fixture Agent 024",
+                      "Fixture Agent 025",
+                      "Fixture Agent 026",
+                      "Fixture Agent 027",
+                      "Fixture Agent 028",
+                      "Fixture Agent 029",
+                      "Fixture Agent 030",
+                      "Fixture Agent 031",
+                      "Fixture Agent 032",
+                      "Fixture Agent 033",
+                      "Fixture Agent 034",
+                      "Fixture Agent 035",
+                      "Fixture Agent 036",
+                      "Fixture Agent 037",
+                      "Fixture Agent 038",
+                      "Fixture Agent 039",
+                      "Fixture Agent 040",
+                      "Fixture Agent 041",
+                      "Fixture Agent 042",
+                      "Fixture Agent 043",
+                      "Fixture Agent 044",
+                      "Fixture Agent 045",
+                      "Fixture Agent 046",
+                      "Fixture Agent 047",
+                      "Fixture Agent 048",
+                      "Fixture Agent 049",
+                      "Fixture Agent 050",
+                      "Fixture Agent 051",
+                      "Fixture Agent 052",
+                      "Fixture Agent 053",
+                      "Fixture Agent 054",
+                      "Fixture Agent 055",
+                      "Fixture Agent 056",
+                      "Fixture Agent 057",
+                      "Fixture Agent 058",
+                      "Fixture Agent 059",
+                      "Fixture Agent 060",
+                      "Fixture Agent 061",
+                      "Fixture Agent 062",
+                      "Fixture Agent 063",
+                      "Fixture Agent 064",
+                      "Fixture Agent 065",
+                      "Fixture Agent 066",
+                      "Fixture Agent 067",
+                      "Fixture Agent 068",
+                      "Fixture Agent 069",
+                      "Fixture Agent 070",
+                      "Fixture Agent 071",
+                      "Fixture Agent 072",
+                      "Fixture Agent 073",
+                      "Fixture Agent 074",
+                      "Fixture Agent 075",
+                      "Fixture Agent 076",
+                      "Fixture Agent 077",
+                      "Fixture Agent 078",
+                      "Fixture Agent 079",
+                      "Fixture Agent 080",
+                      "Fixture Agent 081",
+                      "Fixture Agent 082",
+                      "Fixture Agent 083",
+                      "Fixture Agent 084",
+                      "Fixture Agent 085",
+                      "Fixture Agent 086",
+                      "Fixture Agent 087",
+                      "Fixture Agent 088",
+                      "Fixture Agent 089",
+                      "Fixture Agent 090",
+                      "Fixture Agent 091",
+                      "Fixture Agent 092",
+                      "Fixture Agent 093",
+                      "Fixture Agent 094",
+                      "Fixture Agent 095",
+                      "Fixture Agent 096",
+                      "Fixture Agent 097",
+                      "Fixture Agent 098",
+                      "Fixture Agent 099",
+                      "Fixture Agent 100"
                     ],
                     "prompt_characters": 18420,
-                    "prompt_xml_sha256": "baseline-fixture-sha256"
+                    "prompt_xml_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                   }
                 },
                 "recommendation": {
                   "availability": "not_applicable",
-                  "reason": "Baseline has no deterministic recommendation record.",
+                  "reason": "historical full-roster selection has no ranked candidate set",
                   "value": null
                 },
                 "revision": {
-                  "availability": "available",
-                  "reason": null,
-                  "value": "baseline@abc1234"
+                  "availability": "unavailable",
+                  "reason": "baseline observation does not carry revision metadata",
+                  "value": null
                 },
                 "roster_count": {
                   "availability": "available",
                   "reason": null,
-                  "value": 6
+                  "value": 100
                 },
                 "run_id": "11111111-1111-4111-8111-111111111111",
                 "schema_version": 1,
                 "selected_identity": {
                   "availability": "inferred",
-                  "reason": "Observed from state delta.",
+                  "reason": "one observed historical journal append",
                   "value": {
-                    "agent_id": "00000000-0000-4000-8000-000000000001",
-                    "name": "Atlas"
+                    "name": "Instagram Security Monitor",
+                    "reason": "one observed historical journal append"
                   }
                 },
                 "system": "baseline",
@@ -200,13 +267,64 @@
                   "reason": null,
                   "value": [
                     {
-                      "latency_ms": 812.4,
-                      "phase": "total",
-                      "provider": "fixture-provider"
+                      "actual_provider": "fixture-provider",
+                      "call_id": "baseline-fixture-call",
+                      "component": "interaction",
+                      "elapsed_ms": 812.4,
+                      "error_type": null,
+                      "message_count": 3,
+                      "model": "fixture-model-v1",
+                      "provider": "fixture-provider",
+                      "request_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                      "response_choice_count": 1,
+                      "response_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                      "response_tool_call_count": 1,
+                      "tool_names": [
+                        "send_message_to_agent"
+                      ],
+                      "usage": {
+                        "cached_tokens": {
+                          "availability": "available",
+                          "reason": null,
+                          "value": 0
+                        },
+                        "completion_tokens": {
+                          "availability": "available",
+                          "reason": null,
+                          "value": 148
+                        },
+                        "estimated_cost_usd": {
+                          "availability": "unavailable",
+                          "reason": "estimated cost was not supplied",
+                          "value": null
+                        },
+                        "prompt_tokens": {
+                          "availability": "available",
+                          "reason": null,
+                          "value": 4210
+                        },
+                        "provider_cost_usd": {
+                          "availability": "available",
+                          "reason": null,
+                          "value": 0.0142
+                        },
+                        "total_tokens": {
+                          "availability": "available",
+                          "reason": null,
+                          "value": 4358
+                        }
+                      }
+                    },
+                    {
+                      "elapsed_ns": 812400000,
+                      "error_type": null,
+                      "finished_monotonic_ns": 812400100,
+                      "phase": "total_run",
+                      "started_monotonic_ns": 100
                     }
                   ]
                 },
-                "turn_id": "44444444-4444-4444-8444-444444444444",
+                "turn_id": "e820d6d9-ed78-5a83-a420-e2a3119b76a9",
                 "usage": {
                   "cached_tokens": {
                     "availability": "available",
@@ -219,23 +337,23 @@
                     "value": 4210
                   },
                   "known_cached_tokens_subtotal": {
-                    "availability": "not_applicable",
-                    "reason": "Complete subtotal not available.",
+                    "availability": "unavailable",
+                    "reason": "baseline cached tokens has no partial known subtotal",
                     "value": null
                   },
                   "known_input_tokens_subtotal": {
-                    "availability": "not_applicable",
-                    "reason": "Complete subtotal not available.",
+                    "availability": "unavailable",
+                    "reason": "baseline prompt tokens has no partial known subtotal",
                     "value": null
                   },
                   "known_output_tokens_subtotal": {
-                    "availability": "not_applicable",
-                    "reason": "Complete subtotal not available.",
+                    "availability": "unavailable",
+                    "reason": "baseline completion tokens has no partial known subtotal",
                     "value": null
                   },
                   "known_total_tokens_subtotal": {
-                    "availability": "not_applicable",
-                    "reason": "Complete subtotal not available.",
+                    "availability": "unavailable",
+                    "reason": "baseline total tokens has no partial known subtotal",
                     "value": null
                   },
                   "output_tokens": {
@@ -265,7 +383,36 @@
                   "availability": "available",
                   "reason": null,
                   "value": {
-                    "selected_agent_id": "00000000-0000-4000-8000-000000000001",
+                    "code": "ok",
+                    "directory_count_after": 100,
+                    "directory_count_after_availability": "available",
+                    "directory_count_after_reason": null,
+                    "directory_count_before": 100,
+                    "directory_count_before_availability": "available",
+                    "directory_count_before_reason": null,
+                    "events": [
+                      {
+                        "code": "ok",
+                        "directory_count_after": 100,
+                        "directory_count_after_availability": "available",
+                        "directory_count_after_reason": null,
+                        "directory_count_before": 100,
+                        "directory_count_before_availability": "available",
+                        "directory_count_before_reason": null,
+                        "idempotent_creation": false,
+                        "journal_sha256_after": "0000000000000000000000000000000000000000000000000000000000000000",
+                        "journal_sha256_before": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                        "new_agent_created": false,
+                        "selected_agent_id": "292943fa-641b-5ae6-a8d2-ab631be77ba8",
+                        "status": "accepted",
+                        "success": true
+                      }
+                    ],
+                    "idempotent_creation": false,
+                    "journal_sha256_after": "0000000000000000000000000000000000000000000000000000000000000000",
+                    "journal_sha256_before": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                    "new_agent_created": false,
+                    "selected_agent_id": "292943fa-641b-5ae6-a8d2-ab631be77ba8",
                     "status": "accepted",
                     "success": true
                   }
@@ -274,8 +421,29 @@
                   "availability": "available",
                   "reason": null,
                   "value": {
+                    "authorized_ids": [
+                      "292943fa-641b-5ae6-a8d2-ab631be77ba8"
+                    ],
+                    "creation_intent_supplied": false,
+                    "directory_count_before": 100,
+                    "directory_count_before_availability": "available",
+                    "directory_count_before_reason": null,
+                    "events": [
+                      {
+                        "authorized_ids": [
+                          "292943fa-641b-5ae6-a8d2-ab631be77ba8"
+                        ],
+                        "creation_intent_supplied": false,
+                        "directory_count_before": 100,
+                        "directory_count_before_availability": "available",
+                        "directory_count_before_reason": null,
+                        "reference_type": "reuse",
+                        "requested_agent_id": "292943fa-641b-5ae6-a8d2-ab631be77ba8",
+                        "routing_action": "reuse"
+                      }
+                    ],
                     "reference_type": "reuse",
-                    "requested_agent_id": "00000000-0000-4000-8000-000000000001",
+                    "requested_agent_id": "292943fa-641b-5ae6-a8d2-ab631be77ba8",
                     "routing_action": "reuse"
                   }
                 },
@@ -283,59 +451,99 @@
                   "availability": "available",
                   "reason": null,
                   "value": [
-                    "00000000-0000-4000-8000-000000000001"
+                    "292943fa-641b-5ae6-a8d2-ab631be77ba8"
                   ]
                 },
-                "availability_metadata": {},
+                "availability_metadata": {
+                  "accepted_dispatch": "available",
+                  "attempted_dispatch": "available",
+                  "authorized_ids": "available",
+                  "candidates": "available",
+                  "context_metrics": "available",
+                  "created_identity": "unavailable",
+                  "decision": "available",
+                  "duplicates": "unavailable",
+                  "errors": "unavailable",
+                  "final_response": "available",
+                  "gmail_evidence": "available",
+                  "identity_delta": "available",
+                  "mode": "available",
+                  "prompt_exposure": "available",
+                  "recommendation": "available",
+                  "revision": "available",
+                  "roster_count": "available",
+                  "selected_identity": "available",
+                  "timings": "available"
+                },
                 "candidates": {
                   "availability": "available",
                   "reason": null,
                   "value": [
                     {
-                      "agent_id": "00000000-0000-4000-8000-000000000001",
-                      "components": {
-                        "recency": 0.12,
-                        "semantic": 0.72,
-                        "use_count": 0.1
-                      },
-                      "name": "Atlas",
+                      "agent_id": "292943fa-641b-5ae6-a8d2-ab631be77ba8",
+                      "name": "Instagram Security Monitor",
+                      "purpose": "Review Instagram security notices and account-protection events",
                       "rank": 1,
                       "reasons": [
-                        "security intent match",
-                        "recent successful use"
+                        "exact name or alias phrase",
+                        "shared terms: instagram, monitor, security",
+                        "shared multi-word phrase",
+                        "recently used",
+                        "prior successful use"
                       ],
-                      "score": 0.94,
+                      "score": 1.0,
+                      "score_components": {
+                        "exact_match": 0.7,
+                        "lifecycle": 0.0,
+                        "phrase_match": 0.12,
+                        "prior_use": 0.04,
+                        "recency": 0.05,
+                        "token_overlap": 0.13125
+                      },
                       "status": "hot"
                     },
                     {
-                      "agent_id": "00000000-0000-4000-8000-000000000003",
-                      "components": {
-                        "recency": 0.02,
-                        "semantic": 0.55,
-                        "use_count": 0.04
-                      },
-                      "name": "Cedar",
+                      "agent_id": "5f5723ea-68b5-513c-8562-b8d7145440e7",
+                      "name": "Controlled Fixture Researcher",
+                      "purpose": "Summarize controlled fixture references",
                       "rank": 2,
                       "reasons": [
-                        "research capability overlap"
+                        "shared terms: fixture, summarize",
+                        "recently used",
+                        "prior successful use"
                       ],
-                      "score": 0.61,
-                      "status": "cold"
+                      "score": 0.1775,
+                      "score_components": {
+                        "exact_match": 0.0,
+                        "lifecycle": 0.0,
+                        "phrase_match": 0.0,
+                        "prior_use": 0.04,
+                        "recency": 0.05,
+                        "token_overlap": 0.0875
+                      },
+                      "status": "hot"
                     },
                     {
-                      "agent_id": "00000000-0000-4000-8000-000000000004",
-                      "components": {
-                        "recency": 0.01,
-                        "semantic": 0.33,
-                        "use_count": 0.03
-                      },
-                      "name": "Delta",
+                      "agent_id": "68163898-5de0-5848-8cd9-7148270cb0ea",
+                      "name": "Account Security Auditor",
+                      "purpose": "Review account security notices",
                       "rank": 3,
                       "reasons": [
-                        "weak review overlap"
+                        "shared terms: security",
+                        "recently used",
+                        "prior successful use",
+                        "dormant lifecycle penalty"
                       ],
-                      "score": 0.37,
-                      "status": "cold"
+                      "score": 0.10375,
+                      "score_components": {
+                        "exact_match": 0.0,
+                        "lifecycle": -0.03,
+                        "phrase_match": 0.0,
+                        "prior_use": 0.04,
+                        "recency": 0.05,
+                        "token_overlap": 0.04375
+                      },
+                      "status": "dormant"
                     }
                   ]
                 },
@@ -343,15 +551,15 @@
                   "availability": "available",
                   "reason": null,
                   "value": {
-                    "contamination_detected": false,
                     "included_episode_count": 8,
-                    "omitted_entry_count": 9968,
-                    "preserved_raw_history": true,
-                    "raw_bytes": 984220,
+                    "omitted_entry_count": 9984,
                     "raw_entry_count": 10000,
-                    "rendered_characters": 4000,
+                    "raw_history_bytes": 1229999,
+                    "raw_history_characters": 1229999,
+                    "rendered_bytes": 2100,
+                    "rendered_characters": 2100,
                     "summary_used": true,
-                    "truncated_entry_count": 24
+                    "truncated_entry_count": 0
                   }
                 },
                 "cost": {
@@ -366,14 +574,14 @@
                     "value": "USD"
                   },
                   "known_amount_subtotal": {
-                    "availability": "available",
-                    "reason": null,
-                    "value": 0.0048
+                    "availability": "unavailable",
+                    "reason": "provider cost has no partial known subtotal",
+                    "value": null
                   }
                 },
                 "created_identity": {
-                  "availability": "not_applicable",
-                  "reason": "The selected identity was reused.",
+                  "availability": "unavailable",
+                  "reason": "not emitted",
                   "value": null
                 },
                 "decision": {
@@ -381,25 +589,33 @@
                   "reason": null,
                   "value": {
                     "action": "reuse",
-                    "agent_id": "00000000-0000-4000-8000-000000000001",
-                    "expectation": "reuse Atlas",
-                    "reason": "Highest deterministic score."
+                    "agent_id": "292943fa-641b-5ae6-a8d2-ab631be77ba8",
+                    "confidence": 1.0,
+                    "reasons": [
+                      "one candidate cleared the reuse threshold and ambiguity margin",
+                      "exact name or alias phrase",
+                      "shared terms: instagram, monitor, security",
+                      "shared multi-word phrase",
+                      "recently used",
+                      "prior successful use"
+                    ],
+                    "recommendation": "292943fa-641b-5ae6-a8d2-ab631be77ba8"
                   }
                 },
                 "duplicates": {
-                  "availability": "available",
-                  "reason": null,
-                  "value": []
+                  "availability": "unavailable",
+                  "reason": "not emitted",
+                  "value": null
                 },
                 "errors": {
-                  "availability": "available",
-                  "reason": null,
-                  "value": []
+                  "availability": "unavailable",
+                  "reason": "not emitted",
+                  "value": null
                 },
                 "final_response": {
                   "availability": "available",
                   "reason": null,
-                  "value": "Atlas found the controlled fixture and summarized the security alert."
+                  "value": "reference: SEC-7419; timestamp: 2026-09-18 04:12 UTC; location: Lisbon; device: Pixel 10; verification phrase: indigo-orbit"
                 },
                 "gmail_evidence": {
                   "availability": "available",
@@ -407,19 +623,34 @@
                   "value": [
                     {
                       "allowed": true,
-                      "content_excerpt": "Security alert for the controlled fixture.",
-                      "fabricated": true,
-                      "fact_ids": [
-                        "fixture-security-001"
-                      ],
-                      "full_fabricated_content": "A controlled fixture reports a new sign-in and recommends reviewing account activity.",
+                      "boundary": "gmail_client",
+                      "has_more": false,
+                      "observation_availability": "available",
+                      "observation_reason": null,
                       "operation_name": "GMAIL_FETCH_EMAILS",
                       "policy_code": "allowed_read_only",
-                      "query_sha256": "controlled-query-sha256",
                       "result_count": 1,
                       "sdk_executed": true,
-                      "stage": "completed",
-                      "track": "controlled"
+                      "stage": "completed"
+                    },
+                    {
+                      "attachment_count": 0,
+                      "boundary": "email_search_task",
+                      "controlled_fixture_evidence": [
+                        {
+                          "content": "Fabricated security notice SEC-7419. A sign-in was recorded at 2026-09-18 04:12 UTC from Lisbon on Pixel 10. Verification phrase: indigo-orbit.",
+                          "fabricated": true,
+                          "fact_id": "SEC-7419"
+                        }
+                      ],
+                      "fact_ids": [
+                        "SEC-7419"
+                      ],
+                      "has_more": false,
+                      "operation_name": "GMAIL_FETCH_EMAILS",
+                      "query_sha256": "6073fce814d8071b361414ab24475b0bd25f504759d1517f3a762c2a8e088768",
+                      "result_count": 1,
+                      "stage": "completed"
                     }
                   ]
                 },
@@ -428,10 +659,16 @@
                   "reason": null,
                   "value": {
                     "created_agent_ids": [],
-                    "directory_count_after": 6,
-                    "directory_count_before": 6,
+                    "directory_count_after": 100,
+                    "directory_count_after_availability": "available",
+                    "directory_count_after_reason": null,
+                    "directory_count_before": 100,
+                    "directory_count_before_availability": "available",
+                    "directory_count_before_reason": null,
+                    "journal_sha256_after": "0000000000000000000000000000000000000000000000000000000000000000",
+                    "journal_sha256_before": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
                     "selected_agent_ids": [
-                      "00000000-0000-4000-8000-000000000001"
+                      "292943fa-641b-5ae6-a8d2-ab631be77ba8"
                     ]
                   }
                 },
@@ -444,69 +681,21 @@
                   "availability": "available",
                   "reason": null,
                   "value": {
-                    "exposed_agent_ids": [
-                      "00000000-0000-4000-8000-000000000001",
-                      "00000000-0000-4000-8000-000000000002",
-                      "00000000-0000-4000-8000-000000000003"
+                    "candidate_count": 3,
+                    "candidate_ids": [
+                      "292943fa-641b-5ae6-a8d2-ab631be77ba8",
+                      "5f5723ea-68b5-513c-8562-b8d7145440e7",
+                      "68163898-5de0-5848-8cd9-7148270cb0ea"
                     ],
-                    "exposed_identity_count": 3,
-                    "full_roster": false,
-                    "identities": [
-                      {
-                        "agent_id": "00000000-0000-4000-8000-000000000001",
-                        "name": "Atlas",
-                        "purpose": "Account security",
-                        "status": "hot",
-                        "use_count": 1
-                      },
-                      {
-                        "agent_id": "00000000-0000-4000-8000-000000000002",
-                        "name": "Beacon",
-                        "purpose": "Calendar planning",
-                        "status": "warm",
-                        "use_count": 2
-                      },
-                      {
-                        "agent_id": "00000000-0000-4000-8000-000000000003",
-                        "name": "Cedar",
-                        "purpose": "Research synthesis",
-                        "status": "cold",
-                        "use_count": 3
-                      },
-                      {
-                        "agent_id": "00000000-0000-4000-8000-000000000004",
-                        "name": "Delta",
-                        "purpose": "Draft review",
-                        "status": "cold",
-                        "use_count": 4
-                      },
-                      {
-                        "agent_id": "00000000-0000-4000-8000-000000000005",
-                        "name": "Ember",
-                        "purpose": "Expense lookup",
-                        "status": "warm",
-                        "use_count": 5
-                      },
-                      {
-                        "agent_id": "00000000-0000-4000-8000-000000000006",
-                        "name": "Flint",
-                        "purpose": "File organization",
-                        "status": "cold",
-                        "use_count": 6
-                      }
-                    ],
-                    "prompt_characters": 3920,
-                    "prompt_xml_sha256": "enhanced-fixture-sha256"
+                    "candidate_xml": "<agent_candidates routing_action=\"reuse\">\n<agent_candidate id=\"292943fa-641b-5ae6-a8d2-ab631be77ba8\" name=\"Instagram Security Monitor\" purpose=\"Review Instagram security notices and account-protection events\" status=\"hot\">exact name or alias phrase; shared terms: instagram, monitor, security; shared multi-word phrase; recently used; prior successful use</agent_candidate>\n<agent_candidate id=\"5f5723ea-68b5-513c-8562-b8d7145440e7\" name=\"Controlled Fixture Researcher\" purpose=\"Summarize controlled fixture references\" status=\"hot\">shared terms: fixture, summarize; recently used; prior successful use</agent_candidate>\n<agent_candidate id=\"68163898-5de0-5848-8cd9-7148270cb0ea\" name=\"Account Security Auditor\" purpose=\"Review account security notices\" status=\"dormant\">shared terms: security; recently used; prior successful use; dormant lifecycle penalty</agent_candidate>\n</agent_candidates>",
+                    "routing_action": "reuse",
+                    "surface": "interaction_agent_candidate_xml"
                   }
                 },
                 "recommendation": {
                   "availability": "available",
                   "reason": null,
-                  "value": {
-                    "action": "reuse",
-                    "agent_id": "00000000-0000-4000-8000-000000000001",
-                    "name": "Atlas"
-                  }
+                  "value": "292943fa-641b-5ae6-a8d2-ab631be77ba8"
                 },
                 "revision": {
                   "availability": "available",
@@ -516,7 +705,7 @@
                 "roster_count": {
                   "availability": "available",
                   "reason": null,
-                  "value": 6
+                  "value": 100
                 },
                 "run_id": "11111111-1111-4111-8111-111111111111",
                 "schema_version": 1,
@@ -524,9 +713,9 @@
                   "availability": "available",
                   "reason": null,
                   "value": {
-                    "agent_id": "00000000-0000-4000-8000-000000000001",
-                    "name": "Atlas",
-                    "reused": true
+                    "agent_id": "292943fa-641b-5ae6-a8d2-ab631be77ba8",
+                    "name": "Instagram Security Monitor",
+                    "status": "hot"
                   }
                 },
                 "system": "enhanced",
@@ -535,14 +724,16 @@
                   "reason": null,
                   "value": [
                     {
-                      "latency_ms": 19.3,
-                      "phase": "retrieval",
-                      "provider": "fixture-provider"
+                      "elapsed_ns": 19300000,
+                      "finished_monotonic_ns": 19300010,
+                      "phase": "retrieval_routing",
+                      "started_monotonic_ns": 10
                     },
                     {
-                      "latency_ms": 436.8,
-                      "phase": "total",
-                      "provider": "fixture-provider"
+                      "elapsed_ns": 436800000,
+                      "finished_monotonic_ns": 436800100,
+                      "phase": "total_run",
+                      "started_monotonic_ns": 100
                     }
                   ]
                 },
@@ -559,24 +750,24 @@
                     "value": 968
                   },
                   "known_cached_tokens_subtotal": {
-                    "availability": "available",
-                    "reason": null,
-                    "value": 0
+                    "availability": "unavailable",
+                    "reason": "cached_tokens has no partial known subtotal",
+                    "value": null
                   },
                   "known_input_tokens_subtotal": {
-                    "availability": "available",
-                    "reason": null,
-                    "value": 968
+                    "availability": "unavailable",
+                    "reason": "input_tokens has no partial known subtotal",
+                    "value": null
                   },
                   "known_output_tokens_subtotal": {
-                    "availability": "available",
-                    "reason": null,
-                    "value": 126
+                    "availability": "unavailable",
+                    "reason": "output_tokens has no partial known subtotal",
+                    "value": null
                   },
                   "known_total_tokens_subtotal": {
-                    "availability": "available",
-                    "reason": null,
-                    "value": 1094
+                    "availability": "unavailable",
+                    "reason": "total_tokens has no partial known subtotal",
+                    "value": null
                   },
                   "output_tokens": {
                     "availability": "available",
@@ -632,7 +823,9 @@
           ],
           "status": "pass"
         },
+        "pair_id": "37eec440-c41e-5043-bce0-f4e87289b9fd",
         "passed": false,
+        "repetition": 1,
         "scenario_id": "exact-instagram-security",
         "schema_version": 1,
         "system": "baseline",
@@ -677,11 +870,11 @@
               "contradictory_evidence": [],
               "layer": "identity",
               "missing_evidence": [],
-              "negative_evidence": [
-                "selected identity did not match expected reuse contract"
+              "negative_evidence": [],
+              "positive_evidence": [
+                "baseline inferred canonical fixture name reused without directory growth"
               ],
-              "positive_evidence": [],
-              "status": "fail"
+              "status": "pass"
             },
             "passed": false,
             "response": {
@@ -721,16 +914,18 @@
           ],
           "status": "pass"
         },
-        "passed": false,
+        "pair_id": "37eec440-c41e-5043-bce0-f4e87289b9fd",
+        "passed": true,
+        "repetition": 1,
         "scenario_id": "exact-instagram-security",
         "schema_version": 1,
         "system": "enhanced",
         "turns": [
           {
             "candidate_rank": {
-              "availability": "unavailable",
-              "reason": "expected reuse identity was absent from enhanced candidates",
-              "value": null
+              "availability": "available",
+              "reason": null,
+              "value": 1
             },
             "context": {
               "contradictory_evidence": [],
@@ -755,50 +950,46 @@
             "gmail_safety": {
               "contradictory_evidence": [],
               "layer": "gmail_safety",
-              "missing_evidence": [
-                "exact predeclared Gmail query"
-              ],
+              "missing_evidence": [],
               "negative_evidence": [],
-              "positive_evidence": [],
-              "status": "missing"
+              "positive_evidence": [
+                "exact read-only Gmail operation and query completed"
+              ],
+              "status": "pass"
             },
             "identity": {
               "contradictory_evidence": [],
               "layer": "identity",
               "missing_evidence": [],
-              "negative_evidence": [
-                "selected identity did not match expected reuse contract"
+              "negative_evidence": [],
+              "positive_evidence": [
+                "expected stable identity reused without directory growth"
               ],
-              "positive_evidence": [],
-              "status": "fail"
+              "status": "pass"
             },
-            "passed": false,
+            "passed": true,
             "response": {
               "contradictory_evidence": [],
               "layer": "response",
               "missing_evidence": [],
-              "negative_evidence": [
-                "facts were not captured by read-only evidence: ['SEC-7419']",
-                "response contains an unsupported or misbound factual assertion"
+              "negative_evidence": [],
+              "positive_evidence": [
+                "captured facts matched normalized response text"
               ],
-              "positive_evidence": [],
-              "status": "fail"
+              "status": "pass"
             },
             "routing": {
-              "contradictory_evidence": [
-                "authorized IDs did not exactly match recommended reuse identity",
-                "dispatch requested the wrong stable identity",
-                "accepted dispatch selected the wrong stable identity"
-              ],
+              "contradictory_evidence": [],
               "layer": "routing",
               "missing_evidence": [],
-              "negative_evidence": [
-                "reuse recommendation did not match expected stable identity"
-              ],
+              "negative_evidence": [],
               "positive_evidence": [
-                "action=reuse"
+                "action=reuse",
+                "reuse recommendation matched expected stable identity",
+                "authorization exactly matched recommended identity",
+                "dispatch was accepted consistently with recommendation"
               ],
-              "status": "contradictory"
+              "status": "pass"
             },
             "scenario_id": "exact-instagram-security",
             "schema_version": 1,
@@ -842,169 +1033,361 @@
           {
             "attempt_count": 1,
             "late_completion": null,
-            "model_id": "fixture-model",
+            "model_id": "fixture-model-v1",
             "reason": null,
             "results": [
               {
                 "accepted_dispatch": {
                   "availability": "unavailable",
-                  "reason": "not emitted",
+                  "reason": "raw baseline observation does not expose exact dispatch acceptance",
                   "value": null
                 },
                 "attempted_dispatch": {
                   "availability": "unavailable",
-                  "reason": "not emitted",
+                  "reason": "raw baseline observation does not expose exact dispatch acceptance",
                   "value": null
                 },
                 "authorized_ids": {
-                  "availability": "unavailable",
-                  "reason": "not emitted",
+                  "availability": "not_applicable",
+                  "reason": "historical baseline has no deterministic authorization set",
                   "value": null
                 },
-                "availability_metadata": {},
+                "availability_metadata": {
+                  "accepted_dispatch": "unavailable",
+                  "attempted_dispatch": "unavailable",
+                  "authorized_ids": "not_applicable",
+                  "candidates": "not_applicable",
+                  "context_metrics": "unavailable",
+                  "created_identity": "not_applicable",
+                  "decision": "inferred",
+                  "duplicates": "not_applicable",
+                  "errors": "available",
+                  "final_response": "available",
+                  "gmail_evidence": "unavailable",
+                  "identity_delta": "available",
+                  "mode": "inferred",
+                  "prompt_exposure": "available",
+                  "recommendation": "not_applicable",
+                  "revision": "unavailable",
+                  "roster_count": "available",
+                  "selected_identity": "inferred",
+                  "timings": "available"
+                },
                 "candidates": {
-                  "availability": "unavailable",
-                  "reason": "not emitted",
+                  "availability": "not_applicable",
+                  "reason": "historical full-roster selection has no ranked candidate set",
                   "value": null
                 },
                 "context_metrics": {
                   "availability": "unavailable",
-                  "reason": "not emitted",
+                  "reason": "historical baseline has no bounded enhanced context metrics",
                   "value": null
                 },
                 "cost": {
                   "amount": {
-                    "availability": "unavailable",
-                    "reason": "not emitted",
-                    "value": null
+                    "availability": "available",
+                    "reason": null,
+                    "value": 0.0142
                   },
                   "currency": {
-                    "availability": "unavailable",
-                    "reason": "not emitted",
-                    "value": null
+                    "availability": "available",
+                    "reason": null,
+                    "value": "USD"
                   },
                   "known_amount_subtotal": {
                     "availability": "unavailable",
-                    "reason": "complete subtotal not applicable",
+                    "reason": "baseline provider cost has no partial known subtotal",
                     "value": null
                   }
                 },
                 "created_identity": {
-                  "availability": "unavailable",
-                  "reason": "not emitted",
+                  "availability": "not_applicable",
+                  "reason": "baseline did not infer one new historical roster name",
                   "value": null
                 },
                 "decision": {
-                  "availability": "unavailable",
-                  "reason": "not emitted",
-                  "value": null
+                  "availability": "inferred",
+                  "reason": "one observed historical journal append",
+                  "value": {
+                    "action": "reuse",
+                    "reason": "one observed historical journal append"
+                  }
                 },
                 "duplicates": {
-                  "availability": "unavailable",
-                  "reason": "not emitted",
+                  "availability": "not_applicable",
+                  "reason": "historical baseline has no enhanced stable identity contract",
                   "value": null
                 },
                 "errors": {
-                  "availability": "unavailable",
-                  "reason": "not emitted",
-                  "value": null
+                  "availability": "available",
+                  "reason": null,
+                  "value": []
                 },
                 "final_response": {
                   "availability": "available",
                   "reason": null,
-                  "value": "Fabricated fixture response."
+                  "value": "reference: SEC-7419; timestamp: 2026-09-18 04:12 UTC; location: Lisbon; device: Pixel 10; verification phrase: indigo-orbit"
                 },
                 "gmail_evidence": {
                   "availability": "unavailable",
-                  "reason": "not emitted",
+                  "reason": "raw baseline observation has no normalized Gmail evidence",
                   "value": null
                 },
                 "identity_delta": {
-                  "availability": "unavailable",
-                  "reason": "not emitted",
-                  "value": null
+                  "availability": "available",
+                  "reason": null,
+                  "value": {
+                    "added_names": [],
+                    "removed_names": [],
+                    "roster_after_count": 100,
+                    "roster_before_count": 100
+                  }
                 },
                 "mode": {
-                  "availability": "unavailable",
-                  "reason": "not emitted",
-                  "value": null
+                  "availability": "inferred",
+                  "reason": "historical baseline observer captures the full-roster selection path",
+                  "value": "full_roster"
                 },
                 "prompt_exposure": {
-                  "availability": "unavailable",
-                  "reason": "not emitted",
-                  "value": null
+                  "availability": "available",
+                  "reason": null,
+                  "value": {
+                    "exposed_name_count": 100,
+                    "exposed_names": [
+                      "Instagram Security Monitor",
+                      "AI Video Newsletter Curator",
+                      "AI Video Receipt Reconciler",
+                      "Account Security Auditor",
+                      "Controlled Fixture Researcher",
+                      "Draft Review Assistant",
+                      "Fixture Agent 007",
+                      "Fixture Agent 008",
+                      "Fixture Agent 009",
+                      "Fixture Agent 010",
+                      "Fixture Agent 011",
+                      "Fixture Agent 012",
+                      "Fixture Agent 013",
+                      "Fixture Agent 014",
+                      "Fixture Agent 015",
+                      "Fixture Agent 016",
+                      "Fixture Agent 017",
+                      "Fixture Agent 018",
+                      "Fixture Agent 019",
+                      "Fixture Agent 020",
+                      "Fixture Agent 021",
+                      "Fixture Agent 022",
+                      "Fixture Agent 023",
+                      "Fixture Agent 024",
+                      "Fixture Agent 025",
+                      "Fixture Agent 026",
+                      "Fixture Agent 027",
+                      "Fixture Agent 028",
+                      "Fixture Agent 029",
+                      "Fixture Agent 030",
+                      "Fixture Agent 031",
+                      "Fixture Agent 032",
+                      "Fixture Agent 033",
+                      "Fixture Agent 034",
+                      "Fixture Agent 035",
+                      "Fixture Agent 036",
+                      "Fixture Agent 037",
+                      "Fixture Agent 038",
+                      "Fixture Agent 039",
+                      "Fixture Agent 040",
+                      "Fixture Agent 041",
+                      "Fixture Agent 042",
+                      "Fixture Agent 043",
+                      "Fixture Agent 044",
+                      "Fixture Agent 045",
+                      "Fixture Agent 046",
+                      "Fixture Agent 047",
+                      "Fixture Agent 048",
+                      "Fixture Agent 049",
+                      "Fixture Agent 050",
+                      "Fixture Agent 051",
+                      "Fixture Agent 052",
+                      "Fixture Agent 053",
+                      "Fixture Agent 054",
+                      "Fixture Agent 055",
+                      "Fixture Agent 056",
+                      "Fixture Agent 057",
+                      "Fixture Agent 058",
+                      "Fixture Agent 059",
+                      "Fixture Agent 060",
+                      "Fixture Agent 061",
+                      "Fixture Agent 062",
+                      "Fixture Agent 063",
+                      "Fixture Agent 064",
+                      "Fixture Agent 065",
+                      "Fixture Agent 066",
+                      "Fixture Agent 067",
+                      "Fixture Agent 068",
+                      "Fixture Agent 069",
+                      "Fixture Agent 070",
+                      "Fixture Agent 071",
+                      "Fixture Agent 072",
+                      "Fixture Agent 073",
+                      "Fixture Agent 074",
+                      "Fixture Agent 075",
+                      "Fixture Agent 076",
+                      "Fixture Agent 077",
+                      "Fixture Agent 078",
+                      "Fixture Agent 079",
+                      "Fixture Agent 080",
+                      "Fixture Agent 081",
+                      "Fixture Agent 082",
+                      "Fixture Agent 083",
+                      "Fixture Agent 084",
+                      "Fixture Agent 085",
+                      "Fixture Agent 086",
+                      "Fixture Agent 087",
+                      "Fixture Agent 088",
+                      "Fixture Agent 089",
+                      "Fixture Agent 090",
+                      "Fixture Agent 091",
+                      "Fixture Agent 092",
+                      "Fixture Agent 093",
+                      "Fixture Agent 094",
+                      "Fixture Agent 095",
+                      "Fixture Agent 096",
+                      "Fixture Agent 097",
+                      "Fixture Agent 098",
+                      "Fixture Agent 099",
+                      "Fixture Agent 100"
+                    ],
+                    "prompt_characters": 18420,
+                    "prompt_xml_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  }
                 },
                 "recommendation": {
-                  "availability": "unavailable",
-                  "reason": "not emitted",
+                  "availability": "not_applicable",
+                  "reason": "historical full-roster selection has no ranked candidate set",
                   "value": null
                 },
                 "revision": {
-                  "availability": "available",
-                  "reason": null,
-                  "value": "fixture-baseline"
+                  "availability": "unavailable",
+                  "reason": "baseline observation does not carry revision metadata",
+                  "value": null
                 },
                 "roster_count": {
-                  "availability": "unavailable",
-                  "reason": "not emitted",
-                  "value": null
+                  "availability": "available",
+                  "reason": null,
+                  "value": 100
                 },
                 "run_id": "11111111-1111-4111-8111-111111111111",
                 "schema_version": 1,
                 "selected_identity": {
                   "availability": "inferred",
-                  "reason": "Observed from state delta",
+                  "reason": "one observed historical journal append",
                   "value": {
-                    "name": "Fixture reader"
+                    "name": "Instagram Security Monitor",
+                    "reason": "one observed historical journal append"
                   }
                 },
                 "system": "baseline",
                 "timings": {
-                  "availability": "unavailable",
-                  "reason": "not emitted",
-                  "value": null
+                  "availability": "available",
+                  "reason": null,
+                  "value": [
+                    {
+                      "actual_provider": "fixture-provider",
+                      "call_id": "baseline-fixture-call",
+                      "component": "interaction",
+                      "elapsed_ms": 812.4,
+                      "error_type": null,
+                      "message_count": 3,
+                      "model": "fixture-model-v1",
+                      "provider": "fixture-provider",
+                      "request_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                      "response_choice_count": 1,
+                      "response_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                      "response_tool_call_count": 1,
+                      "tool_names": [
+                        "send_message_to_agent"
+                      ],
+                      "usage": {
+                        "cached_tokens": {
+                          "availability": "available",
+                          "reason": null,
+                          "value": 0
+                        },
+                        "completion_tokens": {
+                          "availability": "available",
+                          "reason": null,
+                          "value": 148
+                        },
+                        "estimated_cost_usd": {
+                          "availability": "unavailable",
+                          "reason": "estimated cost was not supplied",
+                          "value": null
+                        },
+                        "prompt_tokens": {
+                          "availability": "available",
+                          "reason": null,
+                          "value": 4210
+                        },
+                        "provider_cost_usd": {
+                          "availability": "available",
+                          "reason": null,
+                          "value": 0.0142
+                        },
+                        "total_tokens": {
+                          "availability": "available",
+                          "reason": null,
+                          "value": 4358
+                        }
+                      }
+                    },
+                    {
+                      "elapsed_ns": 812400000,
+                      "error_type": null,
+                      "finished_monotonic_ns": 812400100,
+                      "phase": "total_run",
+                      "started_monotonic_ns": 100
+                    }
+                  ]
                 },
-                "turn_id": "33333333-3333-4333-8333-333333333333",
+                "turn_id": "e820d6d9-ed78-5a83-a420-e2a3119b76a9",
                 "usage": {
                   "cached_tokens": {
-                    "availability": "unavailable",
-                    "reason": "not emitted",
-                    "value": null
+                    "availability": "available",
+                    "reason": null,
+                    "value": 0
                   },
                   "input_tokens": {
-                    "availability": "unavailable",
-                    "reason": "not emitted",
-                    "value": null
+                    "availability": "available",
+                    "reason": null,
+                    "value": 4210
                   },
                   "known_cached_tokens_subtotal": {
                     "availability": "unavailable",
-                    "reason": "complete subtotal not applicable",
+                    "reason": "baseline cached tokens has no partial known subtotal",
                     "value": null
                   },
                   "known_input_tokens_subtotal": {
                     "availability": "unavailable",
-                    "reason": "complete subtotal not applicable",
+                    "reason": "baseline prompt tokens has no partial known subtotal",
                     "value": null
                   },
                   "known_output_tokens_subtotal": {
                     "availability": "unavailable",
-                    "reason": "complete subtotal not applicable",
+                    "reason": "baseline completion tokens has no partial known subtotal",
                     "value": null
                   },
                   "known_total_tokens_subtotal": {
                     "availability": "unavailable",
-                    "reason": "complete subtotal not applicable",
+                    "reason": "baseline total tokens has no partial known subtotal",
                     "value": null
                   },
                   "output_tokens": {
-                    "availability": "unavailable",
-                    "reason": "not emitted",
-                    "value": null
+                    "availability": "available",
+                    "reason": null,
+                    "value": 148
                   },
                   "total_tokens": {
-                    "availability": "unavailable",
-                    "reason": "not emitted",
-                    "value": null
+                    "availability": "available",
+                    "reason": null,
+                    "value": 4358
                   }
                 }
               }
@@ -1052,14 +1435,16 @@
         "identity_continuity": {
           "contradictory_evidence": [],
           "layer": "identity",
-          "missing_evidence": [
-            "scenario initial and final directory counts"
-          ],
+          "missing_evidence": [],
           "negative_evidence": [],
-          "positive_evidence": [],
-          "status": "missing"
+          "positive_evidence": [
+            "separate turns preserved final directory growth and stable identity continuity"
+          ],
+          "status": "pass"
         },
+        "pair_id": "37eec440-c41e-5043-bce0-f4e87289b9fd",
         "passed": false,
+        "repetition": 1,
         "scenario_id": "exact-instagram-security",
         "schema_version": 1,
         "system": "baseline",
@@ -1083,12 +1468,12 @@
             "duplicate": {
               "contradictory_evidence": [],
               "layer": "duplicate",
-              "missing_evidence": [
-                "directory identity delta"
-              ],
+              "missing_evidence": [],
               "negative_evidence": [],
-              "positive_evidence": [],
-              "status": "missing"
+              "positive_evidence": [
+                "baseline name/count delta shows no duplicate"
+              ],
+              "status": "pass"
             },
             "gmail_safety": {
               "contradictory_evidence": [],
@@ -1103,12 +1488,12 @@
             "identity": {
               "contradictory_evidence": [],
               "layer": "identity",
-              "missing_evidence": [
-                "directory identity delta"
-              ],
+              "missing_evidence": [],
               "negative_evidence": [],
-              "positive_evidence": [],
-              "status": "missing"
+              "positive_evidence": [
+                "baseline inferred canonical fixture name reused without directory growth"
+              ],
+              "status": "pass"
             },
             "passed": false,
             "response": {
@@ -1124,12 +1509,12 @@
             "routing": {
               "contradictory_evidence": [],
               "layer": "routing",
-              "missing_evidence": [
-                "routing decision"
-              ],
+              "missing_evidence": [],
               "negative_evidence": [],
-              "positive_evidence": [],
-              "status": "missing"
+              "positive_evidence": [
+                "action=reuse"
+              ],
+              "status": "pass"
             },
             "scenario_id": "exact-instagram-security",
             "schema_version": 1,
@@ -1384,163 +1769,355 @@
   "system_result": {
     "accepted_dispatch": {
       "availability": "unavailable",
-      "reason": "not emitted",
+      "reason": "raw baseline observation does not expose exact dispatch acceptance",
       "value": null
     },
     "attempted_dispatch": {
       "availability": "unavailable",
-      "reason": "not emitted",
+      "reason": "raw baseline observation does not expose exact dispatch acceptance",
       "value": null
     },
     "authorized_ids": {
-      "availability": "unavailable",
-      "reason": "not emitted",
+      "availability": "not_applicable",
+      "reason": "historical baseline has no deterministic authorization set",
       "value": null
     },
-    "availability_metadata": {},
+    "availability_metadata": {
+      "accepted_dispatch": "unavailable",
+      "attempted_dispatch": "unavailable",
+      "authorized_ids": "not_applicable",
+      "candidates": "not_applicable",
+      "context_metrics": "unavailable",
+      "created_identity": "not_applicable",
+      "decision": "inferred",
+      "duplicates": "not_applicable",
+      "errors": "available",
+      "final_response": "available",
+      "gmail_evidence": "unavailable",
+      "identity_delta": "available",
+      "mode": "inferred",
+      "prompt_exposure": "available",
+      "recommendation": "not_applicable",
+      "revision": "unavailable",
+      "roster_count": "available",
+      "selected_identity": "inferred",
+      "timings": "available"
+    },
     "candidates": {
-      "availability": "unavailable",
-      "reason": "not emitted",
+      "availability": "not_applicable",
+      "reason": "historical full-roster selection has no ranked candidate set",
       "value": null
     },
     "context_metrics": {
       "availability": "unavailable",
-      "reason": "not emitted",
+      "reason": "historical baseline has no bounded enhanced context metrics",
       "value": null
     },
     "cost": {
       "amount": {
-        "availability": "unavailable",
-        "reason": "not emitted",
-        "value": null
+        "availability": "available",
+        "reason": null,
+        "value": 0.0142
       },
       "currency": {
-        "availability": "unavailable",
-        "reason": "not emitted",
-        "value": null
+        "availability": "available",
+        "reason": null,
+        "value": "USD"
       },
       "known_amount_subtotal": {
         "availability": "unavailable",
-        "reason": "complete subtotal not applicable",
+        "reason": "baseline provider cost has no partial known subtotal",
         "value": null
       }
     },
     "created_identity": {
-      "availability": "unavailable",
-      "reason": "not emitted",
+      "availability": "not_applicable",
+      "reason": "baseline did not infer one new historical roster name",
       "value": null
     },
     "decision": {
-      "availability": "unavailable",
-      "reason": "not emitted",
-      "value": null
+      "availability": "inferred",
+      "reason": "one observed historical journal append",
+      "value": {
+        "action": "reuse",
+        "reason": "one observed historical journal append"
+      }
     },
     "duplicates": {
-      "availability": "unavailable",
-      "reason": "not emitted",
+      "availability": "not_applicable",
+      "reason": "historical baseline has no enhanced stable identity contract",
       "value": null
     },
     "errors": {
-      "availability": "unavailable",
-      "reason": "not emitted",
-      "value": null
+      "availability": "available",
+      "reason": null,
+      "value": []
     },
     "final_response": {
       "availability": "available",
       "reason": null,
-      "value": "Fabricated fixture response."
+      "value": "reference: SEC-7419; timestamp: 2026-09-18 04:12 UTC; location: Lisbon; device: Pixel 10; verification phrase: indigo-orbit"
     },
     "gmail_evidence": {
       "availability": "unavailable",
-      "reason": "not emitted",
+      "reason": "raw baseline observation has no normalized Gmail evidence",
       "value": null
     },
     "identity_delta": {
-      "availability": "unavailable",
-      "reason": "not emitted",
-      "value": null
+      "availability": "available",
+      "reason": null,
+      "value": {
+        "added_names": [],
+        "removed_names": [],
+        "roster_after_count": 100,
+        "roster_before_count": 100
+      }
     },
     "mode": {
-      "availability": "unavailable",
-      "reason": "not emitted",
-      "value": null
+      "availability": "inferred",
+      "reason": "historical baseline observer captures the full-roster selection path",
+      "value": "full_roster"
     },
     "prompt_exposure": {
-      "availability": "unavailable",
-      "reason": "not emitted",
-      "value": null
+      "availability": "available",
+      "reason": null,
+      "value": {
+        "exposed_name_count": 100,
+        "exposed_names": [
+          "Instagram Security Monitor",
+          "AI Video Newsletter Curator",
+          "AI Video Receipt Reconciler",
+          "Account Security Auditor",
+          "Controlled Fixture Researcher",
+          "Draft Review Assistant",
+          "Fixture Agent 007",
+          "Fixture Agent 008",
+          "Fixture Agent 009",
+          "Fixture Agent 010",
+          "Fixture Agent 011",
+          "Fixture Agent 012",
+          "Fixture Agent 013",
+          "Fixture Agent 014",
+          "Fixture Agent 015",
+          "Fixture Agent 016",
+          "Fixture Agent 017",
+          "Fixture Agent 018",
+          "Fixture Agent 019",
+          "Fixture Agent 020",
+          "Fixture Agent 021",
+          "Fixture Agent 022",
+          "Fixture Agent 023",
+          "Fixture Agent 024",
+          "Fixture Agent 025",
+          "Fixture Agent 026",
+          "Fixture Agent 027",
+          "Fixture Agent 028",
+          "Fixture Agent 029",
+          "Fixture Agent 030",
+          "Fixture Agent 031",
+          "Fixture Agent 032",
+          "Fixture Agent 033",
+          "Fixture Agent 034",
+          "Fixture Agent 035",
+          "Fixture Agent 036",
+          "Fixture Agent 037",
+          "Fixture Agent 038",
+          "Fixture Agent 039",
+          "Fixture Agent 040",
+          "Fixture Agent 041",
+          "Fixture Agent 042",
+          "Fixture Agent 043",
+          "Fixture Agent 044",
+          "Fixture Agent 045",
+          "Fixture Agent 046",
+          "Fixture Agent 047",
+          "Fixture Agent 048",
+          "Fixture Agent 049",
+          "Fixture Agent 050",
+          "Fixture Agent 051",
+          "Fixture Agent 052",
+          "Fixture Agent 053",
+          "Fixture Agent 054",
+          "Fixture Agent 055",
+          "Fixture Agent 056",
+          "Fixture Agent 057",
+          "Fixture Agent 058",
+          "Fixture Agent 059",
+          "Fixture Agent 060",
+          "Fixture Agent 061",
+          "Fixture Agent 062",
+          "Fixture Agent 063",
+          "Fixture Agent 064",
+          "Fixture Agent 065",
+          "Fixture Agent 066",
+          "Fixture Agent 067",
+          "Fixture Agent 068",
+          "Fixture Agent 069",
+          "Fixture Agent 070",
+          "Fixture Agent 071",
+          "Fixture Agent 072",
+          "Fixture Agent 073",
+          "Fixture Agent 074",
+          "Fixture Agent 075",
+          "Fixture Agent 076",
+          "Fixture Agent 077",
+          "Fixture Agent 078",
+          "Fixture Agent 079",
+          "Fixture Agent 080",
+          "Fixture Agent 081",
+          "Fixture Agent 082",
+          "Fixture Agent 083",
+          "Fixture Agent 084",
+          "Fixture Agent 085",
+          "Fixture Agent 086",
+          "Fixture Agent 087",
+          "Fixture Agent 088",
+          "Fixture Agent 089",
+          "Fixture Agent 090",
+          "Fixture Agent 091",
+          "Fixture Agent 092",
+          "Fixture Agent 093",
+          "Fixture Agent 094",
+          "Fixture Agent 095",
+          "Fixture Agent 096",
+          "Fixture Agent 097",
+          "Fixture Agent 098",
+          "Fixture Agent 099",
+          "Fixture Agent 100"
+        ],
+        "prompt_characters": 18420,
+        "prompt_xml_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
     },
     "recommendation": {
-      "availability": "unavailable",
-      "reason": "not emitted",
+      "availability": "not_applicable",
+      "reason": "historical full-roster selection has no ranked candidate set",
       "value": null
     },
     "revision": {
-      "availability": "available",
-      "reason": null,
-      "value": "fixture-baseline"
+      "availability": "unavailable",
+      "reason": "baseline observation does not carry revision metadata",
+      "value": null
     },
     "roster_count": {
-      "availability": "unavailable",
-      "reason": "not emitted",
-      "value": null
+      "availability": "available",
+      "reason": null,
+      "value": 100
     },
     "run_id": "11111111-1111-4111-8111-111111111111",
     "schema_version": 1,
     "selected_identity": {
       "availability": "inferred",
-      "reason": "Observed from state delta",
+      "reason": "one observed historical journal append",
       "value": {
-        "name": "Fixture reader"
+        "name": "Instagram Security Monitor",
+        "reason": "one observed historical journal append"
       }
     },
     "system": "baseline",
     "timings": {
-      "availability": "unavailable",
-      "reason": "not emitted",
-      "value": null
+      "availability": "available",
+      "reason": null,
+      "value": [
+        {
+          "actual_provider": "fixture-provider",
+          "call_id": "baseline-fixture-call",
+          "component": "interaction",
+          "elapsed_ms": 812.4,
+          "error_type": null,
+          "message_count": 3,
+          "model": "fixture-model-v1",
+          "provider": "fixture-provider",
+          "request_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "response_choice_count": 1,
+          "response_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "response_tool_call_count": 1,
+          "tool_names": [
+            "send_message_to_agent"
+          ],
+          "usage": {
+            "cached_tokens": {
+              "availability": "available",
+              "reason": null,
+              "value": 0
+            },
+            "completion_tokens": {
+              "availability": "available",
+              "reason": null,
+              "value": 148
+            },
+            "estimated_cost_usd": {
+              "availability": "unavailable",
+              "reason": "estimated cost was not supplied",
+              "value": null
+            },
+            "prompt_tokens": {
+              "availability": "available",
+              "reason": null,
+              "value": 4210
+            },
+            "provider_cost_usd": {
+              "availability": "available",
+              "reason": null,
+              "value": 0.0142
+            },
+            "total_tokens": {
+              "availability": "available",
+              "reason": null,
+              "value": 4358
+            }
+          }
+        },
+        {
+          "elapsed_ns": 812400000,
+          "error_type": null,
+          "finished_monotonic_ns": 812400100,
+          "phase": "total_run",
+          "started_monotonic_ns": 100
+        }
+      ]
     },
-    "turn_id": "33333333-3333-4333-8333-333333333333",
+    "turn_id": "e820d6d9-ed78-5a83-a420-e2a3119b76a9",
     "usage": {
       "cached_tokens": {
-        "availability": "unavailable",
-        "reason": "not emitted",
-        "value": null
+        "availability": "available",
+        "reason": null,
+        "value": 0
       },
       "input_tokens": {
-        "availability": "unavailable",
-        "reason": "not emitted",
-        "value": null
+        "availability": "available",
+        "reason": null,
+        "value": 4210
       },
       "known_cached_tokens_subtotal": {
         "availability": "unavailable",
-        "reason": "complete subtotal not applicable",
+        "reason": "baseline cached tokens has no partial known subtotal",
         "value": null
       },
       "known_input_tokens_subtotal": {
         "availability": "unavailable",
-        "reason": "complete subtotal not applicable",
+        "reason": "baseline prompt tokens has no partial known subtotal",
         "value": null
       },
       "known_output_tokens_subtotal": {
         "availability": "unavailable",
-        "reason": "complete subtotal not applicable",
+        "reason": "baseline completion tokens has no partial known subtotal",
         "value": null
       },
       "known_total_tokens_subtotal": {
         "availability": "unavailable",
-        "reason": "complete subtotal not applicable",
+        "reason": "baseline total tokens has no partial known subtotal",
         "value": null
       },
       "output_tokens": {
-        "availability": "unavailable",
-        "reason": "not emitted",
-        "value": null
+        "availability": "available",
+        "reason": null,
+        "value": 148
       },
       "total_tokens": {
-        "availability": "unavailable",
-        "reason": "not emitted",
-        "value": null
+        "availability": "available",
+        "reason": null,
+        "value": 4358
       }
     }
   }

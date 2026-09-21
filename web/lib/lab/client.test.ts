@@ -105,7 +105,7 @@ describe('read-only polling', () => {
     await vi.runAllTimersAsync();
     const result = await pending;
     expect(methods).toEqual(['GET', 'GET']);
-    expect(result.pairs[0].outcomes[0].results[0].final_response.value).toBe('Fabricated fixture response.');
+    expect(result.pairs[0].outcomes[0].results[0].final_response.value).toBe('reference: SEC-7419; timestamp: 2026-09-18 04:12 UTC; location: Lisbon; device: Pixel 10; verification phrase: indigo-orbit');
     expect(result.pairs[0].outcomes[1].reason).toBe('Enhanced side exceeded its time limit.');
   });
   it('stops instead of retrying unverified or rejected responses', async () => {

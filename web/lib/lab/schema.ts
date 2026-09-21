@@ -63,6 +63,7 @@ export function observedValue<T extends z.ZodTypeAny>(value: T) {
 }
 const observation = observedValue(jsonValue);
 const observedList = observedValue(z.array(jsonValue));
+const observedCandidates = observedValue(z.array(jsonValue).max(5));
 const usage = z.object({
   input_tokens: observedValue(integer), output_tokens: observedValue(integer),
   cached_tokens: observedValue(integer), total_tokens: observedValue(integer),
@@ -73,7 +74,7 @@ const usage = z.object({
 export const SystemRunResultSchema = z.object({
   schema_version: z.literal(1), run_id: uuid, turn_id: uuid, system,
   revision: observedValue(text), mode: observedValue(text), roster_count: observedValue(integer),
-  prompt_exposure: observation, candidates: observedList, decision: observation,
+  prompt_exposure: observation, candidates: observedCandidates, decision: observation,
   recommendation: observation, authorized_ids: observedValue(z.array(text)),
   attempted_dispatch: observation, accepted_dispatch: observation,
   selected_identity: observation, created_identity: observation, identity_delta: observation,
@@ -115,7 +116,7 @@ const scorecard = z.object({
   candidate_rank: observedValue(integer), passed: z.boolean(),
 }).strict();
 const sequenceScorecard = z.object({
-  schema_version: z.literal(1), scenario_id: text, system, turns: z.array(scorecard), identity_continuity: layerGrade, passed: z.boolean(),
+  schema_version: z.literal(1), pair_id: uuid, repetition: integer.min(1), scenario_id: text, system, turns: z.array(scorecard), identity_continuity: layerGrade, passed: z.boolean(),
 }).strict();
 export const PairedRunResultSchema = z.object({
   schema_version: z.literal(1), run_id: uuid, request: StartRunRequestSchema,

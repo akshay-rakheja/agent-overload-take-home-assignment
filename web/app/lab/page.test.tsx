@@ -34,7 +34,7 @@ it('prevents double submission and retains both sides of a partial failure', asy
   expect(writes[0]).toMatchObject({ scenario_ids: [backend.scenarios.scenarios[0].scenario_id], request_id: expect.stringMatching(/^[0-9a-f-]{36}$/) });
   await act(async () => release(json(backend.handle, 202)));
   expect(await screen.findByText('Partial failure')).toBeVisible();
-  expect(within(screen.getByRole('region', { name: 'Baseline evidence' })).getByText('Fabricated fixture response.')).toBeVisible();
+  expect(within(screen.getByRole('region', { name: 'Baseline evidence' })).getByText('reference: SEC-7419; timestamp: 2026-09-18 04:12 UTC; location: Lisbon; device: Pixel 10; verification phrase: indigo-orbit')).toBeVisible();
   expect(within(screen.getByRole('region', { name: 'Enhanced evidence' })).getByText('Enhanced side exceeded its time limit.')).toBeVisible();
 });
 
@@ -88,7 +88,7 @@ it('can resume a failed status read without submitting another scenario', async 
 });
 
 it('composes complete evidence, aggregate outcomes, and repetition navigation without hiding failures', async () => {
-  const repeated = structuredClone(backend.evidence_run) as PairedRunResult;
+  const repeated = structuredClone(backend.evidence_run) as unknown as PairedRunResult;
   repeated.pairs.push({
     ...structuredClone(repeated.pairs[0]),
     scheduled: { ...repeated.pairs[0].scheduled, pair_id: '77777777-7777-4777-8777-777777777777', repetition: 2 },

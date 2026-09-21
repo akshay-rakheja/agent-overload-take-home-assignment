@@ -167,6 +167,10 @@ async def test_runs_three_alternating_pairs_with_independent_verified_resets(tmp
     assert [tuple(item.system for item in pair.outcomes) for pair in result.pairs] == expected_orders
     assert calls == resets == budget_checks
     assert len(result.scorecards) == 6
+    for pair in result.pairs:
+        paired_cards = [card for card in result.scorecards if card.pair_id == pair.scheduled.pair_id]
+        assert len(paired_cards) == 2
+        assert {card.repetition for card in paired_cards} == {pair.scheduled.repetition}
     assert [item.status for item in result.transitions] == [
         RunStatus.QUEUED,
         RunStatus.RESETTING,

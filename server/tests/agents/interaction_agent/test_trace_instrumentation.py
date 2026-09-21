@@ -182,6 +182,7 @@ def test_candidate_trace_matches_returned_context_and_exact_xml_without_second_w
     assert [item["score"] for item in traced_candidates] == [
         candidate.score for candidate in candidate_context.candidates
     ]
+    assert [item["rank"] for item in traced_candidates] == [1]
     assert [dict(item["score_components"]) for item in traced_candidates] == [
         candidate.score_components for candidate in candidate_context.candidates
     ]

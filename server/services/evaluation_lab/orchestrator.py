@@ -228,6 +228,11 @@ class PairExecutionRecord(_FrozenModel):
         return self
 
 
+class PairedSequenceScorecard(ScenarioSequenceScorecard):
+    pair_id: UUID
+    repetition: int = Field(ge=1)
+
+
 class RunTransition(_FrozenModel):
     sequence: int = Field(ge=1)
     status: RunStatus
@@ -254,7 +259,7 @@ class PairedRunResult(_FrozenModel):
     generation: int = Field(ge=0)
     schedule: tuple[ScheduledPair, ...]
     pairs: tuple[PairExecutionRecord, ...] = ()
-    scorecards: tuple[ScenarioSequenceScorecard, ...] = ()
+    scorecards: tuple[PairedSequenceScorecard, ...] = ()
     transitions: tuple[RunTransition, ...]
     trace: tuple[OrchestrationTraceEvent, ...]
     blocked_reason: str | None = None
@@ -1185,7 +1190,7 @@ class PairedRunOrchestrator:
                         )
 
             record = self._transition(record, RunStatus.GRADING)
-            scorecards: list[ScenarioSequenceScorecard] = []
+            scorecards: list[PairedSequenceScorecard] = []
             for pair in record.pairs:
                 scenario = self._scenarios[pair.scheduled.scenario_id]
                 if len(pair.outcomes) != 2:
@@ -1193,8 +1198,13 @@ class PairedRunOrchestrator:
                 for outcome in pair.outcomes:
                     if outcome.status is OutcomeStatus.SUCCESS:
                         try:
+                            graded = grade_scenario_sequence(scenario, outcome.results)
                             scorecards.append(
-                                grade_scenario_sequence(scenario, outcome.results)
+                                PairedSequenceScorecard(
+                                    **graded.model_dump(exclude_computed_fields=True),
+                                    pair_id=pair.scheduled.pair_id,
+                                    repetition=pair.scheduled.repetition,
+                                )
                             )
                         except Exception as exc:
                             malformed = outcome.model_copy(
@@ -1251,6 +1261,7 @@ __all__ = [
     "LateCompletion",
     "OrchestrationTraceEvent",
     "PairExecutionRecord",
+    "PairedSequenceScorecard",
     "PairedRunOrchestrator",
     "PairedRunResult",
     "PersistedSideOutcome",
