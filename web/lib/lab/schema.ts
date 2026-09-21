@@ -3,14 +3,21 @@ import { z } from 'zod';
 // These are wire schemas: all serialized fields (including nulls) are required.
 // They mirror Tasks 07–10 Python models, not the older illustrative TS sketch.
 export const AvailabilitySchema = z.enum(['available', 'inferred', 'not_applicable', 'unavailable']);
-const text = z.string().refine((value) => !/\bbearer\s+[\w.~+/=-]+|\bsk-[\w-]{8,}|\b(?:api[_ -]?key|access[_ -]?token|client[_ -]?secret|password|token|secret)\s*[:=]\s*\S+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|https?:\/\/\S*(?:oauth|authorize|[?&](?:code|token|state)=)/i.test(value), 'Unsafe text');
+const text = z.string().refine((value) => !/\bbearer\s+[\w.~+/=-]+|\bsk-[\w-]{8,}|\b(?:api[_ -]?key|access[_ -]?token|client[_ -]?secret|password|token|secret|key)\b\s*[:=]\s*\S+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|https?:\/\/\S*(?:oauth|authorize|[?&](?:code|token|state)=)/i.test(value), 'Unsafe text');
 const uuid = z.string().uuid();
 const integer = z.number().int();
 const system = z.enum(['baseline', 'enhanced']);
 const nullableText = text.nullable();
 const secretKey = /(?:authorization|authorizationcode|authcode|apikey|authconfigid|oauthcode|accesstoken|refreshtoken|idtoken|clientsecret|password|secret|token)$/i;
+const mailKeys = new Set(['email', 'emailaddress', 'address', 'from', 'to', 'cc', 'bcc', 'sender', 'recipient', 'messageid', 'threadid', 'gmailmessageid', 'gmailthreadid', 'snippet', 'body', 'rawbody', 'htmlbody']);
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 const normalizedKey = (key: string) => key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+const isRedacted = (value: JsonValue) => value === '[REDACTED]' || value === '[REDACTED_EMAIL]';
+const hasRedactedHeaders = (value: JsonValue) => {
+  if (isRedacted(value)) return true;
+  return value !== null && !Array.isArray(value) && typeof value === 'object'
+    && Object.values(value).every(isRedacted);
+};
 function containsCodeField(value: JsonValue): boolean {
   if (Array.isArray(value)) return value.some(containsCodeField);
   if (value === null || typeof value !== 'object') return false;
@@ -21,7 +28,15 @@ const jsonValue: z.ZodType<JsonValue> = z.lazy(() => z.union([
   z.record(jsonValue).superRefine((value, ctx) => {
     for (const [key, item] of Object.entries(value)) {
       const normalized = normalizedKey(key);
-      if (secretKey.test(normalized) || (normalized.includes('oauth') && containsCodeField(item))) {
+      const authorizationWrapper = (normalized.includes('oauth') || normalized.includes('authorization'))
+        && item !== null && typeof item === 'object';
+      const mailKey = mailKeys.has(normalized) || normalized.includes('address')
+        || normalized.endsWith('messageid') || normalized.endsWith('threadid');
+      const headerKey = normalized === 'headers' || normalized.endsWith('headers');
+      if ((authorizationWrapper && containsCodeField(item))
+        || (!authorizationWrapper && secretKey.test(normalized))
+        || (mailKey && !isRedacted(item))
+        || (headerKey && !hasRedactedHeaders(item))) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Unexpected private field' });
       }
     }

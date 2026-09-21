@@ -15,6 +15,21 @@ import { pollRun, startRun } from '../../../lib/lab/client';
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 const request = (path = 'runs', body?: unknown, origin = 'http://127.0.0.1:3000') => new Request(`http://127.0.0.1:3000/api/lab/${path}`, body === undefined ? {} : { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
+const runWithGmailEvidence = (value: unknown[]) => {
+  const payload = structuredClone(backend.run) as unknown as {
+    pairs: Array<{ outcomes: Array<{ results: Array<{ gmail_evidence: {
+      availability: string;
+      reason: string | null;
+      value: unknown[] | null;
+    } }> }> }>;
+  };
+  payload.pairs[0].outcomes[0].results[0].gmail_evidence = {
+    availability: 'available',
+    reason: null,
+    value,
+  };
+  return payload;
+};
 
 it('uses the fixed enhanced origin and rejects URLs, traversal, query strings and invalid UUIDs', async () => {
   const targets: string[] = [];
@@ -60,6 +75,49 @@ it('sanitizes missing prospective endpoints, provider errors, and invalid succes
   const invalid = await readScenarios(request('scenarios'));
   expect(invalid.status).toBe(502);
   expect(await invalid.json()).toEqual({ error: 'Lab response could not be verified', code: 'INVALID_UPSTREAM_RESPONSE' });
+});
+
+it.each([
+  ['mail body', { body: 'Private appointment notes' }, 'Private appointment notes'],
+  ['message ID', { message_id: 'abcdef123456' }, 'abcdef123456'],
+  ['thread ID', { thread_id: 'fedcba654321' }, 'fedcba654321'],
+  ['Cookie header', { headers: { Cookie: 'session=fixture' } }, 'session=fixture'],
+  ['authorization response code', { authorization_response: { code: 'fixture-code' } }, 'fixture-code'],
+  ['nested authorization code', { nested: { authorization_result: { payload: { code: 'fixture-nested-code' } } } }, 'fixture-nested-code'],
+  ['free-text key', { text: 'key=fixture-private' }, 'fixture-private'],
+])('fails closed when the backend returns raw %s evidence', async (_label, value, privateText) => {
+  const payload = runWithGmailEvidence([value]);
+  vi.stubGlobal('fetch', async () => json(payload));
+
+  const response = await readRun(request(), { params: { runId: backend.handle.run_id } });
+
+  expect(response.status).toBe(502);
+  const responseBody = await response.text();
+  expect(JSON.parse(responseBody)).toEqual({ error: 'Lab response could not be verified', code: 'INVALID_UPSTREAM_RESPONSE' });
+  expect(responseBody).not.toContain(privateText);
+});
+
+it('forwards redacted mail fields and safe diagnostic evidence unchanged', async () => {
+  const value = [{
+    body: '[REDACTED]',
+    message_id: '[REDACTED]',
+    thread_id: '[REDACTED]',
+    headers: { Cookie: '[REDACTED]' },
+    tool: 'gmail.search',
+    count: 2,
+    code: 'timeout',
+    oauth: { status: 'connected' },
+    authorization: { status: 'denied' },
+    generic: { nested: true, values: [0, false, null] },
+  }];
+  const payload = runWithGmailEvidence(value);
+  vi.stubGlobal('fetch', async () => json(payload));
+
+  const response = await readRun(request(), { params: { runId: backend.handle.run_id } });
+
+  expect(response.status).toBe(200);
+  const forwarded = await response.json();
+  expect(forwarded.pairs[0].outcomes[0].results[0].gmail_evidence.value).toEqual(value);
 });
 
 it('bounds upstream reads and passes navigation cancellation through', async () => {

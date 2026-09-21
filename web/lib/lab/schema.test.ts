@@ -47,6 +47,38 @@ describe('Python serialization boundary', () => {
     const value = { code: 'timeout', oauth: { status: 'connected' } };
     expect(SystemRunResultSchema.safeParse({ ...backend.system_result, decision: { availability: 'available', value, reason: null } }).success).toBe(true);
   });
+  it.each([
+    ['mail body', { body: 'Private appointment notes' }],
+    ['message ID', { message_id: 'abcdef123456' }],
+    ['thread ID', { thread_id: 'fedcba654321' }],
+    ['Cookie header', { headers: { Cookie: 'session=fixture' } }],
+    ['authorization response code', { authorization_response: { code: 'fixture-code' } }],
+    ['nested authorization code', { nested: { authorization_result: { payload: { code: 'fixture-code' } } } }],
+    ['free-text key', { text: 'key=fixture-private' }],
+  ])('rejects raw %s inside JSON-valued evidence', (_label, value) => {
+    expect(SystemRunResultSchema.safeParse({
+      ...backend.system_result,
+      gmail_evidence: { availability: 'available', value: [value], reason: null },
+    }).success).toBe(false);
+  });
+  it('preserves redacted mail fields, safe tool evidence and non-secret diagnostic JSON', () => {
+    const value = [{
+      body: '[REDACTED]',
+      message_id: '[REDACTED]',
+      thread_id: '[REDACTED]',
+      headers: { Cookie: '[REDACTED]' },
+      tool: 'gmail.search',
+      count: 2,
+      code: 'timeout',
+      oauth: { status: 'connected' },
+      authorization: { status: 'denied' },
+      generic: { nested: true, values: [0, false, null] },
+    }];
+    expect(SystemRunResultSchema.safeParse({
+      ...backend.system_result,
+      gmail_evidence: { availability: 'available', value, reason: null },
+    }).success).toBe(true);
+  });
   it('accepts the documented prospective preflight and fails closed on missing proof', () => {
     expect(LabPreflightSchema.parse(preflight).runnable).toBe(true);
     expect(LabPreflightSchema.safeParse({ runnable: true }).success).toBe(false);
