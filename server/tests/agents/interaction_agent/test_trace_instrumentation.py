@@ -13,6 +13,7 @@ import pytest
 
 from server.agents.interaction_agent import agent as interaction_agent
 from server.agents.interaction_agent import runtime as interaction_runtime
+from server.agents.interaction_agent import tools as interaction_tools
 from server.agents.interaction_agent.agent import (
     CandidateContext,
     build_candidate_context,
@@ -28,6 +29,7 @@ from server.agents.interaction_agent.tools import (
     ToolResult,
     send_message_to_agent,
 )
+from server.config import Settings
 from server.services.evaluation_lab.models import TraceContext, TraceEventKind
 from server.services.evaluation_lab.trace import NullTraceSink, trace_scope
 from server.services.execution.directory import AgentDirectory
@@ -351,6 +353,138 @@ def test_trace_sink_failure_preserves_interaction_results_and_exceptions(
     assert exc_info.value is failure
 
 
+def test_interaction_model_and_tool_timings_exclude_synchronous_sink_latency(
+    monkeypatch,
+) -> None:
+    clock = {"now": 0}
+
+    class ClockAdvancingSink(CollectingSink):
+        def emit(self, event) -> None:
+            clock["now"] += 1_000_000_000
+            super().emit(event)
+
+    async def fake_chat_completion(**kwargs):
+        del kwargs
+        clock["now"] += 10
+        return {"choices": [{"message": {"content": "fixture"}}]}
+
+    def fake_handle_tool_call(name, arguments, *, dispatch_context):
+        del name, arguments, dispatch_context
+        clock["now"] += 7
+        return ToolResult(success=True, payload={"status": "fixture"})
+
+    monkeypatch.setattr(interaction_runtime, "monotonic_ns", lambda: clock["now"])
+    monkeypatch.setattr(
+        interaction_runtime, "request_chat_completion", fake_chat_completion
+    )
+    monkeypatch.setattr(interaction_runtime, "handle_tool_call", fake_handle_tool_call)
+    runtime = InteractionAgentRuntime.__new__(InteractionAgentRuntime)
+    runtime.model = "fixture-model"
+    runtime.api_key = "fixture-key"
+    runtime.tool_schemas = []
+    runtime.dispatch_context = DispatchContext()
+    sink = ClockAdvancingSink()
+
+    with trace_scope(_trace_context(), sink):
+        asyncio.run(runtime._make_llm_call("system", []))
+        runtime._execute_tool(
+            _ToolCall(identifier="call-1", name="wait", arguments={"reason": "fixture"})
+        )
+
+    model_completed = [
+        event
+        for event in _events(sink, TraceEventKind.MODEL_CALL)
+        if event.payload["stage"] == "completed"
+    ][0]
+    tool_completed = [
+        event
+        for event in _events(sink, TraceEventKind.TOOL_CALL)
+        if event.payload["stage"] == "completed"
+    ][0]
+    assert model_completed.payload["elapsed_ns"] == 10
+    assert tool_completed.payload["elapsed_ns"] == 7
+
+
+def test_lab_send_draft_emits_rejection_at_policy_boundary_without_recording(
+    monkeypatch,
+) -> None:
+    policy_calls = 0
+    original_decide = interaction_tools.LabToolPolicy.decide_model_tool
+
+    def counted_decide(policy, tool_name):
+        nonlocal policy_calls
+        policy_calls += 1
+        return original_decide(policy, tool_name)
+
+    monkeypatch.setattr(
+        interaction_tools,
+        "get_settings",
+        lambda: Settings(
+            lab_enabled=True,
+            lab_composio_user_id="opaque-lab-user",
+        ),
+    )
+    monkeypatch.setattr(
+        interaction_tools.LabToolPolicy,
+        "decide_model_tool",
+        counted_decide,
+    )
+    monkeypatch.setattr(
+        interaction_tools,
+        "get_conversation_log",
+        lambda: pytest.fail("draft policy rejection must not record"),
+    )
+    sink = CollectingSink()
+
+    with trace_scope(_trace_context(), sink):
+        result = interaction_tools.send_draft(
+            "private@example.invalid", "Private", "private body"
+        )
+
+    event = _events(sink, TraceEventKind.GMAIL_EVIDENCE)[0]
+    assert result.success is False
+    assert policy_calls == 1
+    assert event.payload == {
+        "boundary": "interaction_send_draft",
+        "operation_name": "send_draft",
+        "stage": "rejected",
+        "allowed": False,
+        "policy_code": "mutation_blocked",
+        "callable_executed": False,
+    }
+
+
+def test_interaction_runtime_labels_send_draft_result_rejected(monkeypatch) -> None:
+    monkeypatch.setattr(
+        interaction_tools,
+        "get_settings",
+        lambda: Settings(
+            lab_enabled=True,
+            lab_composio_user_id="opaque-lab-user",
+        ),
+    )
+    runtime = InteractionAgentRuntime.__new__(InteractionAgentRuntime)
+    runtime.dispatch_context = DispatchContext()
+    sink = CollectingSink()
+
+    with trace_scope(_trace_context(), sink):
+        result = runtime._execute_tool(
+            _ToolCall(
+                identifier="call-1",
+                name="send_draft",
+                arguments={
+                    "to": "private@example.invalid",
+                    "subject": "Private",
+                    "body": "private body",
+                },
+            )
+        )
+
+    stages = [event.payload["stage"] for event in _events(sink, TraceEventKind.TOOL_CALL)]
+    assert result.success is False
+    assert stages == ["started", "rejected"]
+
+
 def test_dispatch_traces_recommended_reuse_and_rejects_valid_nonrecommended_id(
     tmp_path,
 ) -> None:
@@ -562,6 +696,63 @@ def test_null_trace_scope_adds_no_dispatch_observation_reads(tmp_path) -> None:
 
     assert result.success is True
     assert directory.list_calls == 0
+
+
+@pytest.mark.parametrize("sink_kind", ["collecting", "failing"])
+@pytest.mark.parametrize("roster_state", ["missing", "legacy", "repair"])
+def test_rejected_dispatch_trace_never_initializes_migrates_or_repairs_directory(
+    tmp_path,
+    sink_kind,
+    roster_state,
+) -> None:
+    roster_path = tmp_path / "roster.json"
+    directory = AgentDirectory(roster_path)
+    if roster_state == "missing":
+        roster_path.unlink()
+        before = None
+    elif roster_state == "legacy":
+        roster_path.write_text('["Legacy Alice"]', encoding="utf-8")
+        before = roster_path.read_bytes()
+    else:
+        roster_path.write_text('["Legacy Alice"]', encoding="utf-8")
+        repaired_directory = AgentDirectory(roster_path)
+        payload = json.loads(roster_path.read_text(encoding="utf-8"))
+        del payload["agents"][0]["legacy_storage_key"]
+        roster_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        before = roster_path.read_bytes()
+        directory = repaired_directory
+
+    sink = CollectingSink() if sink_kind == "collecting" else FailingSink()
+    with trace_scope(_trace_context(), sink):
+        result = _dispatch_and_drain(
+            agent_name="Rejected",
+            agent_purpose="Must not create",
+            instructions="Do not run",
+            dispatch_context=DispatchContext(routing_action=RoutingAction.ABSTAIN),
+            directory=directory,
+            log_store=ExecutionAgentLogStore(tmp_path / "logs"),
+            batch_manager=FakeBatchManager(),
+        )
+
+    assert result.success is False
+    if before is None:
+        assert roster_path.exists() is False
+    else:
+        assert roster_path.read_bytes() == before
+
+    if sink_kind == "collecting":
+        dispatch_result = next(
+            event.payload
+            for event in sink.events
+            if event.kind is TraceEventKind.DISPATCH_RESULT
+        )
+        if roster_state == "missing":
+            assert dispatch_result["directory_count_before"] is None
+            assert dispatch_result["directory_count_before_availability"] == "unavailable"
+            assert dispatch_result["directory_count_before_reason"] == "directory snapshot missing"
+        else:
+            assert dispatch_result["directory_count_before"] == 1
+            assert dispatch_result["directory_count_before_availability"] == "available"
 
 
 def test_dispatch_trace_sink_failure_does_not_change_result(tmp_path) -> None:

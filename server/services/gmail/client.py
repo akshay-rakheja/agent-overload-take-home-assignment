@@ -14,7 +14,7 @@ from ...logging_config import logger
 from ...models import GmailConnectPayload, GmailDisconnectPayload, GmailStatusPayload
 from ...utils import error_response
 from ..evaluation_lab import LabToolPolicy, lab_tool_rejection
-from ..evaluation_lab.models import TraceEventKind
+from ..evaluation_lab.models import Availability, TraceEventKind
 from ..evaluation_lab.trace import emit_trace
 
 
@@ -512,15 +512,47 @@ def _normalize_tool_response(result: Any) -> Dict[str, Any]:
     return payload_dict
 
 
-def _gmail_result_facts(payload: Dict[str, Any]) -> Dict[str, Any]:
+_GMAIL_COLLECTION_OPERATIONS = frozenset(
+    {
+        "GMAIL_FETCH_EMAILS",
+        "GMAIL_GET_CONTACTS",
+        "GMAIL_GET_PEOPLE",
+        "GMAIL_LIST_DRAFTS",
+        "GMAIL_SEARCH_PEOPLE",
+    }
+)
+
+
+def _gmail_result_facts(tool_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Return count/pagination facts without exposing provider payload contents."""
 
     try:
+        # Probe the normalized mapping inside the guarded observation boundary so
+        # exotic provider mappings cannot turn tracing into a production failure.
+        payload.get("items")
+        if tool_name not in _GMAIL_COLLECTION_OPERATIONS:
+            return {
+                "result_count": None,
+                "has_more": None,
+                "observation_availability": Availability.NOT_APPLICABLE.value,
+                "observation_reason": "gmail operation has no collection result",
+            }
+
         items = payload.get("items")
+        if not isinstance(items, list):
+            items = payload.get("messages")
         data = payload.get("data")
         if not isinstance(items, list) and isinstance(data, dict):
-            items = data.get("messages") or data.get("items")
-        result_count = len(items) if isinstance(items, list) else 0
+            items = data.get("messages")
+            if not isinstance(items, list):
+                items = data.get("items")
+        if not isinstance(items, list):
+            return {
+                "result_count": None,
+                "has_more": None,
+                "observation_availability": Availability.UNAVAILABLE.value,
+                "observation_reason": "gmail collection shape unavailable",
+            }
         has_more = bool(
             payload.get("nextPageToken")
             or payload.get("next_page_token")
@@ -529,9 +561,19 @@ def _gmail_result_facts(payload: Dict[str, Any]) -> Dict[str, Any]:
                 and (data.get("nextPageToken") or data.get("next_page_token"))
             )
         )
-        return {"result_count": result_count, "has_more": has_more}
+        return {
+            "result_count": len(items),
+            "has_more": has_more,
+            "observation_availability": Availability.AVAILABLE.value,
+            "observation_reason": None,
+        }
     except Exception:
-        return {"result_count": 0, "has_more": False}
+        return {
+            "result_count": None,
+            "has_more": None,
+            "observation_availability": Availability.UNAVAILABLE.value,
+            "observation_reason": "gmail observation failed",
+        }
 
 
 # Execute Gmail operations through Composio SDK with error handling
@@ -588,9 +630,12 @@ def execute_gmail_tool(
 
     prepared_arguments.setdefault("user_id", "me")
 
+    sdk_executed = False
     try:
         client = _get_composio_client()
-        result = client.client.tools.execute(
+        sdk_callable = client.client.tools.execute
+        sdk_executed = True
+        result = sdk_callable(
             tool_name,
             user_id=composio_user_id,
             arguments=prepared_arguments,
@@ -605,7 +650,7 @@ def execute_gmail_tool(
                 "allowed": True,
                 "policy_code": policy_code,
                 "sdk_executed": True,
-                **_gmail_result_facts(normalized),
+                **_gmail_result_facts(tool_name, normalized),
             },
         )
         return normalized
@@ -618,7 +663,7 @@ def execute_gmail_tool(
                 "stage": "failed",
                 "allowed": True,
                 "policy_code": policy_code,
-                "sdk_executed": True,
+                "sdk_executed": sdk_executed,
                 "error_type": type(exc).__name__,
             },
         )

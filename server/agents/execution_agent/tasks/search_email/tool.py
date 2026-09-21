@@ -274,6 +274,18 @@ async def _execute_tool_calls(
             query = arguments.get("query")
             error = f"Unsupported tool: {name}"
             logger.warning(f"[EMAIL_SEARCH] Unsupported tool: {name}")
+            emit_trace(
+                TraceEventKind.GMAIL_EVIDENCE,
+                {
+                    "boundary": "email_search_task",
+                    "operation_name": name,
+                    "stage": "rejected",
+                    "allowed": False,
+                    "policy_code": "unsupported_tool",
+                    "callable_executed": False,
+                    "sdk_executed": False,
+                },
+            )
             responses.append(_create_error_response(call_id, query, error))
 
     return responses, completion_ids

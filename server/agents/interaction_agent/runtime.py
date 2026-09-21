@@ -294,17 +294,16 @@ class InteractionAgentRuntime:
     ) -> Dict[str, Any]:
         """Make an LLM call via OpenRouter."""
 
-        started = monotonic_ns()
         emit_trace(
             TraceEventKind.MODEL_CALL,
             {
                 "runtime": "interaction",
                 "stage": "started",
                 "model": self.model,
-                "started_monotonic_ns": started,
                 "tool_schema_count": len(self.tool_schemas),
             },
         )
+        started = monotonic_ns()
         logger.debug(
             "Interaction agent calling LLM",
             extra={"model": self.model, "tools": len(self.tool_schemas)},
@@ -430,16 +429,15 @@ class InteractionAgentRuntime:
             self._log_tool_invocation(tool_call, stage="rejected", detail={"error": error})
             return ToolResult(success=False, payload={"error": error})
 
-        started = monotonic_ns()
         emit_trace(
             TraceEventKind.TOOL_CALL,
             {
                 "runtime": "interaction",
                 "tool_name": tool_call.name,
                 "stage": "started",
-                "started_monotonic_ns": started,
             },
         )
+        started = monotonic_ns()
         try:
             self._log_tool_invocation(tool_call, stage="start")
             result = handle_tool_call(
@@ -506,12 +504,13 @@ class InteractionAgentRuntime:
         )
         self._log_tool_invocation(tool_call, stage="done", result=result)
         finished = monotonic_ns()
+        trace_stage = "completed" if result.success else "rejected"
         emit_trace(
             TraceEventKind.TOOL_CALL,
             {
                 "runtime": "interaction",
                 "tool_name": tool_call.name,
-                "stage": "completed",
+                "stage": trace_stage,
                 "success": result.success,
                 "result": result.payload,
                 "started_monotonic_ns": started,

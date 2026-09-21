@@ -149,6 +149,53 @@ def test_execution_runtime_traces_model_and_final_response_without_usage_or_cost
     assert _events(sink, TraceEventKind.COST) == []
 
 
+def test_execution_model_and_tool_timings_exclude_synchronous_sink_latency(
+    monkeypatch,
+) -> None:
+    clock = {"now": 0}
+
+    class ClockAdvancingSink(CollectingSink):
+        def emit(self, event) -> None:
+            clock["now"] += 1_000_000_000
+            super().emit(event)
+
+    async def fake_chat_completion(**kwargs):
+        del kwargs
+        clock["now"] += 10
+        return {"choices": [{"message": {"content": "fixture"}}]}
+
+    def fake_tool(**kwargs):
+        del kwargs
+        clock["now"] += 7
+        return {"status": "fixture"}
+
+    monkeypatch.setattr(execution_runtime, "monotonic_ns", lambda: clock["now"])
+    monkeypatch.setattr(
+        execution_runtime, "request_chat_completion", fake_chat_completion
+    )
+    runtime = _runtime()
+    runtime.lab_enabled = False
+    runtime.tool_registry = {"fixture_tool": fake_tool}
+    sink = ClockAdvancingSink()
+
+    with trace_scope(_trace_context(), sink):
+        asyncio.run(runtime._make_llm_call("system", [], with_tools=False))
+        asyncio.run(runtime._execute_tool("fixture_tool", {}))
+
+    model_completed = [
+        event
+        for event in _events(sink, TraceEventKind.MODEL_CALL)
+        if event.payload["stage"] == "completed"
+    ][0]
+    tool_completed = [
+        event
+        for event in _events(sink, TraceEventKind.TOOL_CALL)
+        if event.payload["stage"] == "completed"
+    ][0]
+    assert model_completed.payload["elapsed_ns"] == 10
+    assert tool_completed.payload["elapsed_ns"] == 7
+
+
 @pytest.mark.parametrize(
     ("tool_name", "expected_policy_code"),
     [

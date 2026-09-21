@@ -155,6 +155,8 @@ def test_gmail_client_traces_only_sanitized_read_only_result_facts(monkeypatch) 
         "sdk_executed": True,
         "result_count": 1,
         "has_more": True,
+        "observation_availability": "available",
+        "observation_reason": None,
     }
     for marker in private_markers:
         assert marker not in serialized_event
@@ -177,13 +179,202 @@ def test_gmail_observation_failure_does_not_change_provider_result(monkeypatch) 
         ),
     )
 
-    with trace_scope(_trace_context(), CollectingSink()):
+    sink = CollectingSink()
+    with trace_scope(_trace_context(), sink):
         result = gmail_client.execute_gmail_tool(
             "GMAIL_GET_PROFILE",
             "opaque-lab-user",
         )
 
     assert result is provider_result
+    event = _gmail_events(sink)[0]
+    assert event.payload["result_count"] is None
+    assert event.payload["has_more"] is None
+    assert event.payload["observation_availability"] == "unavailable"
+    assert event.payload["observation_reason"] == "gmail observation failed"
+
+
+@pytest.mark.parametrize(
+    ("provider_result", "expected_count", "expected_has_more"),
+    [
+        ({"messages": [{"id": "fixture"}]}, 1, False),
+        ({"messages": []}, 0, False),
+        ({"data": {"messages": [{"id": "fixture"}]}}, 1, False),
+        ({"data": {"items": [{"id": "fixture"}], "nextPageToken": "next"}}, 1, True),
+    ],
+)
+def test_gmail_supported_collection_shapes_have_available_exact_counts(
+    monkeypatch,
+    provider_result,
+    expected_count,
+    expected_has_more,
+) -> None:
+    monkeypatch.setattr(gmail_client, "_CLIENT", FakeComposio(provider_result))
+    monkeypatch.setattr(
+        gmail_client,
+        "get_settings",
+        lambda: Settings(
+            lab_enabled=True,
+            lab_composio_user_id="opaque-lab-user",
+        ),
+    )
+    sink = CollectingSink()
+
+    with trace_scope(_trace_context(), sink):
+        result = gmail_client.execute_gmail_tool(
+            "GMAIL_FETCH_EMAILS", "opaque-lab-user"
+        )
+
+    assert result is provider_result
+    event = _gmail_events(sink)[0]
+    assert event.payload["result_count"] == expected_count
+    assert event.payload["has_more"] is expected_has_more
+    assert event.payload["observation_availability"] == "available"
+    assert event.payload["observation_reason"] is None
+
+
+def test_gmail_unknown_collection_shape_is_unavailable_not_empty(monkeypatch) -> None:
+    provider_result = {"status": "fixture"}
+    monkeypatch.setattr(gmail_client, "_CLIENT", FakeComposio(provider_result))
+    monkeypatch.setattr(
+        gmail_client,
+        "get_settings",
+        lambda: Settings(
+            lab_enabled=True,
+            lab_composio_user_id="opaque-lab-user",
+        ),
+    )
+    sink = CollectingSink()
+
+    with trace_scope(_trace_context(), sink):
+        result = gmail_client.execute_gmail_tool(
+            "GMAIL_FETCH_EMAILS", "opaque-lab-user"
+        )
+
+    assert result is provider_result
+    event = _gmail_events(sink)[0]
+    assert event.payload["result_count"] is None
+    assert event.payload["has_more"] is None
+    assert event.payload["observation_availability"] == "unavailable"
+    assert event.payload["observation_reason"] == "gmail collection shape unavailable"
+
+
+def test_gmail_non_collection_operation_is_not_applicable_not_empty(monkeypatch) -> None:
+    provider_result = {"profile": {"displayName": "Fixture"}}
+    monkeypatch.setattr(gmail_client, "_CLIENT", FakeComposio(provider_result))
+    monkeypatch.setattr(
+        gmail_client,
+        "get_settings",
+        lambda: Settings(
+            lab_enabled=True,
+            lab_composio_user_id="opaque-lab-user",
+        ),
+    )
+    sink = CollectingSink()
+
+    with trace_scope(_trace_context(), sink):
+        result = gmail_client.execute_gmail_tool(
+            "GMAIL_GET_PROFILE", "opaque-lab-user"
+        )
+
+    assert result is provider_result
+    event = _gmail_events(sink)[0]
+    assert event.payload["result_count"] is None
+    assert event.payload["has_more"] is None
+    assert event.payload["observation_availability"] == "not_applicable"
+    assert event.payload["observation_reason"] == "gmail operation has no collection result"
+
+
+def test_gmail_client_acquisition_failure_reports_sdk_not_executed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        gmail_client,
+        "get_settings",
+        lambda: Settings(
+            lab_enabled=True,
+            lab_composio_user_id="opaque-lab-user",
+        ),
+    )
+    monkeypatch.setattr(
+        gmail_client,
+        "_get_composio_client",
+        lambda: (_ for _ in ()).throw(RuntimeError("client unavailable")),
+    )
+    sink = CollectingSink()
+
+    with trace_scope(_trace_context(), sink):
+        with pytest.raises(RuntimeError, match="Gmail tool execution failed"):
+            gmail_client.execute_gmail_tool(
+                "GMAIL_GET_PROFILE", "opaque-lab-user"
+            )
+
+    event = _gmail_events(sink)[0]
+    assert event.payload["stage"] == "failed"
+    assert event.payload["sdk_executed"] is False
+
+
+def test_gmail_sdk_callable_failure_reports_sdk_executed(monkeypatch) -> None:
+    class RaisingComposio(FakeComposio):
+        def _execute(self, tool_name, *, user_id, arguments):
+            self.execute_calls.append((tool_name, user_id, arguments))
+            raise RuntimeError("provider failed")
+
+    client = RaisingComposio({})
+    monkeypatch.setattr(gmail_client, "_CLIENT", client)
+    monkeypatch.setattr(
+        gmail_client,
+        "get_settings",
+        lambda: Settings(
+            lab_enabled=True,
+            lab_composio_user_id="opaque-lab-user",
+        ),
+    )
+    sink = CollectingSink()
+
+    with trace_scope(_trace_context(), sink):
+        with pytest.raises(RuntimeError, match="Gmail tool execution failed"):
+            gmail_client.execute_gmail_tool(
+                "GMAIL_GET_PROFILE", "opaque-lab-user"
+            )
+
+    event = _gmail_events(sink)[0]
+    assert event.payload["stage"] == "failed"
+    assert event.payload["sdk_executed"] is True
+
+
+def test_email_search_unsupported_operation_traces_rejected_before_execution() -> None:
+    sink = CollectingSink()
+    tool_calls = [
+        {
+            "id": "call-1",
+            "function": {
+                "name": "GMAIL_SEND_EMAIL",
+                "arguments": {"body": "private body"},
+            },
+        }
+    ]
+
+    with trace_scope(_trace_context(), sink):
+        responses, completed_ids = asyncio.run(
+            email_search._execute_tool_calls(
+                tool_calls=tool_calls,
+                queries=[],
+                emails={},
+                composio_user_id="opaque-lab-user",
+            )
+        )
+
+    event = _gmail_events(sink)[0]
+    assert completed_ids is None
+    assert "Unsupported tool: GMAIL_SEND_EMAIL" in responses[0][1]
+    assert event.payload == {
+        "boundary": "email_search_task",
+        "operation_name": "GMAIL_SEND_EMAIL",
+        "stage": "rejected",
+        "allowed": False,
+        "policy_code": "unsupported_tool",
+        "callable_executed": False,
+        "sdk_executed": False,
+    }
 
 
 def test_email_search_traces_sanitized_facts_from_exact_processed_result(

@@ -211,17 +211,16 @@ class ExecutionAgentRuntime:
     async def _make_llm_call(self, system_prompt: str, messages: List[Dict], with_tools: bool) -> Dict:
         """Make an LLM call."""
         tools_to_send = self.tool_schemas if with_tools else None
-        started = monotonic_ns()
         emit_trace(
             TraceEventKind.MODEL_CALL,
             {
                 "runtime": "execution",
                 "stage": "started",
                 "model": self.model,
-                "started_monotonic_ns": started,
                 "tool_schema_count": len(tools_to_send) if tools_to_send else 0,
             },
         )
+        started = monotonic_ns()
         logger.info(f"[{self.agent.name}] Calling LLM with model: {self.model}, tools: {len(tools_to_send) if tools_to_send else 0}")
         try:
             response = await request_chat_completion(
@@ -322,16 +321,15 @@ class ExecutionAgentRuntime:
     # Execute tool function from registry with error handling and async support
     async def _execute_tool(self, tool_name: str, arguments: Dict) -> Tuple[bool, Any]:
         """Execute a tool. Returns (success, result)."""
-        started = monotonic_ns()
         emit_trace(
             TraceEventKind.TOOL_CALL,
             {
                 "runtime": "execution",
                 "tool_name": tool_name,
                 "stage": "started",
-                "started_monotonic_ns": started,
             },
         )
+        started = monotonic_ns()
         if getattr(self, "lab_enabled", False):
             decision = LabToolPolicy().decide_model_tool(tool_name)
             if not decision.allowed:

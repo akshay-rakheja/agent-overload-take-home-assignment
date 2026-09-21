@@ -11,7 +11,7 @@ from ...config import get_settings
 from ...logging_config import logger
 from ...services.conversation import get_conversation_log
 from ...services.evaluation_lab import LabToolPolicy, lab_tool_rejection
-from ...services.evaluation_lab.models import TraceEventKind
+from ...services.evaluation_lab.models import Availability, TraceEventKind
 from ...services.evaluation_lab.trace import emit_trace, trace_active
 from ...services.execution import (
     AgentDirectory,
@@ -147,11 +147,53 @@ TOOL_SCHEMAS = [
 _EXECUTION_BATCH_MANAGER = ExecutionBatchManager()
 
 
-def _directory_count(directory: AgentDirectory) -> int | None:
+@dataclass(frozen=True)
+class _DirectoryCountObservation:
+    value: int | None
+    availability: Availability
+    reason: str | None = None
+
+
+def _directory_count(directory: AgentDirectory) -> _DirectoryCountObservation:
+    path = getattr(directory, "_path", None)
+    if path is None or not hasattr(path, "read_text"):
+        return _DirectoryCountObservation(
+            value=None,
+            availability=Availability.UNAVAILABLE,
+            reason="directory snapshot unavailable",
+        )
     try:
-        return len(directory.list_records())
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return _DirectoryCountObservation(
+            value=None,
+            availability=Availability.UNAVAILABLE,
+            reason="directory snapshot missing",
+        )
     except Exception:
-        return None
+        return _DirectoryCountObservation(
+            value=None,
+            availability=Availability.UNAVAILABLE,
+            reason="directory snapshot unreadable",
+        )
+
+    if isinstance(payload, list):
+        return _DirectoryCountObservation(
+            value=len(payload), availability=Availability.AVAILABLE
+        )
+    if (
+        isinstance(payload, dict)
+        and payload.get("schema_version") == 1
+        and isinstance(payload.get("agents"), list)
+    ):
+        return _DirectoryCountObservation(
+            value=len(payload["agents"]), availability=Availability.AVAILABLE
+        )
+    return _DirectoryCountObservation(
+        value=None,
+        availability=Availability.UNAVAILABLE,
+        reason="directory snapshot shape unavailable",
+    )
 
 
 def _journal_sha256(log_store: ExecutionAgentLogStore, storage_key: str) -> str | None:
@@ -193,7 +235,15 @@ def send_message_to_agent(
     resolved_batch_manager = batch_manager or _EXECUTION_BATCH_MANAGER
     context = dispatch_context or DispatchContext()
     tracing = trace_active()
-    directory_count_before = _directory_count(resolved_directory) if tracing else None
+    directory_count_before = (
+        _directory_count(resolved_directory)
+        if tracing
+        else _DirectoryCountObservation(
+            value=None,
+            availability=Availability.NOT_APPLICABLE,
+            reason="trace inactive",
+        )
+    )
     idempotent_creation = False
 
     emit_trace(
@@ -210,7 +260,9 @@ def send_message_to_agent(
                 str(allowed_id) for allowed_id in context.allowed_agent_ids
             ),
             "creation_intent_supplied": bool(creation_intent_id),
-            "directory_count_before": directory_count_before,
+            "directory_count_before": directory_count_before.value,
+            "directory_count_before_availability": directory_count_before.availability.value,
+            "directory_count_before_reason": directory_count_before.reason,
         },
     )
 
@@ -222,13 +274,25 @@ def send_message_to_agent(
         journal_sha256_before: str | None = None,
         journal_sha256_after: str | None = None,
     ) -> ToolResult:
-        directory_count_after = _directory_count(resolved_directory) if tracing else None
+        directory_count_after = (
+            _directory_count(resolved_directory)
+            if tracing
+            else _DirectoryCountObservation(
+                value=None,
+                availability=Availability.NOT_APPLICABLE,
+                reason="trace inactive",
+            )
+        )
         payload: dict[str, Any] = {
             "status": "accepted" if result.success else "rejected",
             "success": result.success,
             "code": _tool_result_code(result),
-            "directory_count_before": directory_count_before,
-            "directory_count_after": directory_count_after,
+            "directory_count_before": directory_count_before.value,
+            "directory_count_before_availability": directory_count_before.availability.value,
+            "directory_count_before_reason": directory_count_before.reason,
+            "directory_count_after": directory_count_after.value,
+            "directory_count_after_availability": directory_count_after.availability.value,
+            "directory_count_after_reason": directory_count_after.reason,
         }
         if record is not None:
             stable_id = str(record.agent_id)
@@ -252,8 +316,12 @@ def send_message_to_agent(
             identity: dict[str, Any] = {
                 "selected": selected,
                 "delta": {
-                    "directory_count_before": directory_count_before,
-                    "directory_count_after": directory_count_after,
+                    "directory_count_before": directory_count_before.value,
+                    "directory_count_before_availability": directory_count_before.availability.value,
+                    "directory_count_before_reason": directory_count_before.reason,
+                    "directory_count_after": directory_count_after.value,
+                    "directory_count_after_availability": directory_count_after.availability.value,
+                    "directory_count_after_reason": directory_count_after.reason,
                     "journal_sha256_before": journal_sha256_before,
                     "journal_sha256_after": journal_sha256_after,
                 },
@@ -408,6 +476,17 @@ def send_draft(
     """Record a draft update in the conversation log for the interaction agent."""
     if get_settings().lab_enabled:
         decision = LabToolPolicy().decide_model_tool("send_draft")
+        emit_trace(
+            TraceEventKind.GMAIL_EVIDENCE,
+            {
+                "boundary": "interaction_send_draft",
+                "operation_name": "send_draft",
+                "stage": "rejected",
+                "allowed": decision.allowed,
+                "policy_code": decision.code,
+                "callable_executed": False,
+            },
+        )
         return ToolResult(
             success=False,
             payload=lab_tool_rejection("send_draft", decision),
