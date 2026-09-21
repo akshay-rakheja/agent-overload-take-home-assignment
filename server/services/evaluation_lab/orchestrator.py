@@ -56,6 +56,47 @@ class _FrozenModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class ExecutionMode(str, Enum):
+    MEASURED = "measured"
+    OFFLINE_FAKE = "offline_fake"
+
+
+class SnapshotContract(_FrozenModel):
+    profile_id: str
+    snapshot_id: str
+    baseline_roster_fingerprint: str
+    enhanced_roster_fingerprint: str
+    fixture_fingerprint: str
+    raw_journal_fingerprint: str
+
+    @field_validator(
+        "profile_id",
+        "snapshot_id",
+        "baseline_roster_fingerprint",
+        "enhanced_roster_fingerprint",
+        "fixture_fingerprint",
+        "raw_journal_fingerprint",
+    )
+    @classmethod
+    def _bounded_value(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or len(normalized) > 512:
+            raise ValueError("snapshot contract values must be bounded non-empty text")
+        return normalized
+
+    def roster_fingerprint(self, system: MeasuredSystem) -> str:
+        return (
+            self.baseline_roster_fingerprint
+            if system is MeasuredSystem.BASELINE
+            else self.enhanced_roster_fingerprint
+        )
+
+
+class BudgetAuthorization(_FrozenModel):
+    reservation_id: UUID
+    authorized: Literal[True] = True
+
+
 class StartRunRequest(_FrozenModel):
     request_id: UUID = Field(default_factory=uuid4)
     scenario_ids: tuple[str, ...] = ()
@@ -133,6 +174,16 @@ class SideRunOutput(_FrozenModel):
     results: tuple[SystemRunResult, ...] = ()
     reason: str | None = None
 
+    @field_validator("model_id")
+    @classmethod
+    def _observed_model_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized or len(normalized) > 200:
+            raise ValueError("observed model identity must be bounded non-empty text")
+        return normalized
+
     @model_validator(mode="after")
     def _coherent(self) -> "SideRunOutput":
         if self.status is OutcomeStatus.SUCCESS:
@@ -145,7 +196,8 @@ class SideRunOutput(_FrozenModel):
 
 class LateCompletion(_FrozenModel):
     status: OutcomeStatus
-    result_count: int = Field(ge=0)
+    model_id: str | None = None
+    results: tuple[SystemRunResult, ...] = ()
     reason: str | None = None
 
 
@@ -182,7 +234,7 @@ class RunTransition(_FrozenModel):
 
 class OrchestrationTraceEvent(_FrozenModel):
     sequence: int = Field(ge=1)
-    kind: Literal["transition", "reset", "outcome", "grade", "recovery"]
+    kind: Literal["transition", "reset", "outcome", "grade", "recovery", "late"]
     occurred_at: datetime
     pair_id: UUID | None = None
     system: MeasuredSystem | None = None
@@ -193,6 +245,8 @@ class PairedRunResult(_FrozenModel):
     schema_version: Literal[1] = 1
     run_id: UUID
     request: StartRunRequest
+    execution_mode: ExecutionMode = ExecutionMode.MEASURED
+    snapshot_contracts: tuple[SnapshotContract, ...] = ()
     status: RunStatus
     generation: int = Field(ge=0)
     schedule: tuple[ScheduledPair, ...]
@@ -207,7 +261,16 @@ class PairedRunResult(_FrozenModel):
 
 Resetter = Callable[..., StateVerification | Awaitable[StateVerification]]
 Runner = Callable[..., SideRunOutput | SystemRunResult | Sequence[SystemRunResult] | Awaitable[Any]]
-BudgetGuard = Callable[..., None | Awaitable[None]]
+BudgetGuard = Callable[
+    ...,
+    BudgetAuthorization | Awaitable[BudgetAuthorization],
+]
+
+
+class _SideAttemptCancelled(asyncio.CancelledError):
+    def __init__(self, outcome: PersistedSideOutcome) -> None:
+        self.outcome = outcome
+        super().__init__("paired run execution was cancelled")
 
 
 async def _await(value: Any) -> Any:
@@ -225,6 +288,8 @@ class PairedRunOrchestrator:
         resetter: Resetter,
         runners: Mapping[MeasuredSystem, Runner],
         budget_guard: BudgetGuard | None = None,
+        execution_mode: ExecutionMode = ExecutionMode.MEASURED,
+        snapshot_contracts: Mapping[str, SnapshotContract] | None = None,
         side_timeout_seconds: float = 60.0,
         late_completion_grace_seconds: float = 0.1,
         clock: Callable[[], datetime] | None = None,
@@ -240,23 +305,33 @@ class PairedRunOrchestrator:
         self._resetter = resetter
         self._runners = MappingProxyType(dict(runners))
         self._budget_guard = budget_guard
+        self._execution_mode = execution_mode
+        self._snapshot_contracts = MappingProxyType(dict(snapshot_contracts or {}))
         self._side_timeout = side_timeout_seconds
         self._late_grace = late_completion_grace_seconds
         self._clock = clock or (lambda: datetime.now(UTC))
         self._state_lock = asyncio.Lock()
         self._active_tasks: set[asyncio.Task[Any]] = set()
+        self._late_monitors: set[asyncio.Task[Any]] = set()
+        self._deferred_leases: set[tuple[UUID, UUID]] = set()
         if recover_on_startup:
             self._recover_interrupted()
 
     @property
     def active_tasks(self) -> tuple[asyncio.Task[Any], ...]:
-        return tuple(task for task in self._active_tasks if not task.done())
+        return tuple(
+            task
+            for task in (*self._active_tasks, *self._late_monitors)
+            if not task.done()
+        )
 
     @staticmethod
     def new_record(
         request: StartRunRequest,
         *,
         scenarios: Sequence[ScenarioDefinition],
+        execution_mode: ExecutionMode = ExecutionMode.MEASURED,
+        snapshot_contracts: Sequence[SnapshotContract] = (),
         now: datetime | None = None,
     ) -> PairedRunResult:
         available = {scenario.scenario_id: scenario for scenario in scenarios}
@@ -283,6 +358,8 @@ class PairedRunOrchestrator:
         return PairedRunResult(
             run_id=run_id,
             request=request,
+            execution_mode=execution_mode,
+            snapshot_contracts=tuple(snapshot_contracts),
             status=RunStatus.QUEUED,
             generation=0,
             schedule=schedule,
@@ -295,6 +372,8 @@ class PairedRunOrchestrator:
     def _recover_interrupted(self) -> None:
         for record in self.store.list_records():
             if record.status in {RunStatus.QUEUED, RunStatus.COMPLETE, RunStatus.PARTIAL_FAILURE, RunStatus.BLOCKED}:
+                continue
+            if self.store.execution_owner_is_alive(record.run_id):
                 continue
             now = self._clock()
             terminal = RunStatus.PARTIAL_FAILURE if any(pair.outcomes for pair in record.pairs) else RunStatus.BLOCKED
@@ -326,6 +405,7 @@ class PairedRunOrchestrator:
                 }
             )
             self.store.save(recovered)
+            self.store.clear_stale_execution(record.run_id)
 
     def _handle(self, record: PairedRunResult) -> RunHandle:
         return RunHandle(
@@ -338,6 +418,8 @@ class PairedRunOrchestrator:
         candidate = self.new_record(
             request,
             scenarios=tuple(self._scenarios.values()),
+            execution_mode=self._execution_mode,
+            snapshot_contracts=tuple(self._snapshot_contracts.values()),
             now=self._clock(),
         )
         existing = self.store.get(candidate.run_id)
@@ -345,7 +427,11 @@ class PairedRunOrchestrator:
             if existing.request != request:
                 raise RunConflict("idempotency key belongs to a different request")
             return self._handle(existing)
-        if self._state_lock.locked() or self.active_tasks:
+        if (
+            self._state_lock.locked()
+            or self.active_tasks
+            or self.store.execution_owner_is_alive()
+        ):
             raise RunConflict("a state-changing Evaluation Lab run is active")
         await self._state_lock.acquire()
         try:
@@ -447,21 +533,95 @@ class PairedRunOrchestrator:
     def _normalize_output(value: object) -> SideRunOutput:
         if isinstance(value, SideRunOutput):
             return value
-        if isinstance(value, SystemRunResult):
-            return SideRunOutput(
-                status=OutcomeStatus.SUCCESS,
-                model_id="openai/gpt-4.1-mini",
-                results=(value,),
-            )
-        if isinstance(value, Sequence) and not isinstance(value, (str, bytes)) and all(
-            isinstance(item, SystemRunResult) for item in value
+        if isinstance(value, SystemRunResult) or (
+            isinstance(value, Sequence)
+            and not isinstance(value, (str, bytes))
+            and all(isinstance(item, SystemRunResult) for item in value)
         ):
-            return SideRunOutput(
-                status=OutcomeStatus.SUCCESS,
-                model_id="openai/gpt-4.1-mini",
-                results=tuple(value),
-            )
+            raise ValueError("bare side evidence has no observed model provenance")
         raise ValueError("side runner returned malformed output")
+
+    @staticmethod
+    def _outcome_from_output(
+        output: SideRunOutput,
+        *,
+        record: PairedRunResult,
+        scenario: ScenarioDefinition,
+        system: MeasuredSystem,
+    ) -> PersistedSideOutcome:
+        invalid_sequence = (
+            output.status is OutcomeStatus.SUCCESS
+            and (
+                len(output.results) != len(scenario.turns)
+                or len({result.turn_id for result in output.results})
+                != len(output.results)
+            )
+        )
+        invalid_identity = any(
+            result.run_id != record.run_id or result.system != system.value
+            for result in output.results
+        )
+        if invalid_sequence or invalid_identity:
+            return PersistedSideOutcome(
+                system=system,
+                status=OutcomeStatus.MALFORMED,
+                model_id=output.model_id,
+                results=output.results,
+                reason=(
+                    "side evidence does not match the run, system, or complete "
+                    "distinct predeclared turn sequence"
+                ),
+            )
+        return PersistedSideOutcome(
+            system=system,
+            status=output.status,
+            model_id=output.model_id,
+            results=output.results,
+            reason=output.reason,
+        )
+
+    @classmethod
+    def _completed_outcome(
+        cls,
+        task: asyncio.Task[Any],
+        *,
+        record: PairedRunResult,
+        scenario: ScenarioDefinition,
+        system: MeasuredSystem,
+    ) -> PersistedSideOutcome:
+        try:
+            output = cls._normalize_output(task.result())
+        except asyncio.CancelledError:
+            return PersistedSideOutcome(
+                system=system,
+                status=OutcomeStatus.FAILURE,
+                reason="side task was cancelled",
+            )
+        except ValueError as exc:
+            return PersistedSideOutcome(
+                system=system,
+                status=OutcomeStatus.MALFORMED,
+                reason=str(exc),
+            )
+        except Exception as exc:
+            return PersistedSideOutcome(
+                system=system,
+                status=OutcomeStatus.FAILURE,
+                reason=f"{type(exc).__name__}: side execution failed",
+            )
+        return cls._outcome_from_output(
+            output,
+            record=record,
+            scenario=scenario,
+            system=system,
+        )
+
+    @staticmethod
+    async def _invoke_runner(runner: Runner, kwargs: dict[str, object]) -> object:
+        if inspect.iscoroutinefunction(runner):
+            return await runner(**kwargs)
+        value = await asyncio.to_thread(runner, **kwargs)
+        return await value if inspect.isawaitable(value) else value
 
     def _watch_task(self, task: asyncio.Task[Any]) -> None:
         self._active_tasks.add(task)
@@ -476,6 +636,101 @@ class PairedRunOrchestrator:
 
         task.add_done_callback(_done)
 
+    @staticmethod
+    async def _join_supervised_task(task: asyncio.Task[Any]) -> None:
+        """Retain ownership until work ends, even if the observer is cancelled."""
+
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                pass
+
+    @staticmethod
+    def _late_from_outcome(outcome: PersistedSideOutcome) -> LateCompletion:
+        return LateCompletion(
+            status=outcome.status,
+            model_id=outcome.model_id,
+            results=outcome.results,
+            reason=outcome.reason,
+        )
+
+    async def _schedule_late_monitor(
+        self,
+        task: asyncio.Task[Any],
+        *,
+        record: PairedRunResult,
+        scenario: ScenarioDefinition,
+        scheduled: ScheduledPair,
+        system: MeasuredSystem,
+        owner_id: UUID,
+    ) -> None:
+        lease_key = (record.run_id, owner_id)
+        self._deferred_leases.add(lease_key)
+        started = asyncio.Event()
+
+        async def _observe() -> None:
+            started.set()
+            try:
+                await self._join_supervised_task(task)
+                outcome = self._completed_outcome(
+                    task,
+                    record=record,
+                    scenario=scenario,
+                    system=system,
+                )
+                late = self._late_from_outcome(outcome)
+                await self._state_lock.acquire()
+                try:
+                    current = self.status(record.run_id)
+                    pair = next(
+                        (
+                            item
+                            for item in current.pairs
+                            if item.scheduled.pair_id == scheduled.pair_id
+                        ),
+                        None,
+                    )
+                    if pair is not None:
+                        outcomes = tuple(
+                            item.model_copy(update={"late_completion": late})
+                            if item.system is system
+                            and item.status is OutcomeStatus.TIMEOUT
+                            else item
+                            for item in pair.outcomes
+                        )
+                        updated_pair = pair.model_copy(update={"outcomes": outcomes})
+                        event = OrchestrationTraceEvent(
+                            sequence=len(current.trace) + 1,
+                            kind="late",
+                            occurred_at=self._clock(),
+                            pair_id=scheduled.pair_id,
+                            system=system,
+                            detail=f"late_{late.status.value}",
+                        )
+                        self._persist(
+                            current,
+                            pairs=self._replace_pair(current, updated_pair),
+                            trace=current.trace + (event,),
+                        )
+                finally:
+                    self._state_lock.release()
+            finally:
+                try:
+                    self.store.release_execution(record.run_id, owner_id)
+                finally:
+                    self._deferred_leases.discard(lease_key)
+
+        monitor = asyncio.create_task(
+            _observe(),
+            name=f"lab-late-{record.run_id}-{scheduled.pair_id}-{system.value}",
+        )
+        self._late_monitors.add(monitor)
+        monitor.add_done_callback(self._late_monitors.discard)
+        await started.wait()
+
     async def _run_side(
         self,
         *,
@@ -483,6 +738,7 @@ class PairedRunOrchestrator:
         scenario: ScenarioDefinition,
         scheduled: ScheduledPair,
         system: MeasuredSystem,
+        owner_id: UUID,
     ) -> PersistedSideOutcome:
         runner = self._runners.get(system)
         if runner is None:
@@ -491,80 +747,71 @@ class PairedRunOrchestrator:
                 status=OutcomeStatus.UNAVAILABLE,
                 reason="side runner is not configured",
             )
+        runner_is_async = inspect.iscoroutinefunction(runner)
         task = asyncio.create_task(
-            _await(
-                runner(
-                    run_id=record.run_id,
-                    system=system,
-                    scheduled=scheduled,
-                    scenario=scenario,
-                )
+            self._invoke_runner(
+                runner,
+                {
+                    "run_id": record.run_id,
+                    "system": system,
+                    "scheduled": scheduled,
+                    "scenario": scenario,
+                },
             ),
             name=f"lab-{record.run_id}-{scheduled.pair_id}-{system.value}",
         )
         self._watch_task(task)
-        done, _pending = await asyncio.wait({task}, timeout=self._side_timeout)
-        if done:
-            try:
-                output = self._normalize_output(task.result())
-            except asyncio.CancelledError:
-                return PersistedSideOutcome(
-                    system=system,
-                    status=OutcomeStatus.FAILURE,
-                    reason="side task was cancelled",
-                )
-            except ValueError as exc:
-                return PersistedSideOutcome(
-                    system=system,
-                    status=OutcomeStatus.MALFORMED,
-                    reason=str(exc),
-                )
-            except Exception as exc:
-                return PersistedSideOutcome(
-                    system=system,
-                    status=OutcomeStatus.FAILURE,
-                    reason=f"{type(exc).__name__}: side execution failed",
-                )
-            if any(
-                result.run_id != record.run_id or result.system != system.value
-                for result in output.results
-            ) or (
-                output.status is OutcomeStatus.SUCCESS
-                and len(output.results) != len(scenario.turns)
-            ):
-                return PersistedSideOutcome(
-                    system=system,
-                    status=OutcomeStatus.MALFORMED,
-                    model_id=output.model_id,
-                    results=output.results,
-                    reason="side evidence does not match run, system, or predeclared turns",
-                )
-            return PersistedSideOutcome(
+        try:
+            done, _pending = await asyncio.wait({task}, timeout=self._side_timeout)
+        except asyncio.CancelledError:
+            if runner_is_async:
+                task.cancel()
+            await self._join_supervised_task(task)
+            completed = self._completed_outcome(
+                task,
+                record=record,
+                scenario=scenario,
                 system=system,
-                status=output.status,
-                model_id=output.model_id,
-                results=output.results,
-                reason=output.reason,
+            )
+            raise _SideAttemptCancelled(
+                PersistedSideOutcome(
+                    system=system,
+                    status=OutcomeStatus.FAILURE,
+                    reason="paired run execution was cancelled; side was joined",
+                    late_completion=self._late_from_outcome(completed),
+                )
+            )
+        if done:
+            return self._completed_outcome(
+                task,
+                record=record,
+                scenario=scenario,
+                system=system,
             )
 
-        task.cancel()
+        if runner_is_async:
+            task.cancel()
         late: LateCompletion | None = None
         if self._late_grace:
             late_done, _ = await asyncio.wait({task}, timeout=self._late_grace)
-            if late_done and not task.cancelled():
-                try:
-                    output = self._normalize_output(task.result())
-                    late = LateCompletion(
-                        status=output.status,
-                        result_count=len(output.results),
-                        reason=output.reason,
+            if late_done:
+                late = self._late_from_outcome(
+                    self._completed_outcome(
+                        task,
+                        record=record,
+                        scenario=scenario,
+                        system=system,
                     )
-                except BaseException as exc:
-                    late = LateCompletion(
-                        status=OutcomeStatus.FAILURE,
-                        result_count=0,
-                        reason=f"{type(exc).__name__}: late completion failed",
-                    )
+                )
+        if not task.done():
+            await self._schedule_late_monitor(
+                task,
+                record=record,
+                scenario=scenario,
+                scheduled=scheduled,
+                system=system,
+                owner_id=owner_id,
+            )
         return PersistedSideOutcome(
             system=system,
             status=OutcomeStatus.TIMEOUT,
@@ -581,14 +828,59 @@ class PairedRunOrchestrator:
         if self._state_lock.locked():
             raise RunConflict("a state-changing Evaluation Lab run is active")
         await self._state_lock.acquire()
+        owner_id = uuid4()
+        lease_acquired = False
         try:
             record = self.status(run_id)
             if record.status.terminal:
                 return record
+            try:
+                self.store.acquire_execution(run_id, owner_id)
+            except RuntimeError as exc:
+                raise RunConflict("a state-changing Evaluation Lab run is active") from exc
+            lease_acquired = True
+
+            contracts = {
+                contract.profile_id: contract for contract in record.snapshot_contracts
+            }
+            executable = any(
+                system in self._runners
+                for scheduled in record.schedule
+                for system in scheduled.order.systems
+            )
+            missing_contracts = sorted(
+                {
+                    self._scenarios[scheduled.scenario_id].reset_profile.profile_id
+                    for scheduled in record.schedule
+                    if self._scenarios[
+                        scheduled.scenario_id
+                    ].reset_profile.profile_id
+                    not in contracts
+                }
+            )
+            if executable and missing_contracts:
+                reason = "immutable snapshot contract is unavailable"
+                return self._transition(
+                    self._persist(record, blocked_reason=reason),
+                    RunStatus.BLOCKED,
+                    detail=reason,
+                )
+            if (
+                executable
+                and record.execution_mode is ExecutionMode.MEASURED
+                and self._budget_guard is None
+            ):
+                reason = "measured execution requires a budget reservation guard"
+                return self._transition(
+                    self._persist(record, blocked_reason=reason),
+                    RunStatus.BLOCKED,
+                    detail=reason,
+                )
+
             for scheduled in record.schedule:
                 scenario = self._scenarios[scheduled.scenario_id]
+                contract = contracts.get(scenario.reset_profile.profile_id)
                 pair = PairExecutionRecord(scheduled=scheduled)
-                expected_snapshot: str | None = None
                 for system in scheduled.order.systems:
                     record = self._transition(record, RunStatus.RESETTING)
                     try:
@@ -615,10 +907,51 @@ class PairedRunOrchestrator:
                     mismatches = list(verification.mismatches)
                     if verification.system is not system:
                         mismatches.append("system")
-                    if expected_snapshot is None:
-                        expected_snapshot = verification.snapshot_id
-                    elif verification.snapshot_id != expected_snapshot:
-                        mismatches.append("snapshot_id")
+                    if contract is None:
+                        mismatches.append("snapshot_contract")
+                    else:
+                        expected_roster = contract.roster_fingerprint(system)
+                        pinned = (
+                            (
+                                "snapshot_id",
+                                verification.snapshot_id,
+                                contract.snapshot_id,
+                            ),
+                            (
+                                "roster_fingerprint",
+                                verification.roster_fingerprint,
+                                expected_roster,
+                            ),
+                            (
+                                "expected_roster_fingerprint",
+                                verification.expected_roster_fingerprint,
+                                expected_roster,
+                            ),
+                            (
+                                "fixture_fingerprint",
+                                verification.fixture_fingerprint,
+                                contract.fixture_fingerprint,
+                            ),
+                            (
+                                "expected_fixture_fingerprint",
+                                verification.expected_fixture_fingerprint,
+                                contract.fixture_fingerprint,
+                            ),
+                            (
+                                "raw_journal_fingerprint",
+                                verification.raw_journal_fingerprint,
+                                contract.raw_journal_fingerprint,
+                            ),
+                            (
+                                "expected_raw_journal_fingerprint",
+                                verification.expected_raw_journal_fingerprint,
+                                contract.raw_journal_fingerprint,
+                            ),
+                        )
+                        mismatches.extend(
+                            name for name, observed, expected in pinned if observed != expected
+                        )
+                    mismatches = list(dict.fromkeys(mismatches))
                     record = self._persist_pair_event(
                         record,
                         pair,
@@ -631,9 +964,10 @@ class PairedRunOrchestrator:
                         record = self._persist(record, blocked_reason=reason)
                         return self._transition(record, RunStatus.BLOCKED, detail=reason)
 
-                    if self._budget_guard is not None:
+                    if record.execution_mode is ExecutionMode.MEASURED:
+                        assert self._budget_guard is not None
                         try:
-                            reservation_ready = await _await(
+                            authorization = await _await(
                                 self._budget_guard(
                                     run_id=record.run_id,
                                     system=system,
@@ -642,8 +976,6 @@ class PairedRunOrchestrator:
                                 )
                             )
                         except BudgetExceeded:
-                            reservation_ready = False
-                        if reservation_ready is False:
                             outcome = PersistedSideOutcome(
                                 system=system,
                                 status=OutcomeStatus.BUDGET_STOP,
@@ -660,6 +992,23 @@ class PairedRunOrchestrator:
                                 detail=outcome.status.value,
                             )
                             continue
+                        except Exception as exc:
+                            reason = (
+                                "budget reservation failed before transport: "
+                                f"{type(exc).__name__}"
+                            )
+                            return self._transition(
+                                self._persist(record, blocked_reason=reason),
+                                RunStatus.BLOCKED,
+                                detail=reason,
+                            )
+                        if not isinstance(authorization, BudgetAuthorization):
+                            reason = "budget reservation authorization was malformed"
+                            return self._transition(
+                                self._persist(record, blocked_reason=reason),
+                                RunStatus.BLOCKED,
+                                detail=reason,
+                            )
 
                     running = (
                         RunStatus.BASELINE_RUNNING
@@ -667,12 +1016,32 @@ class PairedRunOrchestrator:
                         else RunStatus.ENHANCED_RUNNING
                     )
                     record = self._transition(record, running)
-                    outcome = await self._run_side(
-                        record=record,
-                        scenario=scenario,
-                        scheduled=scheduled,
-                        system=system,
-                    )
+                    try:
+                        outcome = await self._run_side(
+                            record=record,
+                            scenario=scenario,
+                            scheduled=scheduled,
+                            system=system,
+                            owner_id=owner_id,
+                        )
+                    except _SideAttemptCancelled as exc:
+                        outcome = exc.outcome
+                        pair = pair.model_copy(
+                            update={"outcomes": pair.outcomes + (outcome,)}
+                        )
+                        record = self._persist_pair_event(
+                            record,
+                            pair,
+                            kind="outcome",
+                            system=system,
+                            detail=outcome.status.value,
+                        )
+                        self._transition(
+                            record,
+                            RunStatus.PARTIAL_FAILURE,
+                            detail="paired run execution was cancelled after joining side",
+                        )
+                        raise
                     pair = pair.model_copy(
                         update={"outcomes": pair.outcomes + (outcome,)}
                     )
@@ -703,7 +1072,32 @@ class PairedRunOrchestrator:
                     continue
                 for outcome in pair.outcomes:
                     if outcome.status is OutcomeStatus.SUCCESS:
-                        scorecards.append(grade_scenario_sequence(scenario, outcome.results))
+                        try:
+                            scorecards.append(
+                                grade_scenario_sequence(scenario, outcome.results)
+                            )
+                        except Exception as exc:
+                            malformed = outcome.model_copy(
+                                update={
+                                    "status": OutcomeStatus.MALFORMED,
+                                    "reason": (
+                                        "deterministic grading rejected terminal evidence: "
+                                        f"{type(exc).__name__}"
+                                    ),
+                                }
+                            )
+                            outcomes = tuple(
+                                malformed if item.system is outcome.system else item
+                                for item in pair.outcomes
+                            )
+                            pair = pair.model_copy(update={"outcomes": outcomes})
+                            record = self._persist_pair_event(
+                                record,
+                                pair,
+                                kind="outcome",
+                                system=outcome.system,
+                                detail=OutcomeStatus.MALFORMED.value,
+                            )
             if scorecards:
                 event = OrchestrationTraceEvent(
                     sequence=len(record.trace) + 1,
@@ -727,9 +1121,13 @@ class PairedRunOrchestrator:
             )
         finally:
             self._state_lock.release()
+            if lease_acquired and (run_id, owner_id) not in self._deferred_leases:
+                self.store.release_execution(run_id, owner_id)
 
 
 __all__ = [
+    "BudgetAuthorization",
+    "ExecutionMode",
     "LateCompletion",
     "OrchestrationTraceEvent",
     "PairExecutionRecord",
@@ -741,6 +1139,7 @@ __all__ = [
     "RunStatus",
     "RunTransition",
     "SideRunOutput",
+    "SnapshotContract",
     "StartRunRequest",
     "StateVerification",
 ]

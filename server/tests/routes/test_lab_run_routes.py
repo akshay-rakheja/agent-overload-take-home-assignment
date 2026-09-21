@@ -114,6 +114,26 @@ def test_request_validation_rejects_unknown_scenario_without_persisting(tmp_path
     assert not settings.lab_run_root.exists()
 
 
+def test_run_creation_validation_errors_are_bounded_and_redacted(tmp_path) -> None:
+    settings = _settings(tmp_path)
+    client = _client(settings)
+    synthetic_token = "sk-fakeONLY_REVIEW_12345678"
+    synthetic_email = "review-secret@example.invalid"
+
+    response = client.post(
+        "/api/v1/lab/runs",
+        json={
+            "scenario_ids": [synthetic_token, synthetic_email],
+            "unexpected": synthetic_token,
+        },
+    )
+
+    assert response.status_code == 422
+    assert synthetic_token.encode() not in response.content
+    assert synthetic_email.encode() not in response.content
+    assert len(response.content) < 256
+
+
 def test_start_request_rejects_duplicate_scenario_ids() -> None:
     scenario_id = "exact-instagram-security"
     try:

@@ -9,14 +9,30 @@ import os
 import secrets
 import stat
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict
 
 from .redaction import redact_value
 
 if TYPE_CHECKING:
     from .orchestrator import PairedRunResult
+
+
+_EXECUTION_LEASE_NAME = ".execution-owner.json"
+
+
+class ExecutionLease(BaseModel):
+    """Persisted conservative proof that one process still owns execution."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    run_id: UUID
+    owner_id: UUID
+    pid: int
+    acquired_at: datetime
 
 
 class RunStore:
@@ -224,6 +240,102 @@ class RunStore:
                 records.append(self._decode(payload, requested=run_id))
             return tuple(records)
 
+    @staticmethod
+    def _pid_alive(pid: int) -> bool:
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    def execution_lease(self) -> ExecutionLease | None:
+        with self._locked_root(create=False, exclusive=False) as root_fd:
+            if root_fd is None:
+                return None
+            payload = self._read_file(root_fd, _EXECUTION_LEASE_NAME)
+            if payload is None:
+                return None
+            try:
+                return ExecutionLease.model_validate_json(payload)
+            except Exception as exc:
+                raise ValueError("execution lease is malformed") from exc
+
+    def execution_owner_is_alive(self, run_id: UUID | None = None) -> bool:
+        lease = self.execution_lease()
+        if lease is None or (run_id is not None and lease.run_id != run_id):
+            return False
+        return self._pid_alive(lease.pid)
+
+    def acquire_execution(self, run_id: UUID, owner_id: UUID) -> ExecutionLease:
+        lease = ExecutionLease(
+            run_id=run_id,
+            owner_id=owner_id,
+            pid=os.getpid(),
+            acquired_at=datetime.now(UTC),
+        )
+        with self._locked_root(create=True, exclusive=True) as root_fd:
+            assert root_fd is not None
+            payload = self._read_file(root_fd, _EXECUTION_LEASE_NAME)
+            if payload is not None:
+                try:
+                    current = ExecutionLease.model_validate_json(payload)
+                except Exception as exc:
+                    raise ValueError("execution lease is malformed") from exc
+                if (current.run_id, current.owner_id, current.pid) == (
+                    lease.run_id,
+                    lease.owner_id,
+                    lease.pid,
+                ):
+                    return current
+                if self._pid_alive(current.pid):
+                    raise RuntimeError("a live execution owner already holds the run store")
+            self._atomic_write(
+                root_fd,
+                _EXECUTION_LEASE_NAME,
+                lease.model_dump_json().encode("utf-8") + b"\n",
+            )
+            return lease
+
+    def release_execution(self, run_id: UUID, owner_id: UUID) -> bool:
+        with self._locked_root(create=False, exclusive=True) as root_fd:
+            if root_fd is None:
+                return False
+            payload = self._read_file(root_fd, _EXECUTION_LEASE_NAME)
+            if payload is None:
+                return False
+            try:
+                current = ExecutionLease.model_validate_json(payload)
+            except Exception as exc:
+                raise ValueError("execution lease is malformed") from exc
+            if (current.run_id, current.owner_id) != (run_id, owner_id):
+                raise RuntimeError("execution lease belongs to another owner")
+            os.unlink(_EXECUTION_LEASE_NAME, dir_fd=root_fd)
+            os.fsync(root_fd)
+            return True
+
+    def clear_stale_execution(self, run_id: UUID) -> bool:
+        with self._locked_root(create=False, exclusive=True) as root_fd:
+            if root_fd is None:
+                return False
+            payload = self._read_file(root_fd, _EXECUTION_LEASE_NAME)
+            if payload is None:
+                return False
+            try:
+                current = ExecutionLease.model_validate_json(payload)
+            except Exception as exc:
+                raise ValueError("execution lease is malformed") from exc
+            if current.run_id != run_id:
+                return False
+            if self._pid_alive(current.pid):
+                raise RuntimeError("cannot clear a live execution owner")
+            os.unlink(_EXECUTION_LEASE_NAME, dir_fd=root_fd)
+            os.fsync(root_fd)
+            return True
+
     def create(self, record: "PairedRunResult") -> None:
         from .orchestrator import PairedRunResult
 
@@ -254,4 +366,4 @@ class RunStore:
             self._atomic_write(root_fd, name, self._serialize(record))
 
 
-__all__ = ["RunStore"]
+__all__ = ["ExecutionLease", "RunStore"]
