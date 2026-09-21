@@ -1,10 +1,13 @@
 """Execution Agent implementation."""
 
 from pathlib import Path
+from dataclasses import asdict
 from itertools import chain
 from typing import List, Optional, Dict, Any
 
 from ...config import get_settings
+from ...services.evaluation_lab.models import TraceEventKind
+from ...services.evaluation_lab.trace import emit_trace
 from ...services.execution import (
     AgentDirectory,
     ContextMetrics,
@@ -125,6 +128,10 @@ class ExecutionAgent:
             memory_summary=memory_summary,
         )
         self.last_context_metrics = context.metrics
+        emit_trace(
+            TraceEventKind.CONTEXT_METRICS,
+            asdict(self.last_context_metrics),
+        )
 
         if context.text:
             return f"{base_prompt}\n\n# Execution History\n\n{context.text}"

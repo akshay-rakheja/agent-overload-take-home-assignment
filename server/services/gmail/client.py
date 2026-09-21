@@ -14,6 +14,8 @@ from ...logging_config import logger
 from ...models import GmailConnectPayload, GmailDisconnectPayload, GmailStatusPayload
 from ...utils import error_response
 from ..evaluation_lab import LabToolPolicy, lab_tool_rejection
+from ..evaluation_lab.models import TraceEventKind
+from ..evaluation_lab.trace import emit_trace
 
 
 _CLIENT_LOCK = threading.Lock()
@@ -510,6 +512,28 @@ def _normalize_tool_response(result: Any) -> Dict[str, Any]:
     return payload_dict
 
 
+def _gmail_result_facts(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Return count/pagination facts without exposing provider payload contents."""
+
+    try:
+        items = payload.get("items")
+        data = payload.get("data")
+        if not isinstance(items, list) and isinstance(data, dict):
+            items = data.get("messages") or data.get("items")
+        result_count = len(items) if isinstance(items, list) else 0
+        has_more = bool(
+            payload.get("nextPageToken")
+            or payload.get("next_page_token")
+            or (
+                isinstance(data, dict)
+                and (data.get("nextPageToken") or data.get("next_page_token"))
+            )
+        )
+        return {"result_count": result_count, "has_more": has_more}
+    except Exception:
+        return {"result_count": 0, "has_more": False}
+
+
 # Execute Gmail operations through Composio SDK with error handling
 def execute_gmail_tool(
     tool_name: str,
@@ -518,9 +542,21 @@ def execute_gmail_tool(
     arguments: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     settings = get_settings()
+    policy_code = "not_evaluated"
     if settings.lab_enabled:
         configured_user_id = _normalized(settings.lab_composio_user_id)
         if _normalized(composio_user_id) != configured_user_id:
+            emit_trace(
+                TraceEventKind.GMAIL_EVIDENCE,
+                {
+                    "boundary": "gmail_client",
+                    "operation_name": tool_name,
+                    "stage": "rejected",
+                    "allowed": False,
+                    "policy_code": "lab_user_mismatch",
+                    "sdk_executed": False,
+                },
+            )
             return {
                 "error": {
                     "code": "lab_user_mismatch",
@@ -529,7 +565,19 @@ def execute_gmail_tool(
                 }
             }
         decision = LabToolPolicy().decide_composio_tool(tool_name)
+        policy_code = decision.code
         if not decision.allowed:
+            emit_trace(
+                TraceEventKind.GMAIL_EVIDENCE,
+                {
+                    "boundary": "gmail_client",
+                    "operation_name": tool_name,
+                    "stage": "rejected",
+                    "allowed": False,
+                    "policy_code": decision.code,
+                    "sdk_executed": False,
+                },
+            )
             return lab_tool_rejection(tool_name, decision)
 
     prepared_arguments: Dict[str, Any] = {}
@@ -547,7 +595,32 @@ def execute_gmail_tool(
             user_id=composio_user_id,
             arguments=prepared_arguments,
         )
-        return _normalize_tool_response(result)
-    except Exception:
+        normalized = _normalize_tool_response(result)
+        emit_trace(
+            TraceEventKind.GMAIL_EVIDENCE,
+            {
+                "boundary": "gmail_client",
+                "operation_name": tool_name,
+                "stage": "completed",
+                "allowed": True,
+                "policy_code": policy_code,
+                "sdk_executed": True,
+                **_gmail_result_facts(normalized),
+            },
+        )
+        return normalized
+    except Exception as exc:
+        emit_trace(
+            TraceEventKind.GMAIL_EVIDENCE,
+            {
+                "boundary": "gmail_client",
+                "operation_name": tool_name,
+                "stage": "failed",
+                "allowed": True,
+                "policy_code": policy_code,
+                "sdk_executed": True,
+                "error_type": type(exc).__name__,
+            },
+        )
         logger.error("Gmail tool execution failed", extra={"tool": tool_name})
         raise RuntimeError("Gmail tool execution failed") from None

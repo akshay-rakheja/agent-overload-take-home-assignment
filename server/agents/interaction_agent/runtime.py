@@ -2,12 +2,15 @@
 
 import json
 from dataclasses import dataclass, field
+from time import monotonic_ns
 from typing import Any, Dict, List, Optional, Set
 
 from .agent import build_candidate_context, build_system_prompt, prepare_message_with_history
 from .tools import DispatchContext, ToolResult, get_tool_schemas, handle_tool_call
 from ...config import get_settings
 from ...services.conversation import get_conversation_log, get_working_memory_log
+from ...services.evaluation_lab.models import TraceEventKind
+from ...services.evaluation_lab.trace import emit_trace
 from ...services.execution import AgentDirectory, RoutingAction, get_agent_directory
 from ...openrouter_client import request_chat_completion
 from ...logging_config import logger
@@ -92,6 +95,14 @@ class InteractionAgentRuntime:
             )
 
         except Exception as exc:
+            emit_trace(
+                TraceEventKind.ERROR,
+                {
+                    "boundary": "interaction_runtime",
+                    "stage": "execute",
+                    "error_type": type(exc).__name__,
+                },
+            )
             logger.error("Interaction agent failed", extra={"error": str(exc)})
             return InteractionResult(
                 success=False,
@@ -127,6 +138,14 @@ class InteractionAgentRuntime:
             )
 
         except Exception as exc:
+            emit_trace(
+                TraceEventKind.ERROR,
+                {
+                    "boundary": "interaction_runtime",
+                    "stage": "handle_agent_message",
+                    "error_type": type(exc).__name__,
+                },
+            )
             logger.error("Interaction agent (agent message) failed", extra={"error": str(exc)})
             return InteractionResult(
                 success=False,
@@ -157,6 +176,37 @@ class InteractionAgentRuntime:
         self.dispatch_context = DispatchContext(
             routing_action=candidate_context.decision.action,
             allowed_agent_ids=allowed_ids,
+        )
+        emit_trace(
+            TraceEventKind.ROUTING_DECISION,
+            {
+                "action": candidate_context.decision.action.value,
+                "agent_id": (
+                    str(candidate_context.decision.agent_id)
+                    if candidate_context.decision.agent_id is not None
+                    else None
+                ),
+                "confidence": candidate_context.decision.confidence,
+                "reasons": candidate_context.decision.reasons,
+                "recommendation": (
+                    str(candidate_context.decision.agent_id)
+                    if candidate_context.decision.agent_id is not None
+                    else candidate_context.decision.action.value
+                ),
+            },
+        )
+        emit_trace(
+            TraceEventKind.AUTHORIZATION,
+            {
+                "routing_action": (
+                    self.dispatch_context.routing_action.value
+                    if self.dispatch_context.routing_action is not None
+                    else None
+                ),
+                "authorized_ids": sorted(
+                    str(agent_id) for agent_id in self.dispatch_context.allowed_agent_ids
+                ),
+            },
         )
         return prepare_message_with_history(
             latest_text,
@@ -244,17 +294,57 @@ class InteractionAgentRuntime:
     ) -> Dict[str, Any]:
         """Make an LLM call via OpenRouter."""
 
+        started = monotonic_ns()
+        emit_trace(
+            TraceEventKind.MODEL_CALL,
+            {
+                "runtime": "interaction",
+                "stage": "started",
+                "model": self.model,
+                "started_monotonic_ns": started,
+                "tool_schema_count": len(self.tool_schemas),
+            },
+        )
         logger.debug(
             "Interaction agent calling LLM",
             extra={"model": self.model, "tools": len(self.tool_schemas)},
         )
-        return await request_chat_completion(
-            model=self.model,
-            messages=messages,
-            system=system_prompt,
-            api_key=self.api_key,
-            tools=self.tool_schemas,
+        try:
+            response = await request_chat_completion(
+                model=self.model,
+                messages=messages,
+                system=system_prompt,
+                api_key=self.api_key,
+                tools=self.tool_schemas,
+            )
+        except Exception as exc:
+            finished = monotonic_ns()
+            emit_trace(
+                TraceEventKind.MODEL_CALL,
+                {
+                    "runtime": "interaction",
+                    "stage": "failed",
+                    "model": self.model,
+                    "started_monotonic_ns": started,
+                    "finished_monotonic_ns": finished,
+                    "elapsed_ns": max(0, finished - started),
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise
+        finished = monotonic_ns()
+        emit_trace(
+            TraceEventKind.MODEL_CALL,
+            {
+                "runtime": "interaction",
+                "stage": "completed",
+                "model": self.model,
+                "started_monotonic_ns": started,
+                "finished_monotonic_ns": finished,
+                "elapsed_ns": max(0, finished - started),
+            },
         )
+        return response
 
     # Extract the assistant's message from the OpenRouter API response structure
     def _extract_assistant_message(self, response: Dict[str, Any]) -> Dict[str, Any]:
@@ -327,9 +417,29 @@ class InteractionAgentRuntime:
 
         if "__invalid_arguments__" in tool_call.arguments:
             error = tool_call.arguments["__invalid_arguments__"]
+            emit_trace(
+                TraceEventKind.TOOL_CALL,
+                {
+                    "runtime": "interaction",
+                    "tool_name": tool_call.name,
+                    "stage": "rejected",
+                    "success": False,
+                    "reason": "invalid_arguments",
+                },
+            )
             self._log_tool_invocation(tool_call, stage="rejected", detail={"error": error})
             return ToolResult(success=False, payload={"error": error})
 
+        started = monotonic_ns()
+        emit_trace(
+            TraceEventKind.TOOL_CALL,
+            {
+                "runtime": "interaction",
+                "tool_name": tool_call.name,
+                "stage": "started",
+                "started_monotonic_ns": started,
+            },
+        )
         try:
             self._log_tool_invocation(tool_call, stage="start")
             result = handle_tool_call(
@@ -338,6 +448,20 @@ class InteractionAgentRuntime:
                 dispatch_context=self.dispatch_context,
             )
         except Exception as exc:  # pragma: no cover - defensive
+            finished = monotonic_ns()
+            emit_trace(
+                TraceEventKind.TOOL_CALL,
+                {
+                    "runtime": "interaction",
+                    "tool_name": tool_call.name,
+                    "stage": "failed",
+                    "success": False,
+                    "started_monotonic_ns": started,
+                    "finished_monotonic_ns": finished,
+                    "elapsed_ns": max(0, finished - started),
+                    "error_type": type(exc).__name__,
+                },
+            )
             logger.error(
                 "Tool execution crashed",
                 extra={"tool": tool_call.name, "error": str(exc)},
@@ -355,6 +479,20 @@ class InteractionAgentRuntime:
                 extra={"tool": tool_call.name},
             )
             wrapped = ToolResult(success=True, payload=result)
+            finished = monotonic_ns()
+            emit_trace(
+                TraceEventKind.TOOL_CALL,
+                {
+                    "runtime": "interaction",
+                    "tool_name": tool_call.name,
+                    "stage": "completed",
+                    "success": wrapped.success,
+                    "result": wrapped.payload,
+                    "started_monotonic_ns": started,
+                    "finished_monotonic_ns": finished,
+                    "elapsed_ns": max(0, finished - started),
+                },
+            )
             self._log_tool_invocation(tool_call, stage="done", result=wrapped)
             return wrapped
 
@@ -367,6 +505,20 @@ class InteractionAgentRuntime:
             },
         )
         self._log_tool_invocation(tool_call, stage="done", result=result)
+        finished = monotonic_ns()
+        emit_trace(
+            TraceEventKind.TOOL_CALL,
+            {
+                "runtime": "interaction",
+                "tool_name": tool_call.name,
+                "stage": "completed",
+                "success": result.success,
+                "result": result.payload,
+                "started_monotonic_ns": started,
+                "finished_monotonic_ns": finished,
+                "elapsed_ns": max(0, finished - started),
+            },
+        )
         return result
 
     # Format tool execution results into JSON for LLM consumption
@@ -441,6 +593,9 @@ class InteractionAgentRuntime:
         """Decide what text should be exposed to the user as the final reply."""
 
         if summary.user_messages:
-            return summary.user_messages[-1]
+            response = summary.user_messages[-1]
+        else:
+            response = summary.last_assistant_text
 
-        return summary.last_assistant_text
+        emit_trace(TraceEventKind.FINAL_RESPONSE, {"response": response})
+        return response

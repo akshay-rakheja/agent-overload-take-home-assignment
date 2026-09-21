@@ -9,6 +9,8 @@ from server.config import get_settings
 from server.logging_config import logger
 from server.openrouter_client import request_chat_completion
 from server.services.execution import get_execution_agent_logs
+from server.services.evaluation_lab.models import TraceEventKind
+from server.services.evaluation_lab.trace import emit_trace
 from server.services.gmail import (
     EmailTextCleaner,
     ProcessedEmail,
@@ -288,10 +290,22 @@ async def _perform_search(
     query = (arguments.get("query") or "").strip()
     if not query:
         logger.warning(f"[EMAIL_SEARCH] Search called with empty query")
-        return EmailSearchToolResult(
+        result_model = EmailSearchToolResult(
             status="error",
             error=ERROR_QUERY_REQUIRED,
         )
+        emit_trace(
+            TraceEventKind.GMAIL_EVIDENCE,
+            {
+                "boundary": "email_search_task",
+                "operation_name": "GMAIL_FETCH_EMAILS",
+                "stage": "rejected",
+                "result_count": 0,
+                "has_more": False,
+                "attachment_count": 0,
+            },
+        )
+        return result_model
 
     # Use LLM-provided max_results or default to 10
     max_results = arguments.get("max_results", 10)
@@ -319,11 +333,24 @@ async def _perform_search(
         )
     except Exception as exc:
         logger.error(f"[EMAIL_SEARCH] Gmail API failed for '{query}': {exc}")
-        return EmailSearchToolResult(
+        result_model = EmailSearchToolResult(
             status="error",
             query=query,
             error=str(exc),
         )
+        emit_trace(
+            TraceEventKind.GMAIL_EVIDENCE,
+            {
+                "boundary": "email_search_task",
+                "operation_name": "GMAIL_FETCH_EMAILS",
+                "stage": "failed",
+                "result_count": 0,
+                "has_more": False,
+                "attachment_count": 0,
+                "error_type": type(exc).__name__,
+            },
+        )
+        return result_model
 
     processed_emails, next_page_token = parse_gmail_fetch_response(
         raw_result,
@@ -337,13 +364,27 @@ async def _perform_search(
         if email.id not in emails:
             emails[email.id] = email
 
-    return EmailSearchToolResult(
+    result_model = EmailSearchToolResult(
         status="success",
         query=query,
         result_count=len(parsed_emails),
         next_page_token=next_page_token,
         messages=parsed_emails,
     )
+    emit_trace(
+        TraceEventKind.GMAIL_EVIDENCE,
+        {
+            "boundary": "email_search_task",
+            "operation_name": "GMAIL_FETCH_EMAILS",
+            "stage": "completed",
+            "result_count": result_model.result_count or 0,
+            "has_more": bool(result_model.next_page_token),
+            "attachment_count": sum(
+                email.attachment_count for email in result_model.messages
+            ),
+        },
+    )
+    return result_model
 
 
 # Build final response with selected emails and logging

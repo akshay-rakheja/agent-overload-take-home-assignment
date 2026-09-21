@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Dict, List
 
 from ...config import MAX_AGENT_CANDIDATES, get_settings
+from ...services.evaluation_lab.models import TraceEventKind
+from ...services.evaluation_lab.trace import emit_trace
 from ...services.execution import (
     AgentCandidate,
     AgentDirectory,
@@ -85,7 +87,26 @@ def build_candidate_context(
     query = RetrievalQuery(text=latest_text, conversation_context=bounded_transcript)
     candidates = AgentRetriever(resolved_directory.list_records).retrieve(query)
     decision = AgentRouter().route(query, candidates)
-    return CandidateContext(candidates=tuple(candidates), decision=decision)
+    context = CandidateContext(candidates=tuple(candidates), decision=decision)
+    emit_trace(
+        TraceEventKind.CANDIDATES,
+        {
+            "candidate_count": len(context.prompt_candidates),
+            "candidates": [
+                {
+                    "agent_id": str(candidate.agent_id),
+                    "name": candidate.name,
+                    "purpose": candidate.purpose,
+                    "status": candidate.status.value,
+                    "score": candidate.score,
+                    "score_components": candidate.score_components,
+                    "reasons": candidate.reasons,
+                }
+                for candidate in context.prompt_candidates
+            ],
+        },
+    )
+    return context
 
 
 def render_agent_candidates(context: CandidateContext) -> str:
@@ -108,7 +129,20 @@ def render_agent_candidates(context: CandidateContext) -> str:
                 f"{hints}</agent_candidate>"
             )
     rendered.append("</agent_candidates>")
-    return "\n".join(rendered)
+    candidate_xml = "\n".join(rendered)
+    emit_trace(
+        TraceEventKind.PROMPT_EXPOSURE,
+        {
+            "surface": "interaction_agent_candidate_xml",
+            "candidate_count": len(context.prompt_candidates),
+            "candidate_ids": [
+                str(candidate.agent_id) for candidate in context.prompt_candidates
+            ],
+            "routing_action": context.decision.action.value,
+            "candidate_xml": candidate_xml,
+        },
+    )
+    return candidate_xml
 
 
 # Wrap the current message in appropriate XML tags based on sender type

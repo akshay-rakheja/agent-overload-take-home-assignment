@@ -149,6 +149,16 @@ def emit_trace(kind: TraceEventKind, payload: Mapping[str, object]) -> None:
         logger.warning(_DEGRADED_WARNING)
 
 
+def trace_active() -> bool:
+    """Return whether the current context has a live request-scoped trace sink."""
+
+    state = _TRACE_SCOPE.get()
+    if state is None:
+        return False
+    with state.lock:
+        return state.active and not isinstance(state.sink, NullTraceSink)
+
+
 def _coerce_run_id(run_id: UUID | str) -> UUID:
     try:
         return run_id if isinstance(run_id, UUID) else UUID(run_id)
@@ -535,5 +545,6 @@ __all__ = [
     "consolidate_trace",
     "emit_trace",
     "make_trace_event",
+    "trace_active",
     "trace_scope",
 ]

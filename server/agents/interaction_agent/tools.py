@@ -1,6 +1,7 @@
 """Tool definitions for interaction agent."""
 
 import asyncio
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -10,6 +11,8 @@ from ...config import get_settings
 from ...logging_config import logger
 from ...services.conversation import get_conversation_log
 from ...services.evaluation_lab import LabToolPolicy, lab_tool_rejection
+from ...services.evaluation_lab.models import TraceEventKind
+from ...services.evaluation_lab.trace import emit_trace, trace_active
 from ...services.execution import (
     AgentDirectory,
     ExecutionAgentLogStore,
@@ -144,6 +147,32 @@ TOOL_SCHEMAS = [
 _EXECUTION_BATCH_MANAGER = ExecutionBatchManager()
 
 
+def _directory_count(directory: AgentDirectory) -> int | None:
+    try:
+        return len(directory.list_records())
+    except Exception:
+        return None
+
+
+def _journal_sha256(log_store: ExecutionAgentLogStore, storage_key: str) -> str | None:
+    try:
+        return hashlib.sha256(log_store.read_raw_bytes(storage_key)).hexdigest()
+    except Exception:
+        return None
+
+
+def _tool_result_code(result: ToolResult) -> str | None:
+    if not isinstance(result.payload, dict):
+        return None
+    direct = result.payload.get("code")
+    if isinstance(direct, str):
+        return direct
+    error = result.payload.get("error")
+    if isinstance(error, dict) and isinstance(error.get("code"), str):
+        return error["code"]
+    return None
+
+
 # Create or reuse execution agent and dispatch instructions asynchronously
 def send_message_to_agent(
     instructions: str,
@@ -163,6 +192,77 @@ def send_message_to_agent(
     resolved_logs = log_store or get_execution_agent_logs()
     resolved_batch_manager = batch_manager or _EXECUTION_BATCH_MANAGER
     context = dispatch_context or DispatchContext()
+    tracing = trace_active()
+    directory_count_before = _directory_count(resolved_directory) if tracing else None
+    idempotent_creation = False
+
+    emit_trace(
+        TraceEventKind.DISPATCH_ATTEMPT,
+        {
+            "reference_type": "reuse" if agent_id else "create",
+            "requested_agent_id": agent_id,
+            "routing_action": (
+                context.routing_action.value
+                if context.routing_action is not None
+                else None
+            ),
+            "authorized_ids": sorted(
+                str(allowed_id) for allowed_id in context.allowed_agent_ids
+            ),
+            "creation_intent_supplied": bool(creation_intent_id),
+            "directory_count_before": directory_count_before,
+        },
+    )
+
+    def finish(
+        result: ToolResult,
+        *,
+        record: Any = None,
+        created: bool = False,
+        journal_sha256_before: str | None = None,
+        journal_sha256_after: str | None = None,
+    ) -> ToolResult:
+        directory_count_after = _directory_count(resolved_directory) if tracing else None
+        payload: dict[str, Any] = {
+            "status": "accepted" if result.success else "rejected",
+            "success": result.success,
+            "code": _tool_result_code(result),
+            "directory_count_before": directory_count_before,
+            "directory_count_after": directory_count_after,
+        }
+        if record is not None:
+            stable_id = str(record.agent_id)
+            payload.update(
+                {
+                    "selected_agent_id": stable_id,
+                    "new_agent_created": created,
+                    "idempotent_creation": idempotent_creation,
+                    "journal_sha256_before": journal_sha256_before,
+                    "journal_sha256_after": journal_sha256_after,
+                }
+            )
+        emit_trace(TraceEventKind.DISPATCH_RESULT, payload)
+
+        if result.success and record is not None:
+            selected = {
+                "agent_id": str(record.agent_id),
+                "name": record.name,
+                "status": record.status.value,
+            }
+            identity: dict[str, Any] = {
+                "selected": selected,
+                "delta": {
+                    "directory_count_before": directory_count_before,
+                    "directory_count_after": directory_count_after,
+                    "journal_sha256_before": journal_sha256_before,
+                    "journal_sha256_after": journal_sha256_after,
+                },
+                "idempotent_creation": idempotent_creation,
+            }
+            if created:
+                identity["created"] = selected
+            emit_trace(TraceEventKind.IDENTITY, identity)
+        return result
 
     def routing_rejection(message: str) -> ToolResult:
         return ToolResult(
@@ -171,19 +271,19 @@ def send_message_to_agent(
         )
 
     if agent_id and (agent_name or agent_purpose or creation_intent_id):
-        return ToolResult(
+        return finish(ToolResult(
             success=False,
             payload={
                 "code": "invalid_agent_reference",
                 "message": "Provide agent_id for reuse or agent_name and agent_purpose for creation, not both.",
             },
-        )
+        ))
 
     is_new = False
     pending_creation = False
     if agent_id:
         if context.routing_action is not None and context.routing_action is not RoutingAction.REUSE:
-            return routing_rejection("The routing policy did not authorize agent reuse for this turn.")
+            return finish(routing_rejection("The routing policy did not authorize agent reuse for this turn."))
         try:
             parsed_agent_id = UUID(agent_id)
         except (TypeError, ValueError, AttributeError):
@@ -192,28 +292,28 @@ def send_message_to_agent(
             context.routing_action is RoutingAction.REUSE
             and parsed_agent_id not in context.allowed_agent_ids
         ):
-            return routing_rejection("Only the recommended execution agent may be reused for this turn.")
+            return finish(routing_rejection("Only the recommended execution agent may be reused for this turn."))
         try:
             record = resolved_directory.require(agent_id)
         except UnknownAgentError:
-            return ToolResult(
+            return finish(ToolResult(
                 success=False,
                 payload={
                     "code": "unknown_agent_id",
                     "message": "The selected execution agent no longer exists. Refresh candidates.",
                 },
-            )
+            ))
     else:
         if context.routing_action is not None and context.routing_action is not RoutingAction.CREATE_NEW:
-            return routing_rejection("The routing policy did not authorize agent creation for this turn.")
+            return finish(routing_rejection("The routing policy did not authorize agent creation for this turn."))
         if not agent_name or not agent_purpose:
-            return ToolResult(
+            return finish(ToolResult(
                 success=False,
                 payload={
                     "code": "missing_new_agent_metadata",
                     "message": "Creating an execution agent requires both agent_name and agent_purpose.",
                 },
-            )
+            ))
         normalized_intent = normalize_agent_text(creation_intent_id or "")
         creation_key = (
             "intent" if normalized_intent else "name",
@@ -221,6 +321,7 @@ def send_message_to_agent(
         )
         existing_id = context.created_agent_ids.get(creation_key)
         if existing_id is not None:
+            idempotent_creation = True
             record = resolved_directory.require(existing_id)
         else:
             pending_creation = True
@@ -229,7 +330,7 @@ def send_message_to_agent(
         loop = asyncio.get_running_loop()
     except RuntimeError:
         logger.error("No running event loop available for async execution")
-        return ToolResult(success=False, payload={"error": "No event loop available"})
+        return finish(ToolResult(success=False, payload={"error": "No event loop available"}))
 
     if pending_creation:
         record = resolved_directory.create(
@@ -240,9 +341,13 @@ def send_message_to_agent(
         context.created_agent_ids[creation_key] = record.agent_id
         is_new = True
 
+    journal_before = (
+        _journal_sha256(resolved_logs, str(record.agent_id)) if tracing else None
+    )
     record = resolved_directory.mark_used(record.agent_id)
     stable_id = str(record.agent_id)
     resolved_logs.record_request(stable_id, instructions)
+    journal_after = _journal_sha256(resolved_logs, stable_id) if tracing else None
 
     action = "Created" if is_new else "Reused"
     logger.info(f"{action} agent: {record.name} ({stable_id})")
@@ -264,7 +369,7 @@ def send_message_to_agent(
 
     loop.create_task(_execute_async())
 
-    return ToolResult(
+    return finish(ToolResult(
         success=True,
         payload={
             "status": "submitted",
@@ -272,6 +377,11 @@ def send_message_to_agent(
             "agent_name": record.name,
             "new_agent_created": is_new,
         },
+    ),
+        record=record,
+        created=is_new,
+        journal_sha256_before=journal_before,
+        journal_sha256_after=journal_after,
     )
 
 
