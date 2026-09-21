@@ -99,7 +99,21 @@
     {"scenario_id": "reuse-video-newsletter", "action": "reuse", "agent_key": "ai-video-newsletter"},
     {"scenario_id": "reuse-video-receipts", "action": "reuse", "agent_key": "ai-video-receipts"},
     {"scenario_id": "reuse-campaign-retention", "action": "reuse", "agent_key": "same-name-retention"},
+    {"scenario_id": "reuse-unicode-accented", "action": "reuse", "agent_key": "unicode-accented"},
     {"scenario_id": "create-new-calendar-workflow", "action": "create_new", "agent_key": null},
-    {"scenario_id": "abstain-ambiguous-collision", "action": "abstain", "agent_key": null}
+    {"scenario_id": "abstain-ambiguous-collision", "action": "abstain", "agent_key": null},
+    {"scenario_id": "abstain-archived-campaign", "action": "abstain", "agent_key": null},
+    {"scenario_id": "abstain-archived-unicode-plain", "action": "abstain", "agent_key": null}
+  ],
+  "sentinels": [
+    {"sentinel_id": "depth_start", "marker": "DEPTH-START-SENTINEL", "agent_key": "ai-video-newsletter"},
+    {"sentinel_id": "depth_end", "marker": "DEPTH-END-SENTINEL", "agent_key": "ai-video-newsletter"},
+    {"sentinel_id": "cross_agent", "marker": "CROSS-AGENT-SENTINEL", "agent_key": "unicode-plain"},
+    {"sentinel_id": "slug_space", "marker": "SPACE-COLLISION-SENTINEL", "agent_key": "slug-space"},
+    {"sentinel_id": "slug_hyphen", "marker": "HYPHEN-COLLISION-SENTINEL", "agent_key": "slug-hyphen"},
+    {"sentinel_id": "same_name_retention", "marker": "RETENTION-CAMPAIGN-SENTINEL", "agent_key": "same-name-retention"},
+    {"sentinel_id": "same_name_partners", "marker": "PARTNER-CAMPAIGN-SENTINEL", "agent_key": "same-name-partners"},
+    {"sentinel_id": "unicode_accented", "marker": "ACCENTED-UNICODE-SENTINEL", "agent_key": "unicode-accented"},
+    {"sentinel_id": "unicode_plain", "marker": "PLAIN-UNICODE-SENTINEL", "agent_key": "unicode-plain"}
   ]
 }

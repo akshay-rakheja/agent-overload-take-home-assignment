@@ -41,12 +41,19 @@ class ScenarioExpectation(_FrozenModel):
     expected_gmail_fact_ids: tuple[str, ...] = ()
 
 
+class SentinelExpectation(_FrozenModel):
+    sentinel_id: str
+    marker: str
+    expected_relative_path: str
+
+
 class FixtureManifest(_FrozenModel):
     schema_version: Literal[1] = 1
     seed: int
     roster_size: Literal[10, 100, 500, 1000]
     agents: tuple[LogicalAgent, ...]
     scenarios: tuple[ScenarioExpectation, ...]
+    sentinels: tuple[SentinelExpectation, ...]
 
 
 class StateFingerprint(_FrozenModel):

@@ -7,6 +7,7 @@ from .contracts import (
     JournalEntry,
     LogicalAgent,
     ScenarioExpectation,
+    SentinelExpectation,
     StateFingerprint,
     StateSnapshot,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "JournalEntry",
     "LogicalAgent",
     "ScenarioExpectation",
+    "SentinelExpectation",
     "StateFingerprint",
     "StateSnapshot",
     "build_fixture_manifest",

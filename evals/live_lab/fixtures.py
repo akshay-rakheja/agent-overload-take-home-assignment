@@ -19,6 +19,7 @@ from .contracts import (
     JournalEntry,
     LogicalAgent,
     ScenarioExpectation,
+    SentinelExpectation,
     StateFingerprint,
 )
 
@@ -133,7 +134,24 @@ def build_fixture_manifest(*, seed: int, roster_size: int) -> FixtureManifest:
         )
         for raw in spec["scenarios"]  # type: ignore[index]
     )
-    return FixtureManifest(seed=seed, roster_size=roster_size, agents=tuple(agents), scenarios=scenarios)
+    sentinels = tuple(
+        SentinelExpectation(
+            sentinel_id=str(raw["sentinel_id"]),
+            marker=str(raw["marker"]),
+            expected_relative_path=(
+                "execution_agents/"
+                f"{execution_log_slug(agents_by_key[str(raw['agent_key'])].name)}.log"
+            ),
+        )
+        for raw in spec["sentinels"]  # type: ignore[index]
+    )
+    return FixtureManifest(
+        seed=seed,
+        roster_size=roster_size,
+        agents=tuple(agents),
+        scenarios=scenarios,
+        sentinels=sentinels,
+    )
 
 
 def serialize_manifest(manifest: FixtureManifest) -> bytes:

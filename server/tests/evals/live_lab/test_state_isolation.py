@@ -15,6 +15,7 @@ from evals.live_lab.fixtures import (
     materialize_baseline,
     materialize_enhanced,
 )
+from evals.live_lab import state as state_module
 from evals.live_lab.state import (
     compare_logical_state,
     create_snapshot,
@@ -22,7 +23,9 @@ from evals.live_lab.state import (
     restore_snapshot,
 )
 from server.services.execution.directory import AgentDirectory
+from server.services.execution.context_policy import ExecutionContextPolicy
 from server.services.execution.log_store import ExecutionAgentLogStore, execution_log_slug
+from server.agents.execution_agent.agent import ExecutionAgent
 
 
 def _materialized_pair(tmp_path: Path):
@@ -117,6 +120,79 @@ def test_same_name_different_purpose_remains_distinct(tmp_path) -> None:
     assert depth_record.memory_summary.startswith("Durable summary:")
 
 
+def test_same_name_histories_are_quarantined_from_both_runtime_identities(tmp_path) -> None:
+    _, _, enhanced_dir, _, fingerprint = _materialized_pair(tmp_path)
+    execution_dir = enhanced_dir / "execution_agents"
+    directory = AgentDirectory(execution_dir / "roster.json")
+    records = [record for record in directory.list_records() if record.name == "Campaign Desk"]
+    store = ExecutionAgentLogStore(execution_dir)
+    ambiguous_before = store.read_raw_bytes("Campaign Desk")
+
+    prompts = [
+        ExecutionAgent(
+            record.name,
+            storage_key=str(record.agent_id),
+            agent_id=str(record.agent_id),
+            legacy_storage_key=record.legacy_storage_key,
+            log_store=store,
+            directory=directory,
+            context_policy=ExecutionContextPolicy(
+                max_recent_episodes=4,
+                max_characters=2_000,
+            ),
+        ).build_system_prompt_with_history()
+        for record in records
+    ]
+
+    assert len(records) == 2
+    assert all(record.legacy_storage_key is None for record in records)
+    assert b"RETENTION-CAMPAIGN-SENTINEL" in ambiguous_before
+    assert b"PARTNER-CAMPAIGN-SENTINEL" in ambiguous_before
+    assert all("RETENTION-CAMPAIGN-SENTINEL" not in prompt for prompt in prompts)
+    assert all("PARTNER-CAMPAIGN-SENTINEL" not in prompt for prompt in prompts)
+    assert store.read_raw_bytes("Campaign Desk") == ambiguous_before
+    assert fingerprint.sentinel_checks["same_name_retention"]
+    assert fingerprint.sentinel_checks["same_name_partners"]
+
+
+@pytest.mark.parametrize("field", ["agent_id", "purpose", "status", "aliases", "legacy_storage_key"])
+def test_actual_enhanced_roster_tamper_breaks_logical_equivalence(tmp_path, field: str) -> None:
+    _, _, enhanced_dir, baseline, _ = _materialized_pair(tmp_path)
+    roster_path = enhanced_dir / "execution_agents" / "roster.json"
+    payload = json.loads(roster_path.read_text(encoding="utf-8"))
+    record = next(
+        item for item in payload["agents"] if item["name"] == "Instagram Security Monitor"
+    )
+    replacements = {
+        "agent_id": "00000000-0000-0000-0000-000000000001",
+        "purpose": "tampered purpose",
+        "status": "archived",
+        "aliases": ["tampered alias"],
+        "legacy_storage_key": "tampered owner",
+    }
+    record[field] = replacements[field]
+    roster_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    tampered = fingerprint_state(enhanced_dir)
+
+    assert tampered.logical_identity_digest != baseline.logical_identity_digest
+    assert not compare_logical_state(baseline, tampered).equivalent
+
+
+def test_collision_quarantine_tamper_breaks_logical_equivalence(tmp_path) -> None:
+    _, _, enhanced_dir, baseline, _ = _materialized_pair(tmp_path)
+    roster_path = enhanced_dir / "execution_agents" / "roster.json"
+    payload = json.loads(roster_path.read_text(encoding="utf-8"))
+    collision = next(item for item in payload["agents"] if item["name"] == "A B")
+    collision["legacy_storage_key"] = "A B"
+    roster_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    tampered = fingerprint_state(enhanced_dir)
+
+    assert tampered.logical_identity_digest != baseline.logical_identity_digest
+    assert not compare_logical_state(baseline, tampered).equivalent
+
+
 def test_10000_entry_depth_fixture_has_complete_episodes_and_isolated_sentinel(tmp_path) -> None:
     manifest, baseline_dir, _, baseline, _ = _materialized_pair(tmp_path)
     depth = next(agent for agent in manifest.agents if agent.name == "AI Video Newsletter Curator")
@@ -133,6 +209,28 @@ def test_10000_entry_depth_fixture_has_complete_episodes_and_isolated_sentinel(t
     assert b"CROSS-AGENT-SENTINEL" not in raw_depth
     assert baseline.journal_entries == 10_396
     assert all(baseline.sentinel_checks.values())
+
+
+def test_cross_attached_sentinel_fails_expected_owner_check(tmp_path) -> None:
+    _, _, enhanced_dir, baseline, _ = _materialized_pair(tmp_path)
+    execution_dir = enhanced_dir / "execution_agents"
+    wrong_owner = execution_dir / "instagram-security-monitor.log"
+    with wrong_owner.open("ab") as handle:
+        handle.write(b"<agent_response>CROSS-AGENT-SENTINEL</agent_response>\n")
+
+    tampered = fingerprint_state(enhanced_dir)
+
+    assert tampered.sentinel_checks["cross_agent"] is False
+    assert not compare_logical_state(baseline, tampered).equivalent
+
+
+def test_equivalence_requires_all_owner_scoped_sentinel_checks_to_pass(tmp_path) -> None:
+    _, _, _, baseline, _ = _materialized_pair(tmp_path)
+    failed_checks = dict(baseline.sentinel_checks)
+    failed_checks["cross_agent"] = False
+    invalid = baseline.model_copy(update={"sentinel_checks": failed_checks})
+
+    assert not compare_logical_state(invalid, invalid).equivalent
 
 
 @pytest.mark.parametrize("mutation", ["append", "truncate"])
@@ -205,10 +303,63 @@ def test_restore_rejects_symlink_escape_without_mutating_outside_tree(tmp_path) 
     marker.write_bytes(b"do not mutate")
     (allowed_root / "escape").symlink_to(outside, target_is_directory=True)
 
-    with pytest.raises(ValueError, match="outside allowed_root"):
+    with pytest.raises(ValueError, match="symlink"):
         restore_snapshot(snapshot, allowed_root / "escape" / "data", allowed_root=allowed_root)
 
     assert marker.read_bytes() == b"do not mutate"
+
+
+def test_restore_rejects_in_root_symlink_target_without_mutation(tmp_path) -> None:
+    manifest = build_fixture_manifest(seed=1313, roster_size=10)
+    source = tmp_path / "source" / "server" / "data"
+    materialize_baseline(manifest, source)
+    snapshot = create_snapshot(source, tmp_path / "snapshots" / "baseline")
+    allowed_root = tmp_path / "runtime"
+    allowed_root.mkdir()
+    real_target = allowed_root / "real-data"
+    real_target.mkdir()
+    marker = real_target / "do-not-replace.bin"
+    marker.write_bytes(b"preserve in-root target")
+    linked_target = allowed_root / "linked-data"
+    linked_target.symlink_to(real_target, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        restore_snapshot(snapshot, linked_target, allowed_root=allowed_root)
+
+    assert marker.read_bytes() == b"preserve in-root target"
+    assert linked_target.is_symlink()
+
+
+def test_restore_revalidates_target_after_path_swap_without_mutating_link_target(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    manifest = build_fixture_manifest(seed=1313, roster_size=10)
+    source = tmp_path / "source" / "server" / "data"
+    materialize_baseline(manifest, source)
+    snapshot = create_snapshot(source, tmp_path / "snapshots" / "baseline")
+    allowed_root = tmp_path / "runtime"
+    target = allowed_root / "slot" / "server" / "data"
+    materialize_enhanced(manifest, target)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "do-not-mutate.bin"
+    marker.write_bytes(b"outside remains unchanged")
+    displaced = target.with_name("data-displaced")
+    original_copy = state_module._copy_snapshot_bytes
+
+    def copy_then_swap(source_dir: Path, destination: Path) -> None:
+        original_copy(source_dir, destination)
+        target.rename(displaced)
+        target.symlink_to(outside, target_is_directory=True)
+
+    monkeypatch.setattr(state_module, "_copy_snapshot_bytes", copy_then_swap)
+
+    with pytest.raises(ValueError, match="symlink"):
+        restore_snapshot(snapshot, target, allowed_root=allowed_root)
+
+    assert marker.read_bytes() == b"outside remains unchanged"
+    assert target.is_symlink()
 
 
 @pytest.mark.parametrize(
