@@ -1,0 +1,12 @@
+{
+  "snake_case": {
+    "redirect_url": "https://fixture.invalid/connect/snake",
+    "connection_request_id": "request_snake",
+    "user_id": "opaque-snake-user"
+  },
+  "camel_case": {
+    "redirectUrl": "https://fixture.invalid/connect/camel",
+    "connectionRequestId": "request_camel",
+    "userId": "opaque-camel-user"
+  }
+}

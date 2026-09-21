@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def _load_env_file() -> None:
@@ -47,6 +47,21 @@ def _env_float(name: str, fallback: float) -> float:
         return fallback
 
 
+def _env_bool(name: str, fallback: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return fallback
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_optional(name: str) -> Optional[str]:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
 class Settings(BaseModel):
     """Application settings with lightweight env fallbacks."""
 
@@ -69,6 +84,14 @@ class Settings(BaseModel):
     openrouter_api_key: Optional[str] = Field(default=os.getenv("OPENROUTER_API_KEY"))
     composio_gmail_auth_config_id: Optional[str] = Field(default=os.getenv("COMPOSIO_GMAIL_AUTH_CONFIG_ID"))
     composio_api_key: Optional[str] = Field(default=os.getenv("COMPOSIO_API_KEY"))
+
+    # Evaluation Lab safety boundary
+    lab_enabled: bool = Field(
+        default_factory=lambda: _env_bool("OPENPOKE_LAB_ENABLED")
+    )
+    lab_composio_user_id: Optional[str] = Field(
+        default_factory=lambda: _env_optional("OPENPOKE_LAB_COMPOSIO_USER_ID")
+    )
 
     # HTTP behaviour
     cors_allow_origins_raw: str = Field(default=os.getenv("OPENPOKE_CORS_ALLOW_ORIGINS", "*"))
@@ -114,6 +137,18 @@ class Settings(BaseModel):
         default=_env_int("OPENPOKE_EXECUTION_CONTEXT_MAX_CHARACTERS", 12_000),
         ge=200,
     )
+
+    @model_validator(mode="after")
+    def validate_lab_identity(self) -> "Settings":
+        """Require one stable opaque Composio identity whenever lab mode is active."""
+
+        normalized = (self.lab_composio_user_id or "").strip()
+        self.lab_composio_user_id = normalized or None
+        if self.lab_enabled and not normalized:
+            raise ValueError(
+                "OPENPOKE_LAB_COMPOSIO_USER_ID is required when Evaluation Lab mode is enabled"
+            )
+        return self
 
     @property
     def cors_allow_origins(self) -> List[str]:
