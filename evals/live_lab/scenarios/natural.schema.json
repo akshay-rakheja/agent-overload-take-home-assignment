@@ -4,10 +4,42 @@
   "title": "Sanitized exploratory natural-inbox inventory",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "track", "items"],
+  "required": [
+    "schema_version",
+    "track",
+    "exploratory",
+    "include_in_controlled_aggregates",
+    "snapshot_at",
+    "window",
+    "drift",
+    "items"
+  ],
   "properties": {
     "schema_version": {"const": 1},
     "track": {"const": "natural"},
+    "exploratory": {"const": true},
+    "include_in_controlled_aggregates": {"const": false},
+    "snapshot_at": {"type": "string", "format": "date-time"},
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": {"type": "string", "format": "date-time"},
+        "end": {"type": "string", "format": "date-time"}
+      }
+    },
+    "drift": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseline_count", "enhanced_count", "added_subject_hashes", "removed_subject_hashes"],
+      "properties": {
+        "baseline_count": {"type": "integer", "minimum": 0},
+        "enhanced_count": {"type": "integer", "minimum": 0},
+        "added_subject_hashes": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+        "removed_subject_hashes": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+      }
+    },
     "items": {
       "type": "array",
       "items": {
