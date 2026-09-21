@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import errno
 import fcntl
 import hashlib
 import json
@@ -525,29 +526,98 @@ def _atomic_install_at(parent_fd: int, source_name: str, target_name: str) -> No
         raise OSError(error_number, os.strerror(error_number), target_name)
 
 
-def _discard_tree_at(parent_fd: int, name: str) -> None:
-    try:
-        mode = os.stat(name, dir_fd=parent_fd, follow_symlinks=False).st_mode
-    except FileNotFoundError:
-        return
-    if stat.S_ISLNK(mode) or stat.S_ISREG(mode):
-        os.unlink(name, dir_fd=parent_fd)
-    elif stat.S_ISDIR(mode):
-        shutil.rmtree(name, dir_fd=parent_fd)
-    else:
-        raise ValueError(f"refusing to remove unsupported temporary entry: {name}")
+def _write_cleanup_pending_metadata_at(
+    parent_fd: int,
+    pending_name: str,
+    *,
+    role: str,
+    target_name: str,
+    expected: os.stat_result,
+) -> None:
+    metadata = json.dumps(
+        {
+            "device": expected.st_dev,
+            "inode": expected.st_ino,
+            "role": role,
+            "schema_version": 1,
+            "state": "cleanup_pending",
+            "target_name": target_name,
+            "tree_name": pending_name,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8") + b"\n"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(f"{pending_name}.json", flags, 0o600, dir_fd=parent_fd)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(metadata)
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
-def _discard_tree_if_same_at(
+def _quarantine_cleanup_if_same_at(
     parent_fd: int,
     name: str,
     expected: os.stat_result,
+    *,
+    role: str,
+    target_name: str,
 ) -> bool:
+    """Move proven cleanup state aside without ever recursively deleting by name."""
+
     current = _stat_at(parent_fd, name)
     if current is None or not os.path.samestat(current, expected):
         return False
-    _discard_tree_at(parent_fd, name)
-    return True
+    prefix = f".{target_name[:48]}.cleanup-pending-{role}-"
+    for _ in range(100):
+        pending_name = f"{prefix}{secrets.token_hex(8)}"
+        try:
+            _atomic_install_at(parent_fd, name, pending_name)
+        except OSError as error:
+            if error.errno == errno.EEXIST:
+                continue
+            return False
+        except RuntimeError:
+            return False
+
+        moved = _stat_at(parent_fd, pending_name)
+        original_name = _stat_at(parent_fd, name)
+        if (
+            moved is not None
+            and os.path.samestat(moved, expected)
+            and original_name is None
+        ):
+            try:
+                _write_cleanup_pending_metadata_at(
+                    parent_fd,
+                    pending_name,
+                    role=role,
+                    target_name=target_name,
+                    expected=expected,
+                )
+            except OSError:
+                return False
+            finally:
+                os.fsync(parent_fd)
+            return True
+
+        if moved is not None and original_name is None:
+            try:
+                _atomic_install_at(parent_fd, pending_name, name)
+            except (OSError, RuntimeError):
+                return False
+            rolled_back = _stat_at(parent_fd, name)
+            pending_after_rollback = _stat_at(parent_fd, pending_name)
+            if (
+                rolled_back is None
+                or not os.path.samestat(rolled_back, moved)
+                or pending_after_rollback is not None
+            ):
+                return False
+        return False
+    return False
 
 
 def restore_snapshot(
@@ -575,6 +645,7 @@ def restore_snapshot(
         target_fd: int | None = None
         temporary_name: str | None = None
         cleanup_identity: os.stat_result | None = None
+        cleanup_role = "staging"
         try:
             target_fd, pinned_target = _open_pinned_target_at(parent_fd, target.name)
             temporary_name, staged_identity = _create_temporary_directory_at(
@@ -630,6 +701,7 @@ def restore_snapshot(
                         cleanup_identity = None
                     raise RuntimeError("restore target changed during atomic exchange")
                 cleanup_identity = pinned_target
+                cleanup_role = "old-target"
             else:
                 if current_target is not None:
                     raise RuntimeError("restore target appeared before atomic install")
@@ -645,14 +717,25 @@ def restore_snapshot(
                 cleanup_identity = None
             os.fsync(parent_fd)
             if temporary_name is not None and cleanup_identity is not None:
-                if not _discard_tree_if_same_at(parent_fd, temporary_name, cleanup_identity):
-                    raise RuntimeError("restore cleanup object changed before deletion")
+                _quarantine_cleanup_if_same_at(
+                    parent_fd,
+                    temporary_name,
+                    cleanup_identity,
+                    role=cleanup_role,
+                    target_name=target.name,
+                )
                 temporary_name = None
                 cleanup_identity = None
             os.fsync(parent_fd)
         finally:
             if temporary_name is not None and cleanup_identity is not None:
-                _discard_tree_if_same_at(parent_fd, temporary_name, cleanup_identity)
+                _quarantine_cleanup_if_same_at(
+                    parent_fd,
+                    temporary_name,
+                    cleanup_identity,
+                    role=cleanup_role,
+                    target_name=target.name,
+                )
             if target_fd is not None:
                 os.close(target_fd)
             os.close(parent_fd)

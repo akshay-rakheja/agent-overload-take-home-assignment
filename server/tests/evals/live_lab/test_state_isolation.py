@@ -265,6 +265,17 @@ def test_pristine_and_repeated_reset_are_idempotent(tmp_path) -> None:
 
     assert first == pristine
     assert second == pristine
+    pending_trees = sorted(data_dir.parent.glob(".data.cleanup-pending-old-target-*"))
+    pending_metadata = sorted(data_dir.parent.glob(".data.cleanup-pending-old-target-*.json"))
+    assert len([path for path in pending_trees if path.is_dir()]) == 2
+    assert len(pending_metadata) == 2
+    for metadata_path in pending_metadata:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        assert metadata["schema_version"] == 1
+        assert metadata["state"] == "cleanup_pending"
+        assert metadata["role"] == "old-target"
+        assert metadata["target_name"] == "data"
+        assert (data_dir.parent / metadata["tree_name"]).is_dir()
 
 
 def test_simultaneous_roots_reset_independently(tmp_path) -> None:
@@ -429,6 +440,82 @@ def test_restore_rolls_back_exchange_when_ordinary_target_replaces_pinned_target
 
     assert (target / unrelated_marker).read_bytes() == unrelated_bytes
     assert fingerprint_state(displaced) == pinned_fingerprint
+
+
+@pytest.mark.parametrize("replacement_kind", ["file", "symlink", "directory"])
+@pytest.mark.parametrize("cleanup_phase", ["success", "copy-error"])
+def test_cleanup_identity_race_preserves_every_unrelated_replacement(
+    tmp_path,
+    monkeypatch,
+    replacement_kind: str,
+    cleanup_phase: str,
+) -> None:
+    manifest = build_fixture_manifest(seed=1313, roster_size=10)
+    source = tmp_path / "source" / "server" / "data"
+    baseline = materialize_baseline(manifest, source)
+    snapshot = create_snapshot(source, tmp_path / "snapshots" / "baseline")
+    allowed_root = tmp_path / "runtime"
+    target = allowed_root / "slot" / "server" / "data"
+    enhanced = materialize_enhanced(manifest, target)
+    parent = target.parent
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside_marker = outside / "outside.bin"
+    outside_marker.write_bytes(b"symlink referent remains unchanged")
+    original_stat_at = state_module._stat_at
+    cleanup_stat_call = 3 if cleanup_phase == "success" else 1
+    restore_name_calls = 0
+    replacement_path: Path | None = None
+    preserved_candidate: Path | None = None
+
+    def stat_then_replace(parent_fd: int, name: str):
+        nonlocal restore_name_calls, replacement_path, preserved_candidate
+        result = original_stat_at(parent_fd, name)
+        if name.startswith(".data.restore-"):
+            restore_name_calls += 1
+            if restore_name_calls == cleanup_stat_call:
+                replacement_path = parent / name
+                preserved_candidate = parent / f"{name}.pinned-by-test"
+                replacement_path.rename(preserved_candidate)
+                if replacement_kind == "file":
+                    replacement_path.write_bytes(b"unrelated file survives")
+                elif replacement_kind == "symlink":
+                    replacement_path.symlink_to(outside, target_is_directory=True)
+                else:
+                    replacement_path.mkdir()
+                    (replacement_path / "unrelated.bin").write_bytes(
+                        b"unrelated directory survives"
+                    )
+        return result
+
+    monkeypatch.setattr(state_module, "_stat_at", stat_then_replace)
+    if cleanup_phase == "copy-error":
+        original_copy = state_module._copy_snapshot_bytes
+
+        def copy_then_fail(*args, **kwargs) -> None:
+            original_copy(*args, **kwargs)
+            raise RuntimeError("injected copy interruption")
+
+        monkeypatch.setattr(state_module, "_copy_snapshot_bytes", copy_then_fail)
+        with pytest.raises(RuntimeError, match="injected copy interruption"):
+            restore_snapshot(snapshot, target, allowed_root=allowed_root)
+        assert fingerprint_state(target) == enhanced
+    else:
+        assert restore_snapshot(snapshot, target, allowed_root=allowed_root) == baseline
+
+    assert replacement_path is not None
+    assert preserved_candidate is not None
+    assert preserved_candidate.is_dir()
+    if replacement_kind == "file":
+        assert replacement_path.read_bytes() == b"unrelated file survives"
+    elif replacement_kind == "symlink":
+        assert replacement_path.is_symlink()
+        assert replacement_path.resolve() == outside
+        assert outside_marker.read_bytes() == b"symlink referent remains unchanged"
+    else:
+        assert (replacement_path / "unrelated.bin").read_bytes() == (
+            b"unrelated directory survives"
+        )
 
 
 @pytest.mark.parametrize(
