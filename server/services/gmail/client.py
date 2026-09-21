@@ -62,8 +62,15 @@ def _active_account_for(client: Any, user_id: str, auth_config_id: str) -> Any:
         auth_config_ids=[auth_config_id],
         statuses=["ACTIVE"],
     )
+    normalized_user_id = _normalized(user_id)
     return next(
-        (account for account in _listed_accounts(result) if _is_active_account(account)),
+        (
+            account
+            for account in _listed_accounts(result)
+            if _is_active_account(account)
+            and _normalized(_value(account, "user_id", "userId"))
+            == normalized_user_id
+        ),
         None,
     )
 

@@ -164,6 +164,34 @@ def test_connect_reuses_active_account_for_stable_user_without_new_link(monkeypa
     assert accounts.link_calls == []
 
 
+def test_connect_ignores_foreign_active_account_before_matching_camel_user(monkeypatch):
+    foreign = SimpleNamespace(
+        id="account_foreign",
+        user_id="different-user",
+        status="ACTIVE",
+    )
+    matching = SimpleNamespace(
+        id="account_matching",
+        userId="opaque-user",
+        status="ACTIVE",
+    )
+    accounts = FakeConnectedAccounts(accounts=[foreign, matching])
+    monkeypatch.setattr(gmail_client, "_CLIENT", FakeComposio(accounts))
+
+    response = gmail_client.initiate_connect(
+        GmailConnectPayload(user_id="opaque-user"),
+        Settings(composio_gmail_auth_config_id="fixture-auth-config"),
+    )
+
+    assert _body(response) == {
+        "ok": True,
+        "redirect_url": None,
+        "connection_request_id": "account_matching",
+        "user_id": "opaque-user",
+    }
+    assert accounts.link_calls == []
+
+
 def test_connect_relinks_when_no_active_account_exists(monkeypatch):
     accounts = FakeConnectedAccounts(
         link_response=SimpleNamespace(
