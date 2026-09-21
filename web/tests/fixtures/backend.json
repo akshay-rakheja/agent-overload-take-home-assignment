@@ -1,4 +1,831 @@
 {
+  "evidence_run": {
+    "blocked_reason": null,
+    "created_at": "2026-09-21T12:00:00Z",
+    "execution_mode": "measured",
+    "generation": 4,
+    "pairs": [
+      {
+        "outcomes": [
+          {
+            "attempt_count": 1,
+            "late_completion": null,
+            "model_id": "fixture-model-v1",
+            "reason": null,
+            "results": [
+              {
+                "accepted_dispatch": {
+                  "availability": "unavailable",
+                  "reason": "Baseline dispatch acceptance was not emitted.",
+                  "value": null
+                },
+                "attempted_dispatch": {
+                  "availability": "unavailable",
+                  "reason": "Baseline dispatch attempt was not emitted.",
+                  "value": null
+                },
+                "authorized_ids": {
+                  "availability": "not_applicable",
+                  "reason": "Baseline has no dispatch authorization boundary.",
+                  "value": null
+                },
+                "availability_metadata": {
+                  "decision": "inferred"
+                },
+                "candidates": {
+                  "availability": "not_applicable",
+                  "reason": "Baseline exposes the full roster without a ranked candidate list.",
+                  "value": null
+                },
+                "context_metrics": {
+                  "availability": "unavailable",
+                  "reason": "Historical baseline has no bounded enhanced context metrics.",
+                  "value": null
+                },
+                "cost": {
+                  "amount": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 0.0142
+                  },
+                  "currency": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": "USD"
+                  },
+                  "known_amount_subtotal": {
+                    "availability": "not_applicable",
+                    "reason": "Complete subtotal not available.",
+                    "value": null
+                  }
+                },
+                "created_identity": {
+                  "availability": "not_applicable",
+                  "reason": "No identity was created.",
+                  "value": null
+                },
+                "decision": {
+                  "availability": "inferred",
+                  "reason": "Baseline decision inferred from state.",
+                  "value": {
+                    "action": "reuse",
+                    "reason": "Selected name observed after the turn."
+                  }
+                },
+                "duplicates": {
+                  "availability": "not_applicable",
+                  "reason": "Baseline has no stable-identity duplicate detector.",
+                  "value": null
+                },
+                "errors": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": []
+                },
+                "final_response": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": "Atlas found the controlled fixture and summarized the security alert."
+                },
+                "gmail_evidence": {
+                  "availability": "unavailable",
+                  "reason": "Raw baseline observation has no normalized Gmail evidence.",
+                  "value": null
+                },
+                "identity_delta": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": {
+                    "added_names": [],
+                    "removed_names": [],
+                    "roster_after_count": 6,
+                    "roster_before_count": 6
+                  }
+                },
+                "mode": {
+                  "availability": "inferred",
+                  "reason": "Historical path observed from the baseline prompt.",
+                  "value": "full_roster"
+                },
+                "prompt_exposure": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": {
+                    "exposed_name_count": 6,
+                    "exposed_names": [
+                      "Atlas",
+                      "Beacon",
+                      "Cedar",
+                      "Delta",
+                      "Ember",
+                      "Flint"
+                    ],
+                    "full_roster": true,
+                    "identities": [
+                      {
+                        "agent_id": "00000000-0000-4000-8000-000000000001",
+                        "name": "Atlas",
+                        "purpose": "Account security",
+                        "status": "hot",
+                        "use_count": 1
+                      },
+                      {
+                        "agent_id": "00000000-0000-4000-8000-000000000002",
+                        "name": "Beacon",
+                        "purpose": "Calendar planning",
+                        "status": "warm",
+                        "use_count": 2
+                      },
+                      {
+                        "agent_id": "00000000-0000-4000-8000-000000000003",
+                        "name": "Cedar",
+                        "purpose": "Research synthesis",
+                        "status": "cold",
+                        "use_count": 3
+                      },
+                      {
+                        "agent_id": "00000000-0000-4000-8000-000000000004",
+                        "name": "Delta",
+                        "purpose": "Draft review",
+                        "status": "cold",
+                        "use_count": 4
+                      },
+                      {
+                        "agent_id": "00000000-0000-4000-8000-000000000005",
+                        "name": "Ember",
+                        "purpose": "Expense lookup",
+                        "status": "warm",
+                        "use_count": 5
+                      },
+                      {
+                        "agent_id": "00000000-0000-4000-8000-000000000006",
+                        "name": "Flint",
+                        "purpose": "File organization",
+                        "status": "cold",
+                        "use_count": 6
+                      }
+                    ],
+                    "prompt_characters": 18420,
+                    "prompt_xml_sha256": "baseline-fixture-sha256"
+                  }
+                },
+                "recommendation": {
+                  "availability": "not_applicable",
+                  "reason": "Baseline has no deterministic recommendation record.",
+                  "value": null
+                },
+                "revision": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": "baseline@abc1234"
+                },
+                "roster_count": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": 6
+                },
+                "run_id": "11111111-1111-4111-8111-111111111111",
+                "schema_version": 1,
+                "selected_identity": {
+                  "availability": "inferred",
+                  "reason": "Observed from state delta.",
+                  "value": {
+                    "agent_id": "00000000-0000-4000-8000-000000000001",
+                    "name": "Atlas"
+                  }
+                },
+                "system": "baseline",
+                "timings": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": [
+                    {
+                      "latency_ms": 812.4,
+                      "phase": "total",
+                      "provider": "fixture-provider"
+                    }
+                  ]
+                },
+                "turn_id": "44444444-4444-4444-8444-444444444444",
+                "usage": {
+                  "cached_tokens": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 0
+                  },
+                  "input_tokens": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 4210
+                  },
+                  "known_cached_tokens_subtotal": {
+                    "availability": "not_applicable",
+                    "reason": "Complete subtotal not available.",
+                    "value": null
+                  },
+                  "known_input_tokens_subtotal": {
+                    "availability": "not_applicable",
+                    "reason": "Complete subtotal not available.",
+                    "value": null
+                  },
+                  "known_output_tokens_subtotal": {
+                    "availability": "not_applicable",
+                    "reason": "Complete subtotal not available.",
+                    "value": null
+                  },
+                  "known_total_tokens_subtotal": {
+                    "availability": "not_applicable",
+                    "reason": "Complete subtotal not available.",
+                    "value": null
+                  },
+                  "output_tokens": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 148
+                  },
+                  "total_tokens": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 4358
+                  }
+                }
+              }
+            ],
+            "status": "success",
+            "system": "baseline"
+          },
+          {
+            "attempt_count": 1,
+            "late_completion": null,
+            "model_id": "fixture-model-v1",
+            "reason": null,
+            "results": [
+              {
+                "accepted_dispatch": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": {
+                    "selected_agent_id": "00000000-0000-4000-8000-000000000001",
+                    "status": "accepted",
+                    "success": true
+                  }
+                },
+                "attempted_dispatch": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": {
+                    "reference_type": "reuse",
+                    "requested_agent_id": "00000000-0000-4000-8000-000000000001",
+                    "routing_action": "reuse"
+                  }
+                },
+                "authorized_ids": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": [
+                    "00000000-0000-4000-8000-000000000001"
+                  ]
+                },
+                "availability_metadata": {},
+                "candidates": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": [
+                    {
+                      "agent_id": "00000000-0000-4000-8000-000000000001",
+                      "components": {
+                        "recency": 0.12,
+                        "semantic": 0.72,
+                        "use_count": 0.1
+                      },
+                      "name": "Atlas",
+                      "rank": 1,
+                      "reasons": [
+                        "security intent match",
+                        "recent successful use"
+                      ],
+                      "score": 0.94,
+                      "status": "hot"
+                    },
+                    {
+                      "agent_id": "00000000-0000-4000-8000-000000000003",
+                      "components": {
+                        "recency": 0.02,
+                        "semantic": 0.55,
+                        "use_count": 0.04
+                      },
+                      "name": "Cedar",
+                      "rank": 2,
+                      "reasons": [
+                        "research capability overlap"
+                      ],
+                      "score": 0.61,
+                      "status": "cold"
+                    },
+                    {
+                      "agent_id": "00000000-0000-4000-8000-000000000004",
+                      "components": {
+                        "recency": 0.01,
+                        "semantic": 0.33,
+                        "use_count": 0.03
+                      },
+                      "name": "Delta",
+                      "rank": 3,
+                      "reasons": [
+                        "weak review overlap"
+                      ],
+                      "score": 0.37,
+                      "status": "cold"
+                    }
+                  ]
+                },
+                "context_metrics": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": {
+                    "contamination_detected": false,
+                    "included_episode_count": 8,
+                    "omitted_entry_count": 9968,
+                    "preserved_raw_history": true,
+                    "raw_bytes": 984220,
+                    "raw_entry_count": 10000,
+                    "rendered_characters": 4000,
+                    "summary_used": true,
+                    "truncated_entry_count": 24
+                  }
+                },
+                "cost": {
+                  "amount": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 0.0048
+                  },
+                  "currency": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": "USD"
+                  },
+                  "known_amount_subtotal": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 0.0048
+                  }
+                },
+                "created_identity": {
+                  "availability": "not_applicable",
+                  "reason": "The selected identity was reused.",
+                  "value": null
+                },
+                "decision": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": {
+                    "action": "reuse",
+                    "agent_id": "00000000-0000-4000-8000-000000000001",
+                    "expectation": "reuse Atlas",
+                    "reason": "Highest deterministic score."
+                  }
+                },
+                "duplicates": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": []
+                },
+                "errors": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": []
+                },
+                "final_response": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": "Atlas found the controlled fixture and summarized the security alert."
+                },
+                "gmail_evidence": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": [
+                    {
+                      "allowed": true,
+                      "content_excerpt": "Security alert for the controlled fixture.",
+                      "fabricated": true,
+                      "fact_ids": [
+                        "fixture-security-001"
+                      ],
+                      "full_fabricated_content": "A controlled fixture reports a new sign-in and recommends reviewing account activity.",
+                      "operation_name": "GMAIL_FETCH_EMAILS",
+                      "policy_code": "allowed_read_only",
+                      "query_sha256": "controlled-query-sha256",
+                      "result_count": 1,
+                      "sdk_executed": true,
+                      "stage": "completed",
+                      "track": "controlled"
+                    }
+                  ]
+                },
+                "identity_delta": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": {
+                    "created_agent_ids": [],
+                    "directory_count_after": 6,
+                    "directory_count_before": 6,
+                    "selected_agent_ids": [
+                      "00000000-0000-4000-8000-000000000001"
+                    ]
+                  }
+                },
+                "mode": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": "bounded_directory"
+                },
+                "prompt_exposure": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": {
+                    "exposed_agent_ids": [
+                      "00000000-0000-4000-8000-000000000001",
+                      "00000000-0000-4000-8000-000000000002",
+                      "00000000-0000-4000-8000-000000000003"
+                    ],
+                    "exposed_identity_count": 3,
+                    "full_roster": false,
+                    "identities": [
+                      {
+                        "agent_id": "00000000-0000-4000-8000-000000000001",
+                        "name": "Atlas",
+                        "purpose": "Account security",
+                        "status": "hot",
+                        "use_count": 1
+                      },
+                      {
+                        "agent_id": "00000000-0000-4000-8000-000000000002",
+                        "name": "Beacon",
+                        "purpose": "Calendar planning",
+                        "status": "warm",
+                        "use_count": 2
+                      },
+                      {
+                        "agent_id": "00000000-0000-4000-8000-000000000003",
+                        "name": "Cedar",
+                        "purpose": "Research synthesis",
+                        "status": "cold",
+                        "use_count": 3
+                      },
+                      {
+                        "agent_id": "00000000-0000-4000-8000-000000000004",
+                        "name": "Delta",
+                        "purpose": "Draft review",
+                        "status": "cold",
+                        "use_count": 4
+                      },
+                      {
+                        "agent_id": "00000000-0000-4000-8000-000000000005",
+                        "name": "Ember",
+                        "purpose": "Expense lookup",
+                        "status": "warm",
+                        "use_count": 5
+                      },
+                      {
+                        "agent_id": "00000000-0000-4000-8000-000000000006",
+                        "name": "Flint",
+                        "purpose": "File organization",
+                        "status": "cold",
+                        "use_count": 6
+                      }
+                    ],
+                    "prompt_characters": 3920,
+                    "prompt_xml_sha256": "enhanced-fixture-sha256"
+                  }
+                },
+                "recommendation": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": {
+                    "action": "reuse",
+                    "agent_id": "00000000-0000-4000-8000-000000000001",
+                    "name": "Atlas"
+                  }
+                },
+                "revision": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": "enhanced@def5678"
+                },
+                "roster_count": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": 6
+                },
+                "run_id": "11111111-1111-4111-8111-111111111111",
+                "schema_version": 1,
+                "selected_identity": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": {
+                    "agent_id": "00000000-0000-4000-8000-000000000001",
+                    "name": "Atlas",
+                    "reused": true
+                  }
+                },
+                "system": "enhanced",
+                "timings": {
+                  "availability": "available",
+                  "reason": null,
+                  "value": [
+                    {
+                      "latency_ms": 19.3,
+                      "phase": "retrieval",
+                      "provider": "fixture-provider"
+                    },
+                    {
+                      "latency_ms": 436.8,
+                      "phase": "total",
+                      "provider": "fixture-provider"
+                    }
+                  ]
+                },
+                "turn_id": "55555555-5555-4555-8555-555555555555",
+                "usage": {
+                  "cached_tokens": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 0
+                  },
+                  "input_tokens": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 968
+                  },
+                  "known_cached_tokens_subtotal": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 0
+                  },
+                  "known_input_tokens_subtotal": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 968
+                  },
+                  "known_output_tokens_subtotal": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 126
+                  },
+                  "known_total_tokens_subtotal": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 1094
+                  },
+                  "output_tokens": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 126
+                  },
+                  "total_tokens": {
+                    "availability": "available",
+                    "reason": null,
+                    "value": 1094
+                  }
+                }
+              }
+            ],
+            "status": "success",
+            "system": "enhanced"
+          }
+        ],
+        "scheduled": {
+          "order": "baseline_then_enhanced",
+          "pair_id": "37eec440-c41e-5043-bce0-f4e87289b9fd",
+          "repetition": 1,
+          "scenario_id": "exact-instagram-security"
+        },
+        "verifications": []
+      }
+    ],
+    "request": {
+      "request_id": "22222222-2222-4222-8222-222222222222",
+      "scenario_ids": [
+        "exact-instagram-security"
+      ]
+    },
+    "run_id": "11111111-1111-4111-8111-111111111111",
+    "schedule": [
+      {
+        "order": "baseline_then_enhanced",
+        "pair_id": "37eec440-c41e-5043-bce0-f4e87289b9fd",
+        "repetition": 1,
+        "scenario_id": "exact-instagram-security"
+      }
+    ],
+    "schema_version": 1,
+    "scorecards": [
+      {
+        "identity_continuity": {
+          "contradictory_evidence": [],
+          "layer": "identity",
+          "missing_evidence": [],
+          "negative_evidence": [],
+          "positive_evidence": [
+            "separate turns preserved final directory growth and stable identity continuity"
+          ],
+          "status": "pass"
+        },
+        "passed": false,
+        "scenario_id": "exact-instagram-security",
+        "schema_version": 1,
+        "system": "baseline",
+        "turns": [
+          {
+            "candidate_rank": {
+              "availability": "not_applicable",
+              "reason": "baseline exposes no ranked enhanced candidate list",
+              "value": null
+            },
+            "context": {
+              "contradictory_evidence": [],
+              "layer": "context",
+              "missing_evidence": [],
+              "negative_evidence": [],
+              "positive_evidence": [
+                "baseline producer exposes no enhanced bounded-context metrics"
+              ],
+              "status": "not_applicable"
+            },
+            "duplicate": {
+              "contradictory_evidence": [],
+              "layer": "duplicate",
+              "missing_evidence": [],
+              "negative_evidence": [],
+              "positive_evidence": [
+                "baseline name/count delta shows no duplicate"
+              ],
+              "status": "pass"
+            },
+            "gmail_safety": {
+              "contradictory_evidence": [],
+              "layer": "gmail_safety",
+              "missing_evidence": [],
+              "negative_evidence": [],
+              "positive_evidence": [
+                "baseline producer exposes no normalized Gmail evidence"
+              ],
+              "status": "not_applicable"
+            },
+            "identity": {
+              "contradictory_evidence": [],
+              "layer": "identity",
+              "missing_evidence": [],
+              "negative_evidence": [
+                "selected identity did not match expected reuse contract"
+              ],
+              "positive_evidence": [],
+              "status": "fail"
+            },
+            "passed": false,
+            "response": {
+              "contradictory_evidence": [],
+              "layer": "response",
+              "missing_evidence": [
+                "captured read-only Gmail evidence"
+              ],
+              "negative_evidence": [],
+              "positive_evidence": [],
+              "status": "missing"
+            },
+            "routing": {
+              "contradictory_evidence": [],
+              "layer": "routing",
+              "missing_evidence": [],
+              "negative_evidence": [],
+              "positive_evidence": [
+                "action=reuse"
+              ],
+              "status": "pass"
+            },
+            "scenario_id": "exact-instagram-security",
+            "schema_version": 1,
+            "system": "baseline"
+          }
+        ]
+      },
+      {
+        "identity_continuity": {
+          "contradictory_evidence": [],
+          "layer": "identity",
+          "missing_evidence": [],
+          "negative_evidence": [],
+          "positive_evidence": [
+            "separate turns preserved final directory growth and stable identity continuity"
+          ],
+          "status": "pass"
+        },
+        "passed": false,
+        "scenario_id": "exact-instagram-security",
+        "schema_version": 1,
+        "system": "enhanced",
+        "turns": [
+          {
+            "candidate_rank": {
+              "availability": "unavailable",
+              "reason": "expected reuse identity was absent from enhanced candidates",
+              "value": null
+            },
+            "context": {
+              "contradictory_evidence": [],
+              "layer": "context",
+              "missing_evidence": [],
+              "negative_evidence": [],
+              "positive_evidence": [
+                "context evidence satisfied bounded-history rules"
+              ],
+              "status": "pass"
+            },
+            "duplicate": {
+              "contradictory_evidence": [],
+              "layer": "duplicate",
+              "missing_evidence": [],
+              "negative_evidence": [],
+              "positive_evidence": [
+                "directory delta and stable identity show no duplicate"
+              ],
+              "status": "pass"
+            },
+            "gmail_safety": {
+              "contradictory_evidence": [],
+              "layer": "gmail_safety",
+              "missing_evidence": [
+                "exact predeclared Gmail query"
+              ],
+              "negative_evidence": [],
+              "positive_evidence": [],
+              "status": "missing"
+            },
+            "identity": {
+              "contradictory_evidence": [],
+              "layer": "identity",
+              "missing_evidence": [],
+              "negative_evidence": [
+                "selected identity did not match expected reuse contract"
+              ],
+              "positive_evidence": [],
+              "status": "fail"
+            },
+            "passed": false,
+            "response": {
+              "contradictory_evidence": [],
+              "layer": "response",
+              "missing_evidence": [],
+              "negative_evidence": [
+                "facts were not captured by read-only evidence: ['SEC-7419']",
+                "response contains an unsupported or misbound factual assertion"
+              ],
+              "positive_evidence": [],
+              "status": "fail"
+            },
+            "routing": {
+              "contradictory_evidence": [
+                "authorized IDs did not exactly match recommended reuse identity",
+                "dispatch requested the wrong stable identity",
+                "accepted dispatch selected the wrong stable identity"
+              ],
+              "layer": "routing",
+              "missing_evidence": [],
+              "negative_evidence": [
+                "reuse recommendation did not match expected stable identity"
+              ],
+              "positive_evidence": [
+                "action=reuse"
+              ],
+              "status": "contradictory"
+            },
+            "scenario_id": "exact-instagram-security",
+            "schema_version": 1,
+            "system": "enhanced"
+          }
+        ]
+      }
+    ],
+    "snapshot_contracts": [],
+    "status": "complete",
+    "trace": [],
+    "transitions": [
+      {
+        "detail": null,
+        "occurred_at": "2026-09-21T12:00:00Z",
+        "sequence": 1,
+        "status": "queued"
+      },
+      {
+        "detail": null,
+        "occurred_at": "2026-09-21T12:00:00Z",
+        "sequence": 2,
+        "status": "complete"
+      }
+    ],
+    "updated_at": "2026-09-21T12:00:00Z"
+  },
   "handle": {
     "request_id": "22222222-2222-4222-8222-222222222222",
     "run_id": "11111111-1111-4111-8111-111111111111",
@@ -340,6 +1167,7 @@
         },
         "scenario_id": "exact-instagram-security",
         "title": "Exact named Instagram security reuse",
+        "track": "controlled",
         "turn_count": 1
       },
       {
@@ -355,6 +1183,7 @@
         },
         "scenario_id": "paraphrase-video-news",
         "title": "Paraphrased AI video newsletter reuse",
+        "track": "controlled",
         "turn_count": 1
       },
       {
@@ -370,6 +1199,7 @@
         },
         "scenario_id": "pronoun-receipt-follow-up",
         "title": "Pronoun follow-up reuses receipt agent",
+        "track": "controlled",
         "turn_count": 2
       },
       {
@@ -385,6 +1215,7 @@
         },
         "scenario_id": "ambiguous-creator-clarification",
         "title": "Ambiguous creator notice requires clarification",
+        "track": "controlled",
         "turn_count": 1
       },
       {
@@ -400,6 +1231,7 @@
         },
         "scenario_id": "novel-calendar-creation",
         "title": "Novel calendar workflow creates one identity",
+        "track": "controlled",
         "turn_count": 1
       },
       {
@@ -415,6 +1247,7 @@
         },
         "scenario_id": "duplicate-clipweaver-prevention",
         "title": "Repeated creation intent preserves one stable identity",
+        "track": "controlled",
         "turn_count": 2
       },
       {
@@ -430,6 +1263,7 @@
         },
         "scenario_id": "old-security-relevant",
         "title": "Old relevant security history beats recent engagement distractor",
+        "track": "controlled",
         "turn_count": 1
       },
       {
@@ -445,6 +1279,7 @@
         },
         "scenario_id": "honest-no-result",
         "title": "Read-only search honestly reports no result",
+        "track": "controlled",
         "turn_count": 1
       },
       {
@@ -460,6 +1295,7 @@
         },
         "scenario_id": "hundred-agent-engagement",
         "title": "Engagement routing under one hundred agents",
+        "track": "controlled",
         "turn_count": 1
       },
       {
@@ -475,6 +1311,7 @@
         },
         "scenario_id": "ten-thousand-history-anchor",
         "title": "Long-history follow-up finds archive anchor",
+        "track": "controlled",
         "turn_count": 1
       },
       {
@@ -490,6 +1327,7 @@
         },
         "scenario_id": "instagram-security-not-engagement",
         "title": "Instagram security and engagement identities stay separate",
+        "track": "controlled",
         "turn_count": 1
       },
       {
@@ -505,6 +1343,7 @@
         },
         "scenario_id": "similar-video-clarification",
         "title": "Two similar video newsletters require clarification",
+        "track": "controlled",
         "turn_count": 1
       },
       {
@@ -520,6 +1359,7 @@
         },
         "scenario_id": "dormant-receipt-recovery",
         "title": "Dormant receipt identity is recovered without duplication",
+        "track": "controlled",
         "turn_count": 1
       },
       {
@@ -535,6 +1375,7 @@
         },
         "scenario_id": "optional-thousand-agent-news",
         "title": "Optional budget-guarded one thousand agent overload",
+        "track": "controlled",
         "turn_count": 1
       }
     ],

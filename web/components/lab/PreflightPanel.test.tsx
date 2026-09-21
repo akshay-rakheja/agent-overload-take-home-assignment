@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { PreflightPanel } from './PreflightPanel';
 import { LabPreflightSchema } from '../../lib/lab/schema';
 import { preflight } from '../../tests/fixtures/preflight';
@@ -18,4 +18,12 @@ it.each(['Backend down', 'Revision mismatch', 'Fixture mismatch', 'Gmail unsafe'
   expect(screen.getByText('Run blocked')).toBeVisible();
   expect(screen.getByText(blocker)).toBeVisible();
   expect(screen.getByText('Second blocker')).toBeVisible();
+});
+
+it('offers a keyboard-operable Gmail Connect handoff when the server reports disconnected', () => {
+  let connected = 0;
+  render(<PreflightPanel preflight={LabPreflightSchema.parse({ ...preflight, runnable: false, gmail_safety: { connected: false, read_only: false, reason: 'Connect the fixture mailbox.' } })} onConnect={() => { connected += 1; }} />);
+  const button = screen.getByRole('button', { name: 'Connect Gmail' });
+  fireEvent.click(button);
+  expect(connected).toBe(1);
 });

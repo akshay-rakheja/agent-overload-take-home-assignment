@@ -4,8 +4,10 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { PreflightPanel } from '@/components/lab/PreflightPanel';
 import { ScenarioRunner } from '@/components/lab/ScenarioRunner';
+import { ComparisonGrid } from '@/components/lab/ComparisonGrid';
 import { errorMessage, getPreflight, listScenarios, pollRun, startRun } from '@/lib/lab/client';
 import type { LabPreflight, PairedRunResult, RunHandle, Scenario } from '@/lib/lab/schema';
+import { GmailLinkSchema } from '@/lib/lab/schema';
 import './lab.css';
 
 const statusLabels = {
@@ -23,6 +25,8 @@ export default function LabPage() {
   const [handle, setHandle] = useState<RunHandle | null>(null);
   const [run, setRun] = useState<PairedRunResult | null>(null);
   const [readStopped, setReadStopped] = useState(false);
+  const [pairIndex, setPairIndex] = useState(0);
+  const [connectMessage, setConnectMessage] = useState<string | null>(null);
   const lifecycle = useRef<AbortController | null>(null);
   const inFlight = useRef(false);
 
@@ -61,6 +65,7 @@ export default function LabPage() {
     setError(null);
     setRun(null);
     setHandle(null);
+    setPairIndex(0);
     let submitted = false;
     try {
       const fresh = await getPreflight(signal);
@@ -82,12 +87,24 @@ export default function LabPage() {
   }
 
   const status = run?.status ?? handle?.status;
+  const currentScenario = scenarios.find((scenario) => scenario.scenario_id === run?.pairs[pairIndex]?.scheduled.scenario_id)
+    ?? scenarios.find((scenario) => scenario.scenario_id === run?.request.scenario_ids[0]);
+  const outcomeStatuses = run?.pairs.flatMap((pair) => pair.outcomes.map((outcome) => outcome.status)) ?? [];
+  const failedSides = outcomeStatuses.filter((outcome) => outcome !== 'success').length;
   return <main className="lab-shell">
     <header className="lab-header">
       <div><h1>Evaluation Lab</h1><p>Follow the evidence through a paired agent run.</p></div>
       <Link href="/">Open chat</Link>
     </header>
-    <PreflightPanel preflight={preflight} />
+    <PreflightPanel preflight={preflight} onConnect={() => {
+      const signal = lifecycle.current?.signal;
+      void fetch('/api/lab/gmail/link', { method: 'POST', cache: 'no-store', signal, headers: { Accept: 'application/json' } })
+        .then(async (response) => {
+          const parsed = GmailLinkSchema.safeParse(await response.json());
+          setConnectMessage(response.ok && parsed.success ? parsed.data.message : 'Gmail handoff could not be verified');
+        }).catch(() => { if (!signal?.aborted) setConnectMessage('Gmail handoff is unavailable'); });
+    }} />
+    {connectMessage && <p className="gmail-handoff" role="status" aria-live="polite">{connectMessage}</p>}
     {error && <div className="lab-error" role="alert"><p>{error}</p>
       {uncertainStart && <p>The start could not be confirmed. Submission is locked to avoid running the scenario again. Check the local run records before starting another run.</p>}
       {!busy && !uncertainStart && <button onClick={async () => {
@@ -101,44 +118,18 @@ export default function LabPage() {
       }}>Resume status checks</button>}
     </div>}
     <ScenarioRunner scenarios={scenarios} runnable={preflight?.runnable ?? false} busy={busy || uncertainStart} onStart={(id) => void begin(id)} />
-    <div className="lab-comparison">
-      <section className="lab-side" aria-labelledby="baseline-title">
-        <h2 id="baseline-title">Baseline evidence</h2>
-        <p className="lab-side-caption">Historical system</p>
-        <SideEvidence run={run} side="baseline" />
+    <div className="lab-live-status" role="status" aria-live="polite"><span>{status ? statusLabels[status] : busy ? 'Checking readiness' : 'Awaiting a run'}</span>{run?.execution_mode === 'offline_fake' && <span>Offline fixture run</span>}{run?.blocked_reason && <span>{run.blocked_reason}</span>}</div>
+    {run && currentScenario ? <>
+      <section className="run-summary" aria-labelledby="run-summary-title">
+        <div><p className="eyebrow">Paired evidence</p><h2 id="run-summary-title">Run summary</h2></div>
+        <dl><div><dt>Repetitions</dt><dd>{run.pairs.length} {run.pairs.length === 1 ? 'repetition' : 'repetitions'}</dd></div><div><dt>Side outcomes</dt><dd>{outcomeStatuses.filter((outcome) => outcome === 'success').length} successful</dd></div><div><dt>Failures</dt><dd>{failedSides} {failedSides === 1 ? 'failed side' : 'failed sides'}</dd></div><div><dt>Sequence scorecards</dt><dd>{run.scorecards.filter((scorecard) => scorecard.passed).length} pass / {run.scorecards.filter((scorecard) => !scorecard.passed).length} fail</dd></div></dl>
       </section>
-      <section className="lab-protocol" aria-labelledby="protocol-title">
-        <h2 id="protocol-title">Protocol</h2>
-        <p role="status" aria-live="polite">{status ? statusLabels[status] : busy ? 'Checking readiness' : 'Awaiting a run'}</p>
-        {run?.execution_mode === 'offline_fake' && <p>Offline fixture run</p>}
-        {run?.transitions.length ? <ol>{run.transitions.map((transition) => <li key={transition.sequence}>{transition.status.replaceAll('_', ' ')}{transition.detail && <p>{transition.detail}</p>}</li>)}</ol> : <p className="lab-subtle">Reset, compare, then grade.</p>}
-        {run?.blocked_reason && <p>{run.blocked_reason}</p>}
-      </section>
-      <section className="lab-side" aria-labelledby="enhanced-title">
-        <h2 id="enhanced-title">Enhanced evidence</h2>
-        <p className="lab-side-caption">Directory and bounded context</p>
-        <SideEvidence run={run} side="enhanced" />
-      </section>
-    </div>
+      <nav className="repetition-nav" aria-label="Repetition results"><span>Inspect repetition</span>{run.pairs.map((pair, index) => {
+        const failures = pair.outcomes.filter((outcome) => outcome.status !== 'success').length;
+        return <button key={pair.scheduled.pair_id} aria-label={`Repetition ${pair.scheduled.repetition}, ${failures} ${failures === 1 ? 'failure' : 'failures'}`} aria-current={index === pairIndex ? 'true' : undefined} onClick={() => setPairIndex(index)}>Repetition {pair.scheduled.repetition}<span>{failures} {failures === 1 ? 'failure' : 'failures'}</span></button>;
+      })}</nav>
+      <ComparisonGrid run={run} scenario={currentScenario} pairIndex={pairIndex} />
+    </> : <section className="lab-awaiting" aria-labelledby="awaiting-title"><p className="eyebrow">Evidence browser</p><h2 id="awaiting-title">One protocol, two visible paths</h2><p>Run a server-approved scenario to inspect aligned baseline and enhanced evidence by layer.</p></section>}
     {handle && <footer className="lab-footer">Run ID: <span>{handle.run_id}</span></footer>}
   </main>;
-}
-
-function SideEvidence({ run, side }: { run: PairedRunResult | null; side: 'baseline' | 'enhanced' }) {
-  if (!run) return <p className="lab-empty">Evidence will appear here when the server reports a result.</p>;
-  return <>{run.pairs.map((pair) => {
-    const outcome = pair.outcomes.find((item) => item.system === side);
-    return <article className="lab-outcome" key={pair.scheduled.pair_id}>
-      <h3>{pair.scheduled.scenario_id} / repetition {pair.scheduled.repetition}</h3>
-      {outcome ? <>
-        <p className="lab-outcome-status">{outcome.status.replaceAll('_', ' ')}</p>
-        {outcome.model_id && <p className="lab-subtle">Model: {outcome.model_id}</p>}
-        {outcome.reason && <p className="lab-outcome-reason">{outcome.reason}</p>}
-        {outcome.results.map((result) => <div key={result.turn_id} className="lab-response">
-          <h4>Final response <span>({result.final_response.availability.replaceAll('_', ' ')})</span></h4>
-          <p>{result.final_response.value ?? result.final_response.reason ?? 'No response available'}</p>
-        </div>)}
-      </> : <p>No outcome reported yet.</p>}
-    </article>;
-  })}{run.pairs.length === 0 && <p className="lab-empty">No outcome reported yet.</p>}</>;
 }

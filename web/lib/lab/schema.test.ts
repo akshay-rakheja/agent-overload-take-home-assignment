@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import backend from '../../tests/fixtures/backend.json';
 import { preflight } from '../../tests/fixtures/preflight';
-import { AvailabilitySchema, observedValue, LabPreflightSchema, ScenarioListSchema, RunHandleSchema, PairedRunResultSchema, SystemRunResultSchema, StartRunRequestSchema } from './schema';
+import { AvailabilitySchema, observedValue, LabPreflightSchema, ScenarioListSchema, ScenarioSchema, RunHandleSchema, PairedRunResultSchema, SystemRunResultSchema, StartRunRequestSchema } from './schema';
 
 describe('Python serialization boundary', () => {
   it('accepts complete actual Python scenario, run, handle and result serialization', () => {
@@ -10,6 +10,14 @@ describe('Python serialization boundary', () => {
     expect(RunHandleSchema.parse(backend.handle).status).toBe('queued');
     expect(PairedRunResultSchema.parse(backend.run).scorecards[0].passed).toBe(false);
     expect(SystemRunResultSchema.parse(backend.system_result).selected_identity.availability).toBe('inferred');
+  });
+  it('requires the backend-authored scenario track enum', () => {
+    const scenario = backend.scenarios.scenarios[0];
+    const { track: _track, ...withoutTrack } = scenario;
+    expect(ScenarioSchema.safeParse({ ...scenario, track: 'controlled' }).success).toBe(true);
+    expect(ScenarioSchema.safeParse({ ...scenario, track: 'natural' }).success).toBe(true);
+    expect(ScenarioSchema.safeParse(withoutTrack).success).toBe(false);
+    expect(ScenarioSchema.safeParse({ ...scenario, track: 'exploratory' }).success).toBe(false);
   });
   it('preserves null, zero, inferred and unavailable without coercion', () => {
     const schema = observedValue(z.number());

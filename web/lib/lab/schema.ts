@@ -10,7 +10,7 @@ const system = z.enum(['baseline', 'enhanced']);
 const nullableText = text.nullable();
 const secretKey = /(?:authorizationcode|authcode|apikey|authconfigid|oauthcode|accesstoken|refreshtoken|idtoken|clientsecret|password|secret|token)$/i;
 const mailKeys = new Set(['email', 'emailaddress', 'address', 'from', 'to', 'cc', 'bcc', 'sender', 'recipient', 'messageid', 'threadid', 'gmailmessageid', 'gmailthreadid', 'snippet', 'body', 'rawbody', 'htmlbody']);
-type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 const normalizedKey = (key: string) => key.replace(/[^a-z0-9]/gi, '').toLowerCase();
 const isRedacted = (value: JsonValue) => value === '[REDACTED]' || value === '[REDACTED_EMAIL]';
 const hasRedactedHeaders = (value: JsonValue) => {
@@ -84,7 +84,7 @@ export const SystemRunResultSchema = z.object({
 }).strict();
 
 export const ScenarioSchema = z.object({
-  scenario_id: text, family: text, title: text, repetitions: integer.min(1), optional: z.boolean(), budget_guarded: z.boolean(),
+  scenario_id: text, track: z.enum(['controlled', 'natural']), family: text, title: text, repetitions: integer.min(1), optional: z.boolean(), budget_guarded: z.boolean(),
   reset_profile: z.object({ profile_id: text, fixture_seed: integer, roster_size: z.union([z.literal(10), z.literal(100), z.literal(500), z.literal(1000)]), history_entries: integer.min(0) }).strict(),
   turn_count: integer.min(1),
 }).strict();

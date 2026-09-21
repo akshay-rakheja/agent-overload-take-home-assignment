@@ -23,6 +23,11 @@ it.each([false, true])('uses server runnable=%s, and shows the selected server s
   expect(screen.getByText('3 repetitions')).toBeVisible();
   expect(screen.getByText('Controlled fixture')).toBeVisible();
 });
+it('labels a backend-authored natural scenario as exploratory', () => {
+  render(<ScenarioRunner scenarios={[{ ...scenarios[0], track: 'natural' }]} runnable busy={false} onStart={() => {}} />);
+  expect(screen.getByText('Exploratory track')).toBeVisible();
+  expect(screen.queryByText('Controlled fixture')).not.toBeInTheDocument();
+});
 it('submits the selected ID and disables selection during an active run', () => {
   const selected: string[] = [];
   const { rerender } = render(<ScenarioRunner scenarios={scenarios} runnable busy={false} onStart={(id) => selected.push(id)} />);

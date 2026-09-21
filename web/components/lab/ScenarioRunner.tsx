@@ -20,7 +20,7 @@ export function ScenarioRunner({ scenarios, runnable, busy, onStart }: {
         <button type="submit" disabled={!runnable || busy || !selected}>Run scenario</button>
       </div>
       {selected && <div className="lab-scenario-details">
-        <span>Controlled fixture</span><span>{selected.repetitions} repetitions</span><span>{selected.turn_count} {selected.turn_count === 1 ? 'turn' : 'turns'}</span>
+        <span>{selected.track === 'controlled' ? 'Controlled fixture' : 'Exploratory track'}</span><span>{selected.repetitions} repetitions</span><span>{selected.turn_count} {selected.turn_count === 1 ? 'turn' : 'turns'}</span>
         <span>{selected.reset_profile.roster_size} agents</span><span>{selected.reset_profile.history_entries} history entries</span>
         {selected.optional && <span>Optional</span>}{selected.budget_guarded && <span>Budget guarded</span>}
       </div>}

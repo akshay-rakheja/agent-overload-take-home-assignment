@@ -119,6 +119,7 @@ def scenarios(settings: Settings = Depends(_require_lab)) -> Response:
         "scenarios": [
             {
                 "scenario_id": item.scenario_id,
+                "track": item.track.value,
                 "family": item.family,
                 "title": item.title,
                 "repetitions": item.repetitions,

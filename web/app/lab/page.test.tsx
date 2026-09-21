@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import backend from '../../tests/fixtures/backend.json';
 import { preflight } from '../../tests/fixtures/preflight';
 import Page from './page';
+import type { PairedRunResult } from '../../lib/lab/schema';
 
 afterEach(() => vi.unstubAllGlobals());
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
@@ -84,4 +85,35 @@ it('can resume a failed status read without submitting another scenario', async 
   fireEvent.click(resume);
   expect(await screen.findByText('Partial failure')).toBeVisible();
   expect(methods).toEqual(['POST', 'GET', 'GET']);
+});
+
+it('composes complete evidence, aggregate outcomes, and repetition navigation without hiding failures', async () => {
+  const repeated = structuredClone(backend.evidence_run) as PairedRunResult;
+  repeated.pairs.push({
+    ...structuredClone(repeated.pairs[0]),
+    scheduled: { ...repeated.pairs[0].scheduled, pair_id: '77777777-7777-4777-8777-777777777777', repetition: 2 },
+    outcomes: [
+      { ...structuredClone(repeated.pairs[0].outcomes[0]), status: 'failure', reason: 'Baseline fixture failed safely.', results: [] },
+      structuredClone(repeated.pairs[0].outcomes[1]),
+    ],
+  });
+  repeated.status = 'partial_failure';
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    if (url.endsWith('preflight')) return json(preflight);
+    if (url.endsWith('scenarios')) return json(backend.scenarios);
+    if (init.method === 'POST') return json(backend.handle, 202);
+    return json(repeated);
+  });
+  render(<Page />);
+  const button = screen.getByRole('button', { name: 'Run scenario' });
+  await waitFor(() => expect(button).toBeEnabled());
+  fireEvent.click(button);
+  expect(await screen.findByRole('heading', { name: 'Run summary' })).toBeVisible();
+  expect(screen.getByText('2 repetitions')).toBeVisible();
+  expect(screen.getByText('1 failed side')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Repetition 1, 0 failures' })).toHaveAttribute('aria-current', 'true');
+  fireEvent.click(screen.getByRole('button', { name: 'Repetition 2, 1 failure' }));
+  expect(screen.getByRole('button', { name: 'Repetition 2, 1 failure' })).toHaveAttribute('aria-current', 'true');
+  expect(screen.getByText('Baseline fixture failed safely.')).toBeVisible();
+  expect(screen.getAllByTestId('evidence-layer')).toHaveLength(20);
 });

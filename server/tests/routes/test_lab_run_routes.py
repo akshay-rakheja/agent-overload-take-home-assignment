@@ -44,6 +44,7 @@ def test_scenario_list_and_run_round_trip_are_stable_and_idempotent(tmp_path) ->
     assert listed["schema_version"] == 1
     assert listed["scenario_count"] == 14
     assert all(item["repetitions"] == 3 for item in listed["scenarios"])
+    assert {item["track"] for item in listed["scenarios"]} == {"controlled"}
     scenario_id = listed["scenarios"][0]["scenario_id"]
     body = {"request_id": REQUEST_A, "scenario_ids": [scenario_id]}
 
