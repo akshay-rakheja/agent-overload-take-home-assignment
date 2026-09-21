@@ -908,6 +908,21 @@ def _transport(fake_base_url: str, component: str):
                     raise client_module.OpenRouterError(
                         f"OpenRouter request failed: {exc}"
                     ) from exc
+                except BaseException as exc:
+                    attempt_timing.finish()
+                    _record_transport_attempt(
+                        {
+                            "application_retry_count": attempt,
+                            "attempt": attempt,
+                            "error_type": type(exc).__name__,
+                            "elapsed_ms": attempt_timing.elapsed_ns / 1_000_000,
+                            "timeout": False,
+                            "rate_limit": {},
+                            "response_payload": None,
+                            "status_code": None,
+                        }
+                    )
+                    raise
                 try:
                     response.raise_for_status()
                 except httpx.HTTPStatusError as exc:
@@ -915,6 +930,21 @@ def _transport(fake_base_url: str, component: str):
                         response_payload = response.json()
                     except Exception:
                         response_payload = None
+                    except BaseException as parsing_error:
+                        attempt_timing.finish()
+                        _record_transport_attempt(
+                            {
+                                "application_retry_count": attempt,
+                                "attempt": attempt,
+                                "error_type": type(parsing_error).__name__,
+                                "elapsed_ms": attempt_timing.elapsed_ns / 1_000_000,
+                                "timeout": False,
+                                "rate_limit": _rate_limit_evidence(response.headers),
+                                "response_payload": None,
+                                "status_code": response.status_code,
+                            }
+                        )
+                        raise
                     attempt_timing.finish()
                     _record_transport_attempt(
                         {
@@ -941,7 +971,7 @@ def _transport(fake_base_url: str, component: str):
                     client_module._handle_response_error(exc)
                 try:
                     result = response.json()
-                except Exception as exc:
+                except BaseException as exc:
                     attempt_timing.finish()
                     _record_transport_attempt(
                         {

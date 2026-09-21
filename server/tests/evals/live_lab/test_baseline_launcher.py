@@ -23,7 +23,13 @@ from evals.live_lab import baseline_launcher
 from evals.live_lab.baseline_observer import run_baseline_turn
 from evals.live_lab.fixtures import build_fixture_manifest, materialize_baseline
 from evals.live_lab.processes import ManagedProcess
-from evals.live_lab.raw_observation import BaselineTurnRequest
+from evals.live_lab.raw_observation import (
+    BaselineObservation,
+    BaselineTurnRequest,
+    RawModelCall,
+)
+from server.services.evaluation_lab.baseline_adapter import adapt_baseline
+from server.services.evaluation_lab.models import Availability
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -371,7 +377,10 @@ def test_baseline_transport_reports_application_retries_separately(
     assert evidence["provider_failover"] is None
 
 
-@pytest.mark.parametrize("terminal", ["success", "charged_error", "timeout"])
+@pytest.mark.parametrize(
+    "terminal",
+    ["success", "charged_error", "timeout", "cancellation", "keyboard_interrupt"],
+)
 def test_baseline_transport_preserves_every_retry_attempt_without_double_counting(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, terminal: str
 ) -> None:
@@ -394,13 +403,20 @@ def test_baseline_transport_preserves_every_retry_attempt_without_double_countin
             },
         )
 
-    outcomes = [charged_response(429, 0.01)]
+    terminal_error: BaseException | None = None
+    outcomes: list[httpx.Response | BaseException] = [charged_response(429, 0.01)]
     if terminal == "success":
         outcomes.append(charged_response(200, 0.02))
     elif terminal == "charged_error":
         outcomes.append(charged_response(400, 0.02))
-    else:
+    elif terminal == "timeout":
         outcomes.append(httpx.ReadTimeout("fixture"))
+    elif terminal == "cancellation":
+        terminal_error = asyncio.CancelledError("fixture")
+        outcomes.append(terminal_error)
+    else:
+        terminal_error = KeyboardInterrupt("fixture")
+        outcomes.append(terminal_error)
 
     clock = {"now": 100, "steps": [7, 11]}
 
@@ -440,8 +456,10 @@ def test_baseline_transport_preserves_every_retry_attempt_without_double_countin
     if terminal == "success":
         asyncio.run(wrapped(messages=[], api_key="fixture"))
     else:
-        with pytest.raises(Exception):
+        with pytest.raises(BaseException) as caught:
             asyncio.run(wrapped(messages=[], api_key="fixture"))
+        if terminal_error is not None:
+            assert caught.value is terminal_error
 
     events = [event for event in sink.read_events() if event["kind"] == "model_call"]
     calls = [event["model_call"] for event in events]
@@ -449,11 +467,15 @@ def test_baseline_transport_preserves_every_retry_attempt_without_double_countin
         "success": [429, 200],
         "charged_error": [429, 400],
         "timeout": [429, None],
+        "cancellation": [429, None],
+        "keyboard_interrupt": [429, None],
     }
     expected_costs = {
         "success": [0.01, 0.02],
         "charged_error": [0.01, 0.02],
         "timeout": [0.01, None],
+        "cancellation": [0.01, None],
+        "keyboard_interrupt": [0.01, None],
     }
     assert len(calls) == 2
     assert [call["attempt"] for call in calls] == [0, 1]
@@ -466,12 +488,103 @@ def test_baseline_transport_preserves_every_retry_attempt_without_double_countin
     assert calls[0]["rate_limit"] == {"retry_after_seconds": "2"}
     assert calls[0]["error_type"] == "HTTPStatusError"
     assert calls[1]["timeout"] is (terminal == "timeout")
+    if terminal_error is not None:
+        assert calls[1]["error_type"] == type(terminal_error).__name__
     first_private = json.loads(
         (tmp_path / "private" / f"{calls[0]['response_sha256']}.json").read_text(
             encoding="utf-8"
         )
     )
     assert first_private["usage"]["cost"] == 0.01
+
+    if terminal in {"timeout", "cancellation", "keyboard_interrupt"}:
+        raw_calls = tuple(RawModelCall.model_validate(call) for call in calls)
+        result = adapt_baseline(
+            BaselineObservation(
+                run_id="fixture",
+                prompt_xml_sha256="fixture",
+                prompt_characters=0,
+                exposed_names=(),
+                roster_before=(),
+                roster_after=(),
+                journal_hashes_before={},
+                journal_hashes_after={},
+                inferred_action="unobservable",
+                inferred_name=None,
+                inference_reason="terminal transport failure",
+                final_response=None,
+                raw_model_calls=raw_calls,
+                errors=(),
+            )
+        )
+        assert result.usage.input_tokens.availability is Availability.UNAVAILABLE
+        assert result.usage.known_input_tokens_subtotal.value == 2
+        assert result.usage.known_output_tokens_subtotal.value == 3
+        assert result.usage.known_total_tokens_subtotal.value == 5
+        assert result.cost.amount.availability is Availability.UNAVAILABLE
+        assert result.cost.known_amount_subtotal.value == 0.01
+
+
+@pytest.mark.parametrize(
+    ("status_code", "terminal_error"),
+    [
+        (200, asyncio.CancelledError("fixture")),
+        (429, KeyboardInterrupt("fixture")),
+    ],
+)
+def test_baseline_response_parsing_base_exception_records_exact_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    status_code: int,
+    terminal_error: BaseException,
+) -> None:
+    clock = {"now": 100}
+
+    class InterruptedJsonResponse(httpx.Response):
+        def json(self, **_kwargs):
+            clock["now"] += 13
+            raise terminal_error
+
+    response = InterruptedJsonResponse(
+        status_code,
+        request=httpx.Request("POST", "https://fixture.invalid/chat/completions"),
+        content=b"fixture",
+    )
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return response
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(baseline_launcher.time, "perf_counter_ns", lambda: clock["now"])
+    configs = _build_model_configs("openai/gpt-4.1-mini")
+    monkeypatch.setattr(baseline_launcher, "_BASELINE_MODEL_CONFIGS", configs)
+    sink = ObservationSink(tmp_path / "events.jsonl", tmp_path / "private")
+    wrapped = wrap_async_call(
+        "interaction_model",
+        baseline_launcher._transport("https://fixture.invalid", "interaction_model"),
+        sink,
+        model_config=configs["interaction"],
+    )
+
+    with pytest.raises(BaseException) as caught:
+        asyncio.run(wrapped(messages=[], api_key="fixture"))
+
+    assert caught.value is terminal_error
+    calls = [event["model_call"] for event in sink.read_events()]
+    assert len(calls) == 1
+    assert calls[0]["attempt"] == 0
+    assert calls[0]["status_code"] == status_code
+    assert calls[0]["error_type"] == type(terminal_error).__name__
+    assert calls[0]["transport_error_type"] == type(terminal_error).__name__
+    assert calls[0]["elapsed_ms"] == 0.000013
+    assert calls[0]["usage"]["provider_cost_usd"]["value"] is None
 
 
 def test_baseline_error_response_retains_reported_usage_for_reconciliation(
