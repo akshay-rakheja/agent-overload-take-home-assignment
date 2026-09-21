@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -398,7 +399,7 @@ def test_email_search_traces_sanitized_facts_from_exact_processed_result(
         id=private_markers[0],
         thread_id=private_markers[1],
         query="from:private@example.invalid",
-        subject="Private subject",
+        subject="[OpenPoke Interview Fixture] run_A7k29mQ4 security SEC-7419",
         sender=private_markers[2],
         recipient="recipient@example.invalid",
         timestamp=datetime(2026, 9, 21, tzinfo=timezone.utc),
@@ -446,6 +447,10 @@ def test_email_search_traces_sanitized_facts_from_exact_processed_result(
         "result_count": 1,
         "has_more": True,
         "attachment_count": 2,
+        "query_sha256": hashlib.sha256(
+            b"from:private@example.invalid"
+        ).hexdigest(),
+        "fact_ids": ("SEC-7419",),
     }
     for marker in private_markers:
         assert marker not in serialized_event

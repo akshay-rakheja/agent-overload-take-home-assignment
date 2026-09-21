@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from server.config import ModelCallConfig, ModelRole, get_settings
@@ -47,6 +49,21 @@ ERROR_ITERATION_LIMIT = "Email search orchestrator exceeded iteration limit"
 _COMPLETION_TOOL_SCHEMA = get_completion_schema()
 _LOG_STORE = get_execution_agent_logs()
 _EMAIL_CLEANER = EmailTextCleaner(max_url_length=40)
+_FIXTURE_SUBJECT_PREFIX = "[OpenPoke Interview Fixture]"
+_FIXTURE_FACT_ID = re.compile(r"\b(?:SEC|ENG|NF|VF|MS|CW|ARC|AMB)-\d{4,5}\b")
+
+
+def _query_sha256(query: str) -> str:
+    return hashlib.sha256(query.encode("utf-8")).hexdigest()
+
+
+def _captured_fixture_fact_ids(emails: Sequence[GmailSearchEmail]) -> list[str]:
+    captured: set[str] = set()
+    for email in emails:
+        if not email.subject.startswith(_FIXTURE_SUBJECT_PREFIX):
+            continue
+        captured.update(_FIXTURE_FACT_ID.findall(f"{email.subject}\n{email.clean_text}"))
+    return sorted(captured)
 
 
 # Create standardized error response for tool calls
@@ -366,6 +383,8 @@ async def _perform_search(
                 "has_more": False,
                 "attachment_count": 0,
                 "error_type": type(exc).__name__,
+                "query_sha256": _query_sha256(query),
+                "fact_ids": [],
             },
         )
         return result_model
@@ -400,6 +419,8 @@ async def _perform_search(
             "attachment_count": sum(
                 email.attachment_count for email in result_model.messages
             ),
+            "query_sha256": _query_sha256(query),
+            "fact_ids": _captured_fixture_fact_ids(result_model.messages),
         },
     )
     return result_model
