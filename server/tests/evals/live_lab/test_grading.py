@@ -7,9 +7,9 @@ from uuid import uuid4
 
 import pytest
 
-from evals.live_lab.fixture_email import fixture_response_facts
+from evals.live_lab.fixture_email import fixture_response_facts, fixture_response_fields
 from evals.live_lab.grading import GradeStatus, grade_scenario
-from evals.live_lab.scenarios import load_controlled_scenarios
+from evals.live_lab.scenarios import GmailExpectation, load_controlled_scenarios
 from server.services.evaluation_lab.models import Availability, ObservedValue, SystemRunResult
 
 
@@ -19,6 +19,14 @@ def _available(value):
 
 def _query_sha256(query: str) -> str:
     return hashlib.sha256(query.encode("utf-8")).hexdigest()
+
+
+def _field_response(*fact_ids: str) -> str:
+    return "; ".join(
+        f"{field.key.replace('_', ' ')}: {field.value}"
+        for fact_id in fact_ids
+        for field in fixture_response_fields(fact_id)
+    )
 
 
 def _replace(result: SystemRunResult, **updates) -> SystemRunResult:
@@ -32,11 +40,7 @@ def _result(scenario_id: str, *, system: str = "enhanced"):
     expected_id = scenario.expected_agent_id
     action = scenario.expected.action.value
     selected_id = expected_id or "00000000-0000-4000-8000-000000000123"
-    response = " ".join(
-        fact
-        for fact_id in scenario.gmail.fact_ids
-        for fact in fixture_response_facts(fact_id)
-    )
+    response = _field_response(*scenario.gmail.fact_ids)
     result = SystemRunResult(
         run_id=uuid4(),
         turn_id=uuid4(),
@@ -101,6 +105,40 @@ def _result(scenario_id: str, *, system: str = "enhanced"):
     return scenario, result
 
 
+def _result_for_fixture_response(fact_id: str, response: str):
+    scenario, result = _result("exact-instagram-security")
+    gmail = GmailExpectation(
+        operation="GMAIL_FETCH_EMAILS",
+        query=f'subject:"[OpenPoke Interview Fixture]" "{fact_id}"',
+        fact_ids=(fact_id,),
+    )
+    scenario = scenario.model_copy(
+        update={
+            "gmail": gmail,
+            "response_assertions": fixture_response_facts(fact_id),
+        }
+    )
+    result = _replace(
+        result,
+        gmail_evidence=_available(
+            [
+                {
+                    "operation_name": gmail.operation,
+                    "stage": "completed",
+                    "allowed": True,
+                    "policy_code": "allowed_read_only",
+                    "query_sha256": _query_sha256(gmail.query),
+                    "result_count": 1,
+                    "fact_ids": [fact_id],
+                    "sdk_executed": True,
+                }
+            ]
+        ),
+        final_response=_available(response),
+    )
+    return scenario, result
+
+
 def test_all_six_layers_pass_with_positive_captured_evidence() -> None:
     scenario, result = _result("exact-instagram-security")
 
@@ -130,7 +168,7 @@ def test_routing_and_response_are_independent_and_invented_fact_fails_response()
     wrong_route = _replace(
         result,
         decision=_available({"action": "create_new", "agent_id": None}),
-        final_response=_available(" ".join(fixture_response_facts("SEC-7419"))),
+        final_response=_available(_field_response("SEC-7419")),
     )
     inverse = grade_scenario(scenario, wrong_route)
     assert inverse.routing.status is GradeStatus.FAIL
@@ -160,6 +198,16 @@ def test_contradictory_gmail_evidence_fails_even_with_a_matching_event() -> None
     assert scorecard.gmail_safety.status is GradeStatus.CONTRADICTORY
     assert scorecard.gmail_safety.contradictory_evidence
     assert scorecard.response.status is GradeStatus.PASS
+
+
+def test_no_gmail_turn_fails_when_unexpected_read_only_work_is_observed() -> None:
+    scenario, result = _result("novel-calendar-creation")
+    scenario = scenario.model_copy(update={"gmail_required": False})
+
+    card = grade_scenario(scenario, result)
+
+    assert card.gmail_safety.status is GradeStatus.FAIL
+    assert card.gmail_safety.status is not GradeStatus.NOT_APPLICABLE
 
 
 def test_missing_evidence_is_not_treated_as_failure_or_success() -> None:
@@ -280,7 +328,7 @@ def test_no_result_rejects_any_nonempty_failed_or_paginated_matching_event() -> 
 
 def test_response_rejects_contradictory_expected_fields_and_unknown_facts() -> None:
     scenario, result = _result("exact-instagram-security")
-    canonical = " ".join(fixture_response_facts("SEC-7419"))
+    canonical = _field_response("SEC-7419")
     contradictory = _replace(
         result,
         final_response=_available(
@@ -325,7 +373,7 @@ def test_response_contract_never_passes_unrecognized_factual_assertions(
     unsupported_assertion: str,
 ) -> None:
     scenario, result = _result("exact-instagram-security")
-    canonical = " ".join(fixture_response_facts("SEC-7419"))
+    canonical = _field_response("SEC-7419")
 
     card = grade_scenario(
         scenario,
@@ -333,6 +381,96 @@ def test_response_contract_never_passes_unrecognized_factual_assertions(
     )
 
     assert card.response.status is not GradeStatus.PASS
+
+
+@pytest.mark.parametrize(
+    "contradictory_assertion",
+    [
+        "The location was Pixel 10.",
+        "The device was Lisbon.",
+        "The verification phrase was Lisbon.",
+        "The location was indigo-orbit.",
+    ],
+)
+def test_response_contract_binds_each_value_to_its_declared_field(
+    contradictory_assertion: str,
+) -> None:
+    canonical = (
+        "Reference: SEC-7419; dated: 2026-09-18 04:12 UTC; location: Lisbon; "
+        "device: Pixel 10; verification phrase: indigo-orbit."
+    )
+    scenario, result = _result_for_fixture_response(
+        "SEC-7419", f"{canonical} {contradictory_assertion}"
+    )
+
+    assert grade_scenario(scenario, result).response.status is not GradeStatus.PASS
+
+
+def test_response_contract_rejects_repeated_field_with_a_conflicting_allowed_value() -> None:
+    scenario, result = _result_for_fixture_response(
+        "SEC-7419",
+        (
+            "Reference: SEC-7419; dated: 2026-09-18 04:12 UTC; location: Lisbon; "
+            "device: Pixel 10; verification phrase: indigo-orbit. "
+            "The location was Pixel 10."
+        ),
+    )
+
+    assert grade_scenario(scenario, result).response.status is not GradeStatus.PASS
+
+
+@pytest.mark.parametrize(
+    ("fact_id", "response"),
+    [
+        (
+            "SEC-7419",
+            "Reference: SEC-7419; sign-in time = 2026-09-18 04:12 UTC; "
+            "the location was Lisbon; device is Pixel 10; "
+            "verification phrase: indigo-orbit.",
+        ),
+        (
+            "ENG-2284",
+            "Reference is ENG-2284. Creator: Aurora Loop; likes = 183 likes; "
+            "comments were 27 comments.",
+        ),
+        (
+            "NF-3207",
+            "Reference: NF-3207; release was Prism Cut 2.4; "
+            "release date = 2026-10-07; feature is Storyboard Lock.",
+        ),
+        (
+            "VF-20481",
+            "Reference = VF-20481; product: Pro Render Monthly; "
+            "total was CAD 47.80; purchase date is 2026-09-19.",
+        ),
+        (
+            "MS-8820",
+            "Reference: MS-8820; session is Temporal Layers; "
+            "session time: 2026-10-11 17:30 UTC; reference code = GLASS-52.",
+        ),
+        (
+            "CW-8117",
+            "Reference was CW-8117; amount: CAD 312.40; "
+            "due date is 2026-10-15; purchase order = PO-4406.",
+        ),
+        (
+            "ARC-1042",
+            "Reference: ARC-1042; archive is Cedar Comet; date = 2026-08-29; "
+            "checksum prefix was 9f2c7a.",
+        ),
+        (
+            "AMB-6063",
+            "Reference: AMB-6063; security category = account-security; "
+            "engagement category was engagement-performance.",
+        ),
+    ],
+)
+def test_response_contract_accepts_finite_field_bound_forms_for_every_fixture(
+    fact_id: str, response: str
+) -> None:
+    scenario, result = _result_for_fixture_response(fact_id, response)
+
+    assert grade_scenario(scenario, result).response.status is GradeStatus.PASS
 
 
 @pytest.mark.parametrize(

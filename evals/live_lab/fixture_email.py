@@ -69,12 +69,32 @@ class FixtureFactManifest(_FrozenModel):
         return dict(value)
 
 
+class FixtureResponseField(_FrozenModel):
+    key: str
+    aliases: tuple[str, ...]
+    value: str
+
+
 class _Template(_FrozenModel):
     template_id: str
     fact_id: str
     subject_label: str
     body: str
-    response_facts: tuple[str, ...]
+    response_fields: tuple[FixtureResponseField, ...]
+
+    @property
+    def response_facts(self) -> tuple[str, ...]:
+        return tuple(field.value for field in self.response_fields)
+
+
+def _response_field(
+    key: str, value: str, *aliases: str
+) -> FixtureResponseField:
+    return FixtureResponseField(
+        key=key,
+        aliases=(key.replace("_", " "), *aliases),
+        value=value,
+    )
 
 
 _TEMPLATES = (
@@ -86,14 +106,25 @@ _TEMPLATES = (
             "Fabricated security notice SEC-7419. A sign-in was recorded at "
             "2026-09-18 04:12 UTC from Lisbon on Pixel 10. Verification phrase: indigo-orbit."
         ),
-        response_facts=("SEC-7419", "2026-09-18 04:12 UTC", "Lisbon", "Pixel 10", "indigo-orbit"),
+        response_fields=(
+            _response_field("reference", "SEC-7419"),
+            _response_field("timestamp", "2026-09-18 04:12 UTC", "sign-in time", "dated"),
+            _response_field("location", "Lisbon"),
+            _response_field("device", "Pixel 10"),
+            _response_field("verification_phrase", "indigo-orbit"),
+        ),
     ),
     _Template(
         template_id="instagram-engagement",
         fact_id="ENG-2284",
         subject_label="Instagram engagement digest ENG-2284",
         body="Fabricated engagement digest ENG-2284: Aurora Loop received 183 likes and 27 comments.",
-        response_facts=("ENG-2284", "Aurora Loop", "183 likes", "27 comments"),
+        response_fields=(
+            _response_field("reference", "ENG-2284"),
+            _response_field("creator", "Aurora Loop"),
+            _response_field("likes", "183 likes"),
+            _response_field("comments", "27 comments"),
+        ),
     ),
     _Template(
         template_id="nebulaframe-newsletter",
@@ -103,7 +134,12 @@ _TEMPLATES = (
             "Fabricated NebulaFrame bulletin NF-3207. Prism Cut 2.4 releases on "
             "2026-10-07 with the Storyboard Lock feature."
         ),
-        response_facts=("NF-3207", "Prism Cut 2.4", "2026-10-07", "Storyboard Lock"),
+        response_fields=(
+            _response_field("reference", "NF-3207"),
+            _response_field("release", "Prism Cut 2.4", "version"),
+            _response_field("release_date", "2026-10-07"),
+            _response_field("feature", "Storyboard Lock"),
+        ),
     ),
     _Template(
         template_id="vidforge-receipt",
@@ -113,7 +149,12 @@ _TEMPLATES = (
             "Fabricated receipt VF-20481 for Pro Render Monthly. Total CAD 47.80 "
             "on 2026-09-19."
         ),
-        response_facts=("VF-20481", "Pro Render Monthly", "CAD 47.80", "2026-09-19"),
+        response_fields=(
+            _response_field("reference", "VF-20481"),
+            _response_field("product", "Pro Render Monthly", "item"),
+            _response_field("total", "CAD 47.80", "amount"),
+            _response_field("purchase_date", "2026-09-19", "date"),
+        ),
     ),
     _Template(
         template_id="motionsynth-newsletter",
@@ -123,7 +164,12 @@ _TEMPLATES = (
             "Fabricated MotionSynth bulletin MS-8820. Temporal Layers session at "
             "2026-10-11 17:30 UTC. Reference code GLASS-52."
         ),
-        response_facts=("MS-8820", "Temporal Layers", "2026-10-11 17:30 UTC", "GLASS-52"),
+        response_fields=(
+            _response_field("reference", "MS-8820"),
+            _response_field("session", "Temporal Layers"),
+            _response_field("session_time", "2026-10-11 17:30 UTC", "scheduled time"),
+            _response_field("reference_code", "GLASS-52", "code"),
+        ),
     ),
     _Template(
         template_id="clipweaver-invoice",
@@ -133,7 +179,12 @@ _TEMPLATES = (
             "Fabricated ClipWeaver invoice CW-8117 for CAD 312.40, due 2026-10-15, "
             "purchase order PO-4406."
         ),
-        response_facts=("CW-8117", "CAD 312.40", "2026-10-15", "PO-4406"),
+        response_fields=(
+            _response_field("reference", "CW-8117"),
+            _response_field("total", "CAD 312.40", "amount"),
+            _response_field("due_date", "2026-10-15"),
+            _response_field("purchase_order", "PO-4406"),
+        ),
     ),
     _Template(
         template_id="long-history-anchor",
@@ -143,7 +194,12 @@ _TEMPLATES = (
             "Fabricated archive anchor ARC-1042 for Cedar Comet dated 2026-08-29. "
             "Checksum prefix 9f2c7a."
         ),
-        response_facts=("ARC-1042", "Cedar Comet", "2026-08-29", "9f2c7a"),
+        response_fields=(
+            _response_field("reference", "ARC-1042"),
+            _response_field("archive", "Cedar Comet", "project"),
+            _response_field("date", "2026-08-29"),
+            _response_field("checksum_prefix", "9f2c7a"),
+        ),
     ),
     _Template(
         template_id="ambiguous-creator-notice",
@@ -153,7 +209,11 @@ _TEMPLATES = (
             "Fabricated creator notice AMB-6063 combines account-security language "
             "with an engagement-performance update. Clarification is required before routing."
         ),
-        response_facts=("AMB-6063", "account-security", "engagement-performance"),
+        response_fields=(
+            _response_field("reference", "AMB-6063"),
+            _response_field("security_category", "account-security"),
+            _response_field("engagement_category", "engagement-performance"),
+        ),
     ),
 )
 
@@ -171,6 +231,13 @@ def fixture_response_facts(fact_id: str) -> tuple[str, ...]:
     for template in _TEMPLATES:
         if template.fact_id == fact_id:
             return template.response_facts
+    raise KeyError(fact_id)
+
+
+def fixture_response_fields(fact_id: str) -> tuple[FixtureResponseField, ...]:
+    for template in _TEMPLATES:
+        if template.fact_id == fact_id:
+            return template.response_fields
     raise KeyError(fact_id)
 
 

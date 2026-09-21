@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from evals.live_lab import grading as grading_module
-from evals.live_lab.fixture_email import fixture_response_facts
+from evals.live_lab.fixture_email import fixture_response_facts, fixture_response_fields
 from evals.live_lab.grading import GradeStatus, grade_scenario
 from evals.live_lab.raw_observation import BaselineObservation
 from evals.live_lab.scenarios import load_controlled_scenarios
@@ -65,6 +65,15 @@ def _dispatch_and_drain(**kwargs):
 def _scenario(scenario_id: str):
     return next(
         item for item in load_controlled_scenarios() if item.scenario_id == scenario_id
+    )
+
+
+def _field_response(fact_id: str, *values: str) -> str:
+    included = set(values) if values else None
+    return "; ".join(
+        f"{field.key.replace('_', ' ')}: {field.value}"
+        for field in fixture_response_fields(fact_id)
+        if included is None or field.value in included
     )
 
 
@@ -274,11 +283,7 @@ def _enhanced_result(scenario_id: str, *, rejected_first: bool = False):
     response = (
         "Which workflow should handle this?"
         if action == "abstain"
-        else " ".join(
-            value
-            for fact_id in scenario.gmail.fact_ids
-            for value in fixture_response_facts(fact_id)
-        )
+        else "; ".join(_field_response(fact_id) for fact_id in scenario.gmail.fact_ids)
     )
     events.append((TraceEventKind.FINAL_RESPONSE, {"response": response}))
     return scenario, consolidate_trace(
@@ -328,7 +333,21 @@ def test_earlier_rejected_dispatch_remains_a_routing_contradiction() -> None:
     assert card.routing.status is GradeStatus.CONTRADICTORY
 
 
-def _real_duplicate_sequence(tmp_path, *, second_mode: str):
+def _gmail_mutation_event(stage: str) -> dict[str, object]:
+    return {
+        "operation_name": "GMAIL_SEND_EMAIL",
+        "stage": stage,
+        "allowed": stage == "completed",
+        "policy_code": (
+            "mutating_tool_blocked" if stage == "rejected" else "unexpected_mutation"
+        ),
+        "sdk_executed": stage == "completed",
+    }
+
+
+def _real_duplicate_sequence(
+    tmp_path, *, second_mode: str, first_gmail_mutation_stage: str | None = None
+):
     scenario = _scenario("duplicate-clipweaver-prevention")
     run_id = uuid4()
     directory = AgentDirectory(tmp_path / "roster.json")
@@ -377,6 +396,11 @@ def _real_duplicate_sequence(tmp_path, *, second_mode: str):
             },
         )
         emit_trace(TraceEventKind.FINAL_RESPONSE, {"response": "Workflow created."})
+        if first_gmail_mutation_stage is not None:
+            emit_trace(
+                TraceEventKind.GMAIL_EVIDENCE,
+                _gmail_mutation_event(first_gmail_mutation_stage),
+            )
     created_id = created.payload["agent_id"]
 
     second_sink = _CollectingSink()
@@ -475,7 +499,7 @@ def _real_duplicate_sequence(tmp_path, *, second_mode: str):
         )
         emit_trace(
             TraceEventKind.FINAL_RESPONSE,
-            {"response": " ".join(fixture_response_facts("CW-8117"))},
+            {"response": _field_response("CW-8117")},
         )
     return scenario, (
         consolidate_trace(first_sink.events),
@@ -499,9 +523,9 @@ def test_real_create_then_separate_reuse_turn_passes_sequence_identity_continuit
     assert card.passed is True
 
 
-def test_real_pronoun_follow_up_reuses_prior_turn_evidence_without_merging_traces(
-    tmp_path,
-) -> None:
+def _real_pronoun_sequence(
+    tmp_path, *, second_gmail_mutation_stage: str | None = None
+):
     scenario = _scenario("pronoun-receipt-follow-up")
     assert scenario.expected_agent_id is not None
     stable_id = UUID(scenario.expected_agent_id)
@@ -517,7 +541,10 @@ def test_real_pronoun_follow_up_reuses_prior_turn_evidence_without_merging_trace
     results = []
 
     for index, final_response in enumerate(
-        (" ".join(fixture_response_facts("VF-20481")), "CAD 47.80")
+        (
+            _field_response("VF-20481"),
+            _field_response("VF-20481", "CAD 47.80"),
+        )
     ):
         sink = _CollectingSink()
         context = TraceContext(
@@ -578,6 +605,11 @@ def test_real_pronoun_follow_up_reuses_prior_turn_evidence_without_merging_trace
                         "fact_ids": list(gmail.fact_ids),
                     },
                 )
+            elif second_gmail_mutation_stage is not None:
+                emit_trace(
+                    TraceEventKind.GMAIL_EVIDENCE,
+                    _gmail_mutation_event(second_gmail_mutation_stage),
+                )
             emit_trace(
                 TraceEventKind.CONTEXT_METRICS,
                 {
@@ -590,7 +622,15 @@ def test_real_pronoun_follow_up_reuses_prior_turn_evidence_without_merging_trace
             emit_trace(TraceEventKind.FINAL_RESPONSE, {"response": final_response})
         results.append(consolidate_trace(sink.events))
 
-    card = grading_module.grade_scenario_sequence(scenario, tuple(results))
+    return scenario, tuple(results)
+
+
+def test_real_pronoun_follow_up_reuses_prior_turn_evidence_without_merging_traces(
+    tmp_path,
+) -> None:
+    scenario, results = _real_pronoun_sequence(tmp_path)
+
+    card = grading_module.grade_scenario_sequence(scenario, results)
 
     assert results[0].turn_id != results[1].turn_id
     assert card.identity_continuity.status is GradeStatus.PASS
@@ -599,6 +639,36 @@ def test_real_pronoun_follow_up_reuses_prior_turn_evidence_without_merging_trace
         GradeStatus.PASS,
     ]
     assert card.passed is True
+
+
+@pytest.mark.parametrize("stage", ["rejected", "completed"])
+def test_no_gmail_create_turn_rejects_observed_mutating_gmail_activity(
+    tmp_path, stage: str
+) -> None:
+    scenario, results = _real_duplicate_sequence(
+        tmp_path,
+        second_mode="correct",
+        first_gmail_mutation_stage=stage,
+    )
+
+    card = grading_module.grade_scenario_sequence(scenario, results)
+
+    assert card.turns[0].gmail_safety.status is GradeStatus.CONTRADICTORY
+    assert card.passed is False
+
+
+@pytest.mark.parametrize("stage", ["rejected", "completed"])
+def test_prior_evidence_follow_up_rejects_observed_mutating_gmail_activity(
+    tmp_path, stage: str
+) -> None:
+    scenario, results = _real_pronoun_sequence(
+        tmp_path, second_gmail_mutation_stage=stage
+    )
+
+    card = grading_module.grade_scenario_sequence(scenario, results)
+
+    assert card.turns[1].gmail_safety.status is GradeStatus.CONTRADICTORY
+    assert card.passed is False
 
 
 @pytest.mark.parametrize("second_mode", ["second_create", "wrong_id", "unauthorized"])
