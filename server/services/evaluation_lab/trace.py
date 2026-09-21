@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import fcntl
 import json
 import logging
 import os
@@ -45,29 +46,64 @@ class NullTraceSink:
 
 
 class _ScopeState:
-    __slots__ = ("context", "sink")
+    __slots__ = ("active", "context", "lock", "sequence", "sink")
 
     def __init__(self, context: TraceContext, sink: TraceSink) -> None:
+        self.active = True
         self.context = context
+        self.lock = threading.RLock()
+        self.sequence = 0
         self.sink = sink
 
 
 _TRACE_SCOPE: ContextVar[_ScopeState | None] = ContextVar(
     "evaluation_lab_trace_scope", default=None
 )
-_TRACE_SEQUENCE: ContextVar[int] = ContextVar("evaluation_lab_trace_sequence", default=0)
+_ACTIVE_TURNS: dict[tuple[UUID, UUID, str], int] = {}
+_ACTIVE_TURNS_LOCK = threading.RLock()
+
+
+def _turn_key(context: TraceContext) -> tuple[UUID, UUID, str]:
+    return (context.run_id, context.turn_id, context.system)
+
+
+def _register_active_turn(context: TraceContext) -> None:
+    key = _turn_key(context)
+    with _ACTIVE_TURNS_LOCK:
+        _ACTIVE_TURNS[key] = _ACTIVE_TURNS.get(key, 0) + 1
+
+
+def _unregister_active_turn(context: TraceContext) -> None:
+    key = _turn_key(context)
+    with _ACTIVE_TURNS_LOCK:
+        remaining = _ACTIVE_TURNS.get(key, 0) - 1
+        if remaining > 0:
+            _ACTIVE_TURNS[key] = remaining
+        else:
+            _ACTIVE_TURNS.pop(key, None)
+
+
+def _is_active_run(context: TraceContext) -> bool:
+    with _ACTIVE_TURNS_LOCK:
+        return any(
+            run_id == context.run_id and count > 0
+            for (run_id, _turn_id, _system), count in _ACTIVE_TURNS.items()
+        )
 
 
 @contextmanager
 def trace_scope(context: TraceContext, sink: TraceSink) -> Iterator[None]:
     """Install an isolated sink for one run/turn and restore the prior scope."""
 
-    scope_token = _TRACE_SCOPE.set(_ScopeState(context, sink))
-    sequence_token = _TRACE_SEQUENCE.set(0)
+    state = _ScopeState(context, sink)
+    scope_token = _TRACE_SCOPE.set(state)
+    _register_active_turn(context)
     try:
         yield
     finally:
-        _TRACE_SEQUENCE.reset(sequence_token)
+        with state.lock:
+            state.active = False
+        _unregister_active_turn(context)
         _TRACE_SCOPE.reset(scope_token)
 
 
@@ -101,10 +137,14 @@ def emit_trace(kind: TraceEventKind, payload: Mapping[str, object]) -> None:
     state = _TRACE_SCOPE.get()
     if state is None:
         return
-    sequence = _TRACE_SEQUENCE.get() + 1
-    _TRACE_SEQUENCE.set(sequence)
     try:
-        state.sink.emit(make_trace_event(state.context, sequence, kind, payload))
+        with state.lock:
+            if not state.active:
+                return
+            state.sequence += 1
+            state.sink.emit(
+                make_trace_event(state.context, state.sequence, kind, payload)
+            )
     except Exception:
         logger.warning(_DEGRADED_WARNING)
 
@@ -121,6 +161,18 @@ class JsonlTraceStore:
 
     def __init__(self, root: Path | str) -> None:
         self.root = Path(root)
+        root_parts = self.root.parts
+        if ".." in root_parts:
+            raise ValueError("trace root must not contain path traversal")
+        lab_indexes = [index for index, part in enumerate(root_parts) if part == ".lab"]
+        if not lab_indexes:
+            raise ValueError("trace root must be inside the VCS-ignored .lab directory")
+        lab_index = lab_indexes[-1]
+        if lab_index == len(root_parts) - 1:
+            raise ValueError("trace root must be below the VCS-ignored .lab directory")
+        parent_parts = root_parts[:lab_index]
+        self._trusted_parent = Path(*parent_parts) if parent_parts else Path(".")
+        self._root_components = root_parts[lab_index:]
         self._lock = threading.RLock()
 
     def path_for(self, run_id: UUID | str) -> Path:
@@ -128,22 +180,43 @@ class JsonlTraceStore:
         return self.root / f"{safe_id}.jsonl"
 
     def _open_root(self, *, create: bool) -> int | None:
-        if self.root.is_symlink():
-            raise ValueError("trace root must not be a symlink")
-        if create:
-            self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        elif not self.root.exists():
-            return None
         flags = (
             os.O_RDONLY
             | getattr(os, "O_DIRECTORY", 0)
             | getattr(os, "O_NOFOLLOW", 0)
         )
         try:
-            return os.open(self.root, flags)
+            descriptor = os.open(self._trusted_parent, flags)
         except OSError as exc:
             if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
-                raise ValueError("trace root must not be a symlink") from exc
+                raise ValueError("trace root must not contain a symlink") from exc
+            raise
+
+        try:
+            for component in self._root_components:
+                if create:
+                    try:
+                        os.mkdir(component, mode=0o700, dir_fd=descriptor)
+                    except FileExistsError:
+                        pass
+                try:
+                    child = os.open(component, flags, dir_fd=descriptor)
+                except FileNotFoundError:
+                    if not create:
+                        os.close(descriptor)
+                        return None
+                    raise
+                except OSError as exc:
+                    if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+                        raise ValueError(
+                            "trace root must not contain a symlink"
+                        ) from exc
+                    raise
+                os.close(descriptor)
+                descriptor = child
+            return descriptor
+        except Exception:
+            os.close(descriptor)
             raise
 
     @staticmethod
@@ -179,7 +252,7 @@ class JsonlTraceStore:
                 raise ValueError("trace event does not match requested run")
             events.append(event)
         if events:
-            _validate_event_stream(events)
+            events = list(_validate_event_stream(events))
         return tuple(events), truncated
 
     def _read_from_root(
@@ -201,6 +274,15 @@ class JsonlTraceStore:
             os.close(descriptor)
         return self._decode_events(b"".join(chunks), requested_run=run_id)
 
+    @contextmanager
+    def _store_lock(self, root_fd: int, *, exclusive: bool) -> Iterator[None]:
+        operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        try:
+            fcntl.flock(root_fd, operation)
+            yield
+        finally:
+            fcntl.flock(root_fd, fcntl.LOCK_UN)
+
     def read(self, run_id: UUID | str) -> tuple[TraceEvent, ...]:
         safe_id = _coerce_run_id(run_id)
         with self._lock:
@@ -208,77 +290,110 @@ class JsonlTraceStore:
             if root_fd is None:
                 return ()
             try:
-                events, _ = self._read_from_root(root_fd, safe_id)
-                return events
+                with self._store_lock(root_fd, exclusive=False):
+                    events, _ = self._read_from_root(root_fd, safe_id)
+                    return events
             finally:
                 os.close(root_fd)
 
     def emit(self, event: TraceEvent) -> None:
         safe_event_payload = redact_value(event.model_dump(mode="json"))
-        safe_event = TraceEvent.model_validate(safe_event_payload)
+        safe_event = TraceEvent.model_validate_json(
+            json.dumps(safe_event_payload, sort_keys=True, separators=(",", ":"))
+        )
         with self._lock:
             root_fd = self._open_root(create=True)
             assert root_fd is not None
             try:
-                existing, truncated = self._read_from_root(root_fd, safe_event.run_id)
-                if truncated:
-                    raise ValueError("cannot append after a truncated final line")
-                if existing:
-                    first = existing[0]
-                    if (safe_event.turn_id, safe_event.system) != (
-                        first.turn_id,
-                        first.system,
-                    ):
-                        raise ValueError("trace events must keep the same turn and system")
-                    expected = existing[-1].sequence + 1
-                else:
-                    expected = 1
-                if safe_event.sequence != expected:
-                    raise ValueError(
-                        f"trace sequence {safe_event.sequence} cannot overwrite or skip {expected}"
+                with self._store_lock(root_fd, exclusive=True):
+                    existing, truncated = self._read_from_root(
+                        root_fd, safe_event.run_id
                     )
+                    if truncated:
+                        raise ValueError("cannot append after a truncated final line")
+                    if existing:
+                        first = existing[0]
+                        if (safe_event.turn_id, safe_event.system) != (
+                            first.turn_id,
+                            first.system,
+                        ):
+                            raise ValueError(
+                                "trace events must keep the same turn and system"
+                            )
+                        expected = existing[-1].sequence + 1
+                    else:
+                        expected = 1
+                    if safe_event.sequence != expected:
+                        raise ValueError(
+                            f"trace sequence {safe_event.sequence} cannot overwrite or skip {expected}"
+                        )
 
-                serialized = (
-                    json.dumps(
-                        safe_event.model_dump(mode="json"),
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ).encode("utf-8")
-                    + b"\n"
-                )
-                descriptor = self._open_run_file(
-                    root_fd,
-                    f"{safe_event.run_id}.jsonl",
-                    os.O_APPEND | os.O_CREAT | os.O_WRONLY,
-                )
-                try:
-                    view = memoryview(serialized)
-                    while view:
-                        written = os.write(descriptor, view)
-                        view = view[written:]
-                    os.fsync(descriptor)
-                finally:
-                    os.close(descriptor)
+                    serialized = (
+                        json.dumps(
+                            safe_event.model_dump(mode="json"),
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                        + b"\n"
+                    )
+                    descriptor = self._open_run_file(
+                        root_fd,
+                        f"{safe_event.run_id}.jsonl",
+                        os.O_APPEND | os.O_CREAT | os.O_WRONLY,
+                    )
+                    try:
+                        view = memoryview(serialized)
+                        while view:
+                            written = os.write(descriptor, view)
+                            view = view[written:]
+                        os.fsync(descriptor)
+                    finally:
+                        os.close(descriptor)
             finally:
                 os.close(root_fd)
 
-    def reset(self, run_id: UUID | str) -> bool:
-        safe_id = _coerce_run_id(run_id)
+    def reset(self, context: TraceContext) -> bool:
+        if not isinstance(context, TraceContext):
+            raise ValueError("reset requires the owning TraceContext")
+        safe_id = context.run_id
+        if _is_active_run(context):
+            raise RuntimeError("cannot reset an active trace turn")
         with self._lock:
             root_fd = self._open_root(create=False)
             if root_fd is None:
                 return False
             name = f"{safe_id}.jsonl"
             try:
-                try:
-                    metadata = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    return False
-                if not stat.S_ISREG(metadata.st_mode):
-                    raise ValueError("trace run path must be a regular file, not a symlink")
-                os.unlink(name, dir_fd=root_fd)
-                os.fsync(root_fd)
-                return True
+                with self._store_lock(root_fd, exclusive=True):
+                    with _ACTIVE_TURNS_LOCK:
+                        if _is_active_run(context):
+                            raise RuntimeError("cannot reset an active trace turn")
+                        events, truncated = self._read_from_root(root_fd, safe_id)
+                        if not events and not truncated:
+                            return False
+                        if truncated:
+                            raise ValueError(
+                                "cannot reset a trace with a truncated final line"
+                            )
+                        first = events[0]
+                        if (first.turn_id, first.system) != (
+                            context.turn_id,
+                            context.system,
+                        ):
+                            raise ValueError("TraceContext does not own this trace run")
+                        try:
+                            metadata = os.stat(
+                                name, dir_fd=root_fd, follow_symlinks=False
+                            )
+                        except FileNotFoundError:
+                            return False
+                        if not stat.S_ISREG(metadata.st_mode):
+                            raise ValueError(
+                                "trace run path must be a regular file, not a symlink"
+                            )
+                        os.unlink(name, dir_fd=root_fd)
+                        os.fsync(root_fd)
+                        return True
             finally:
                 os.close(root_fd)
 
@@ -287,29 +402,33 @@ def _available(value: Any) -> ObservedValue[Any]:
     return ObservedValue(availability=Availability.AVAILABLE, value=value)
 
 
-def _validate_event_stream(events: Sequence[TraceEvent]) -> None:
+def _validate_event_stream(events: Sequence[TraceEvent]) -> tuple[TraceEvent, ...]:
     if not events:
         raise ValueError("trace must contain at least one event")
-    first = events[0]
+    validated = tuple(
+        TraceEvent.model_validate_json(event.model_dump_json()) for event in events
+    )
+    first = validated[0]
     if any(
         (event.run_id, event.turn_id, event.system)
         != (first.run_id, first.turn_id, first.system)
-        for event in events
+        for event in validated
     ):
         raise ValueError("trace events must belong to the same run, turn, and system")
-    if [event.sequence for event in events] != list(range(1, len(events) + 1)):
+    if [event.sequence for event in validated] != list(range(1, len(validated) + 1)):
         raise ValueError("trace event sequences must be contiguous from one")
+    return validated
 
 
-def _payload_value(payload: dict[str, JsonValue], key: str) -> JsonValue:
+def _payload_value(payload: Mapping[str, JsonValue], key: str) -> JsonValue:
     return payload[key]
 
 
 def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
     """Map only emitted event facts into the shared result schema."""
 
-    _validate_event_stream(events)
-    first = events[0]
+    validated_events = _validate_event_stream(events)
+    first = validated_events[0]
     values: dict[str, Any] = {}
     gmail_evidence: list[JsonValue] = []
     timings: list[JsonValue] = []
@@ -317,7 +436,7 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
     usage: dict[str, ObservedValue[int]] = {}
     cost: dict[str, ObservedValue[Any]] = {}
 
-    for event in events:
+    for event in validated_events:
         payload = redact_value(event.payload)
         if not isinstance(payload, dict):
             raise ValueError("trace payload must redact to a JSON object")

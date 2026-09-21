@@ -4,14 +4,39 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Generic, Literal, TypeVar
+from types import MappingProxyType
+from typing import Generic, Literal, Mapping, TypeVar
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 
 class _FrozenModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+def _freeze_json(value: JsonValue) -> JsonValue:
+    if isinstance(value, dict):
+        return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})  # type: ignore[return-value]
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)  # type: ignore[return-value]
+    return value
+
+
+def _thaw_json(value: object) -> JsonValue:
+    if isinstance(value, Mapping):
+        return {str(key): _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    return value  # type: ignore[return-value]
 
 
 class Availability(str, Enum):
@@ -69,7 +94,20 @@ class TraceEvent(_FrozenModel):
     occurred_at: datetime
     system: Literal["baseline", "enhanced"]
     kind: TraceEventKind
-    payload: dict[str, JsonValue]
+    payload: Mapping[str, JsonValue]
+
+    @field_validator("payload", mode="after")
+    @classmethod
+    def _freeze_payload(cls, value: Mapping[str, JsonValue]) -> Mapping[str, JsonValue]:
+        return MappingProxyType(
+            {str(key): _freeze_json(item) for key, item in value.items()}
+        )
+
+    @field_serializer("payload")
+    def _serialize_payload(self, value: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+        thawed = _thaw_json(value)
+        assert isinstance(thawed, dict)
+        return thawed
 
     @model_validator(mode="after")
     def _validate_identity_and_time(self) -> "TraceEvent":

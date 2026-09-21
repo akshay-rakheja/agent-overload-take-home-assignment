@@ -104,3 +104,47 @@ def test_redaction_sanitizes_secret_patterns_even_under_unknown_keys() -> None:
     assert redacted == {
         "notes": [REDACTED, "contact [REDACTED_EMAIL] for details", "https://provider.test/callback"]
     }
+
+
+def test_redaction_canonicalizes_camelcase_mixed_case_and_uppercase_urls() -> None:
+    source = {
+        "accessToken": "opaque-access-token",
+        "AuthConfigID": "opaque-auth-config",
+        "gmailMessageId": "opaque-message-id",
+        "GmailThreadID": "opaque-thread-id",
+        "providerAccessToken": "prefixed-access-token",
+        "connectedAuthConfigId": "prefixed-auth-config",
+        "remoteGmailMessageId": "prefixed-message-id",
+        "QueryString": "code=opaque-code&state=opaque-state",
+        "OAuthURL": "HTTPS://PROVIDER.TEST/oauth?code=opaque-code&state=opaque-state#private",
+        "nested": {"clientSecret": "opaque-client-secret"},
+    }
+
+    redacted = redact_value(source)
+
+    assert redacted == {
+        "AuthConfigID": REDACTED,
+        "GmailThreadID": REDACTED,
+        "OAuthURL": "https://provider.test/oauth",
+        "QueryString": REDACTED,
+        "accessToken": REDACTED,
+        "gmailMessageId": REDACTED,
+        "connectedAuthConfigId": REDACTED,
+        "nested": {"clientSecret": REDACTED},
+        "providerAccessToken": REDACTED,
+        "remoteGmailMessageId": REDACTED,
+    }
+    exported = repr(redacted)
+    for marker in (
+        "opaque-access-token",
+        "opaque-auth-config",
+        "opaque-message-id",
+        "opaque-thread-id",
+        "opaque-code",
+        "opaque-state",
+        "opaque-client-secret",
+        "prefixed-access-token",
+        "prefixed-auth-config",
+        "prefixed-message-id",
+    ):
+        assert marker not in exported

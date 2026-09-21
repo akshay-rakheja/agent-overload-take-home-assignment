@@ -20,16 +20,16 @@ _SECRET = re.compile(
 _SECRET_KEYS = frozenset(
     {
         "authorization",
-        "proxy_authorization",
-        "api_key",
-        "x_api_key",
-        "auth_config_id",
-        "oauth_code",
-        "authorization_code",
-        "access_token",
-        "refresh_token",
-        "id_token",
-        "client_secret",
+        "proxyauthorization",
+        "apikey",
+        "xapikey",
+        "authconfigid",
+        "oauthcode",
+        "authorizationcode",
+        "accesstoken",
+        "refreshtoken",
+        "idtoken",
+        "clientsecret",
         "password",
         "secret",
         "token",
@@ -38,7 +38,7 @@ _SECRET_KEYS = frozenset(
 _MAIL_KEYS = frozenset(
     {
         "email",
-        "email_address",
+        "emailaddress",
         "address",
         "from",
         "to",
@@ -46,31 +46,48 @@ _MAIL_KEYS = frozenset(
         "bcc",
         "sender",
         "recipient",
-        "message_id",
-        "thread_id",
-        "gmail_message_id",
-        "gmail_thread_id",
+        "messageid",
+        "threadid",
+        "gmailmessageid",
+        "gmailthreadid",
         "snippet",
         "body",
-        "raw_body",
-        "html_body",
+        "rawbody",
+        "htmlbody",
     }
 )
 _ERROR_KEYS = frozenset(
     {
-        "provider_error",
-        "provider_exception",
+        "providererror",
+        "providerexception",
         "exception",
-        "error_message",
-        "error_detail",
+        "errormessage",
+        "errordetail",
     }
 )
-_QUERY_KEYS = frozenset({"query", "query_string", "raw_query"})
-_HEADER_KEYS = frozenset({"headers", "request_headers", "response_headers"})
+_QUERY_KEYS = frozenset({"query", "querystring", "rawquery"})
+_HEADER_KEYS = frozenset({"headers", "requestheaders", "responseheaders"})
+_SECRET_SUFFIXES = (
+    "apikey",
+    "authconfigid",
+    "oauthcode",
+    "authorizationcode",
+    "token",
+    "clientsecret",
+    "password",
+    "secret",
+)
+_MAIL_SUFFIXES = ("emailaddress", "messageid", "threadid")
 
 
-def _normalized_key(key: object) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", str(key).lower()).strip("_")
+def _canonical_key(key: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(key).lower())
+
+
+def _matches_key(
+    key: str | None, exact: frozenset[str], suffixes: tuple[str, ...] = ()
+) -> bool:
+    return key is not None and (key in exact or key.endswith(suffixes))
 
 
 def _redact_url(value: str) -> str:
@@ -89,7 +106,7 @@ def _redact_url(value: str) -> str:
 def _redact_string(value: str) -> str:
     if _BEARER.search(value) or _SECRET.search(value):
         return REDACTED
-    if value.startswith(("http://", "https://")):
+    if value.lower().startswith(("http://", "https://")):
         value = _redact_url(value)
     return _EMAIL.sub(REDACTED_EMAIL, value)
 
@@ -105,13 +122,18 @@ def redact_value(
 ) -> Any:
     """Return a sorted, JSON-safe copy with sensitive observations removed."""
 
-    key = _normalized_key(_key) if _key is not None else None
-    parent_key = _normalized_key(_parent_key) if _parent_key is not None else None
-    if key in _SECRET_KEYS or key in _MAIL_KEYS or key in _ERROR_KEYS or key in _QUERY_KEYS:
+    key = _canonical_key(_key) if _key is not None else None
+    parent_key = _canonical_key(_parent_key) if _parent_key is not None else None
+    if (
+        _matches_key(key, _SECRET_KEYS, _SECRET_SUFFIXES)
+        or _matches_key(key, _MAIL_KEYS, _MAIL_SUFFIXES)
+        or _matches_key(key, _ERROR_KEYS)
+        or _matches_key(key, _QUERY_KEYS)
+    ):
         return REDACTED
-    if key == "code" and parent_key in {"authorization", "oauth", "oauth_response"}:
+    if key == "code" and parent_key in {"authorization", "oauth", "oauthresponse"}:
         return REDACTED
-    if key in _HEADER_KEYS:
+    if _matches_key(key, _HEADER_KEYS, ("headers",)):
         return _redact_headers(value)
 
     if isinstance(value, Mapping):

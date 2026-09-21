@@ -72,6 +72,31 @@ def test_trace_event_rejects_unknown_schema_version() -> None:
         TraceEvent.model_validate(payload)
 
 
+def test_trace_event_rejects_coerced_sequence_values() -> None:
+    payload = _event().model_dump(mode="python")
+    payload["sequence"] = "1"
+
+    with pytest.raises(ValidationError, match="sequence"):
+        TraceEvent.model_validate(payload)
+
+
+def test_trace_event_payload_is_deeply_immutable_and_detached() -> None:
+    source = {"nested": {"ids": ["fixture_fact_001"]}}
+    event = TraceEvent(
+        **_event().model_dump(exclude={"payload"}),
+        payload=source,
+    )
+    source["nested"]["ids"].append("outside-mutation")
+
+    with pytest.raises(TypeError):
+        event.payload["new"] = "mutation"
+    with pytest.raises((AttributeError, TypeError)):
+        event.payload["nested"]["ids"].append("inside-mutation")
+    assert event.model_dump(mode="json")["payload"] == {
+        "nested": {"ids": ["fixture_fact_001"]}
+    }
+
+
 @pytest.mark.parametrize(
     "availability", [Availability.NOT_APPLICABLE, Availability.UNAVAILABLE]
 )
@@ -135,3 +160,10 @@ def test_consolidation_redacts_directly_constructed_events_before_export() -> No
     )
 
     assert result.revision.value == "[REDACTED]"
+
+
+def test_consolidation_revalidates_copied_event_schema_version() -> None:
+    bypassed = _event().model_copy(update={"schema_version": 2})
+
+    with pytest.raises(ValidationError, match="schema_version"):
+        consolidate_trace([bypassed])
