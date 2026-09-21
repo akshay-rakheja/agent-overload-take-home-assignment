@@ -13,6 +13,7 @@ from ...config import Settings, get_settings
 from ...logging_config import logger
 from ...models import GmailConnectPayload, GmailDisconnectPayload, GmailStatusPayload
 from ...utils import error_response
+from ..evaluation_lab import LabToolPolicy, lab_tool_rejection
 
 
 _CLIENT_LOCK = threading.Lock()
@@ -509,6 +510,21 @@ def execute_gmail_tool(
     *,
     arguments: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    settings = get_settings()
+    if settings.lab_enabled:
+        configured_user_id = _normalized(settings.lab_composio_user_id)
+        if _normalized(composio_user_id) != configured_user_id:
+            return {
+                "error": {
+                    "code": "lab_user_mismatch",
+                    "tool": tool_name,
+                    "reason": "The Gmail user is not authorized for Evaluation Lab mode.",
+                }
+            }
+        decision = LabToolPolicy().decide_composio_tool(tool_name)
+        if not decision.allowed:
+            return lab_tool_rejection(tool_name, decision)
+
     prepared_arguments: Dict[str, Any] = {}
     if isinstance(arguments, dict):
         for key, value in arguments.items():

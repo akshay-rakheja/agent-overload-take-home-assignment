@@ -102,6 +102,21 @@ def test_lab_settings_require_an_opaque_user_id():
         Settings(lab_enabled=True, lab_composio_user_id=None)
 
 
+def test_lab_settings_parse_environment_without_changing_model_defaults(monkeypatch):
+    monkeypatch.setenv("OPENPOKE_LAB_ENABLED", "true")
+    monkeypatch.setenv("OPENPOKE_LAB_COMPOSIO_USER_ID", "opaque-env-user")
+
+    settings = Settings()
+
+    assert settings.lab_enabled is True
+    assert settings.lab_composio_user_id == "opaque-env-user"
+    assert settings.interaction_agent_model == "anthropic/claude-sonnet-4"
+    assert settings.execution_agent_model == "anthropic/claude-sonnet-4"
+    assert settings.execution_agent_search_model == "anthropic/claude-sonnet-4"
+    assert settings.summarizer_model == "anthropic/claude-sonnet-4"
+    assert settings.email_classifier_model == "anthropic/claude-sonnet-4"
+
+
 def test_lab_connect_uses_configured_user_and_rejects_conflicting_payload(monkeypatch):
     accounts = FakeConnectedAccounts(
         link_response=SimpleNamespace(

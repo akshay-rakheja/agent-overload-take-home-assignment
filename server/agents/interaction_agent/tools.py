@@ -6,8 +6,10 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 from uuid import UUID
 
+from ...config import get_settings
 from ...logging_config import logger
 from ...services.conversation import get_conversation_log
+from ...services.evaluation_lab import LabToolPolicy, lab_tool_rejection
 from ...services.execution import (
     AgentDirectory,
     ExecutionAgentLogStore,
@@ -294,6 +296,13 @@ def send_draft(
     body: str,
 ) -> ToolResult:
     """Record a draft update in the conversation log for the interaction agent."""
+    if get_settings().lab_enabled:
+        decision = LabToolPolicy().decide_model_tool("send_draft")
+        return ToolResult(
+            success=False,
+            payload=lab_tool_rejection("send_draft", decision),
+        )
+
     log = get_conversation_log()
 
     message = f"To: {to}\nSubject: {subject}\n\n{body}"

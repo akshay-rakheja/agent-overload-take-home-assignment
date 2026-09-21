@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from .agent import ExecutionAgent
 from .tools import get_tool_schemas, get_tool_registry
 from ...config import get_settings
+from ...services.evaluation_lab import LabToolPolicy, lab_tool_rejection
 from ...openrouter_client import request_chat_completion
 from ...logging_config import logger
 
@@ -44,8 +45,9 @@ class ExecutionAgentRuntime:
         )
         self.api_key = settings.openrouter_api_key
         self.model = settings.execution_agent_model
-        self.tool_registry = get_tool_registry(agent_name=storage_key)
-        self.tool_schemas = get_tool_schemas()
+        self.lab_enabled = settings.lab_enabled
+        self.tool_registry = get_tool_registry(agent_name=storage_key, settings=settings)
+        self.tool_schemas = get_tool_schemas(settings=settings)
 
         if not self.api_key:
             raise ValueError("OpenRouter API key not configured. Set OPENROUTER_API_KEY environment variable.")
@@ -234,6 +236,11 @@ class ExecutionAgentRuntime:
     # Execute tool function from registry with error handling and async support
     async def _execute_tool(self, tool_name: str, arguments: Dict) -> Tuple[bool, Any]:
         """Execute a tool. Returns (success, result)."""
+        if getattr(self, "lab_enabled", False):
+            decision = LabToolPolicy().decide_model_tool(tool_name)
+            if not decision.allowed:
+                return False, lab_tool_rejection(tool_name, decision)
+
         tool_func = self.tool_registry.get(tool_name)
         if not tool_func:
             return False, {"error": f"Unknown tool: {tool_name}"}
