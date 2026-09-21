@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import socket
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -131,5 +132,140 @@ def test_readiness_timeout_stops_process(tmp_path: Path) -> None:
     with pytest.raises(TimeoutError, match="ready"):
         process.wait_ready("http://127.0.0.1:%d" % _free_port(), timeout=0.15)
 
-    process.stop(timeout=5)
     assert not (tmp_path / "server.pid").exists()
+    assert process.pid is None or not process.is_running
+
+
+def test_stream_exports_are_metadata_only_and_raw_text_is_private(tmp_path: Path) -> None:
+    secret = 'provider body {"access_token":"nested-secret","mailbox":"private body"}'
+    process = ManagedProcess(
+        argv=[sys.executable, "-c", f"import sys; print({secret!r}); print({secret!r}, file=sys.stderr)"],
+        env={},
+        cwd=tmp_path,
+        pid_file=tmp_path / "server.pid",
+        stdout_path=tmp_path / "stdout.json",
+        stderr_path=tmp_path / "stderr.json",
+        private_dir=tmp_path / "private",
+    )
+
+    process.start()
+    process.wait(timeout=5)
+    process.stop(timeout=5)
+
+    exported = (tmp_path / "stdout.json").read_text() + (tmp_path / "stderr.json").read_text()
+    assert "nested-secret" not in exported
+    assert "private body" not in exported
+    assert '"byte_count"' in exported
+    assert '"sha256"' in exported
+    private = "".join(path.read_text() for path in (tmp_path / "private").iterdir())
+    assert "nested-secret" in private
+    assert "private body" in private
+
+
+def test_unrelated_listener_is_rejected_before_child_start(tmp_path: Path) -> None:
+    port = _free_port()
+    unrelated = ManagedProcess(
+        argv=_server_argv(port),
+        env={},
+        cwd=tmp_path,
+        pid_file=tmp_path / "unrelated.pid",
+        stdout_path=tmp_path / "unrelated.out",
+        stderr_path=tmp_path / "unrelated.err",
+    )
+    unrelated.start()
+    unrelated.wait_ready(f"http://127.0.0.1:{port}", timeout=5)
+    child = ManagedProcess(
+        argv=[sys.executable, "-c", "import time; time.sleep(30)"],
+        env={},
+        cwd=tmp_path,
+        pid_file=tmp_path / "child.pid",
+        stdout_path=tmp_path / "child.out",
+        stderr_path=tmp_path / "child.err",
+        readiness_host="127.0.0.1",
+        readiness_port=port,
+        readiness_nonce="owned-child",
+    )
+    try:
+        with pytest.raises(RuntimeError, match="occupied"):
+            child.start()
+        assert not (tmp_path / "child.pid").exists()
+    finally:
+        unrelated.stop(timeout=5)
+
+
+def test_concurrent_start_has_one_atomic_owner(tmp_path: Path) -> None:
+    pid_file = tmp_path / "shared.pid"
+    processes = [
+        ManagedProcess(
+            argv=[sys.executable, "-c", "import time; time.sleep(30)"],
+            env={},
+            cwd=tmp_path,
+            pid_file=pid_file,
+            stdout_path=tmp_path / f"{index}.out",
+            stderr_path=tmp_path / f"{index}.err",
+        )
+        for index in range(2)
+    ]
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(process.start) for process in processes]
+        outcomes = []
+        for future in futures:
+            try:
+                future.result()
+                outcomes.append("started")
+            except RuntimeError:
+                outcomes.append("refused")
+    try:
+        assert sorted(outcomes) == ["refused", "started"]
+    finally:
+        for process in processes:
+            process.stop(timeout=5)
+
+
+def test_refused_duplicate_stop_cannot_remove_owner_marker(tmp_path: Path) -> None:
+    pid_file = tmp_path / "shared.pid"
+    owner = ManagedProcess(
+        argv=[sys.executable, "-c", "import time; time.sleep(30)"],
+        env={},
+        cwd=tmp_path,
+        pid_file=pid_file,
+        stdout_path=tmp_path / "owner.out",
+        stderr_path=tmp_path / "owner.err",
+    )
+    duplicate = ManagedProcess(
+        argv=[sys.executable, "-c", "pass"],
+        env={},
+        cwd=tmp_path,
+        pid_file=pid_file,
+        stdout_path=tmp_path / "duplicate.out",
+        stderr_path=tmp_path / "duplicate.err",
+    )
+    owner.start()
+    try:
+        with pytest.raises(RuntimeError, match="already running"):
+            duplicate.start()
+        duplicate.stop(timeout=1)
+        assert pid_file.exists()
+        assert owner.is_running
+    finally:
+        owner.stop(timeout=5)
+
+
+def test_owner_token_mismatch_preserves_foreign_marker(tmp_path: Path) -> None:
+    pid_file = tmp_path / "server.pid"
+    process = ManagedProcess(
+        argv=[sys.executable, "-c", "import time; time.sleep(30)"],
+        env={},
+        cwd=tmp_path,
+        pid_file=pid_file,
+        stdout_path=tmp_path / "out",
+        stderr_path=tmp_path / "err",
+    )
+    process.start()
+    pid_file.write_text('{"pid":99999999,"owner_token":"foreign"}\n', encoding="utf-8")
+
+    process.stop(timeout=5)
+
+    assert pid_file.exists()
+    pid_file.unlink()

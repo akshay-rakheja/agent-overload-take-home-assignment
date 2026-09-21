@@ -130,6 +130,37 @@ def test_dirty_tracked_worktree_is_rejected(tmp_path: Path, monkeypatch) -> None
         )
 
 
+def test_nonignored_untracked_source_file_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    repo, base = _repo(tmp_path)
+    monkeypatch.setattr(revisions, "PROTECTED_ORIGINAL_REPO", tmp_path / "absent")
+    (repo / "server" / "shadow_import.py").write_text("MUTATES_IMPORTS = True\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="untracked"):
+        revisions.verify_baseline_revision(
+            repo,
+            expected_base=base,
+            allowed_paths=frozenset({"server/config.py"}),
+        )
+
+
+def test_ignored_runtime_data_remains_allowed(tmp_path: Path, monkeypatch) -> None:
+    repo, base = _repo(tmp_path)
+    monkeypatch.setattr(revisions, "PROTECTED_ORIGINAL_REPO", tmp_path / "absent")
+    (repo / ".gitignore").write_text("server/data/\n", encoding="utf-8")
+    base = _commit(repo, "ignore runtime state")
+    runtime = repo / "server" / "data"
+    runtime.mkdir(parents=True)
+    (runtime / "runtime.json").write_text("{}\n", encoding="utf-8")
+
+    result = revisions.verify_baseline_revision(
+        repo,
+        expected_base=base,
+        allowed_paths=frozenset({"server/config.py"}),
+    )
+
+    assert result.overlay_head_sha == base
+
+
 def test_protected_original_must_remain_clean_at_base(tmp_path: Path, monkeypatch) -> None:
     repo, base = _repo(tmp_path)
     original = tmp_path / "openpoke"

@@ -58,8 +58,8 @@ def _git(repo: Path, *args: str, binary: bool = False) -> str | bytes:
     return completed.stdout
 
 
-def _tracked_status(repo: Path) -> str:
-    return str(_git(repo, "status", "--porcelain", "--untracked-files=no")).strip()
+def _worktree_status(repo: Path) -> str:
+    return str(_git(repo, "status", "--porcelain", "--untracked-files=all")).strip()
 
 
 def _verify_protected_original(expected_base: str) -> None:
@@ -68,7 +68,7 @@ def _verify_protected_original(expected_base: str) -> None:
         return
     try:
         head = str(_git(original, "rev-parse", "HEAD")).strip()
-        status = _tracked_status(original)
+        status = _worktree_status(original)
     except ValueError as exc:
         raise ValueError(f"protected original verification failed: {exc}") from exc
     if head != expected_base or status:
@@ -89,7 +89,10 @@ def verify_baseline_revision(
     root = repo.resolve(strict=True)
     if not (root / ".git").exists() and not str(_git(root, "rev-parse", "--git-dir")).strip():
         raise ValueError(f"baseline repo is not a Git checkout: {root}")
-    if _tracked_status(root):
+    status = _worktree_status(root)
+    if status:
+        if any(line.startswith("?? ") for line in status.splitlines()):
+            raise ValueError("baseline worktree contains nonignored untracked paths")
         raise ValueError("baseline worktree has dirty tracked state")
 
     head = str(_git(root, "rev-parse", "HEAD")).strip()

@@ -43,6 +43,7 @@ class StateFingerprint(_FrozenModel):
     journal_sha256: dict[str, str]
     journal_bytes: dict[str, int]
     journal_complete: dict[str, bool] = Field(default_factory=dict)
+    journal_contents: dict[str, bytes] = Field(default_factory=dict, exclude=True, repr=False)
 
 
 class BaselineInference(_FrozenModel):

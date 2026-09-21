@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import secrets
 import socket
 import sys
 from pathlib import Path
@@ -18,6 +19,21 @@ from evals.live_lab.raw_observation import BaselineTurnRequest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 BASELINE_WORKTREE = PROJECT_ROOT.parent / "openpoke-evaluation-baseline"
+
+
+class _FailingSink:
+    def __init__(self, *, fail_store: bool = False, fail_append: bool = False) -> None:
+        self.fail_store = fail_store
+        self.fail_append = fail_append
+
+    def store_private(self, value):
+        if self.fail_store:
+            raise OSError("private storage unavailable")
+        return "0" * 64
+
+    def append(self, event):
+        if self.fail_append:
+            raise OSError("event storage unavailable")
 
 
 def _free_port() -> int:
@@ -138,6 +154,7 @@ def _run_real_turn(
     timeout_seconds: float = 10,
     late_grace_seconds: float = 0,
     execution_timeout_seconds: float | None = None,
+    run_second_turn: bool = False,
 ):
     manifest = build_fixture_manifest(seed=1313, roster_size=size)
     data_dir = tmp_path / "fixture" / "server" / "data"
@@ -150,6 +167,7 @@ def _run_real_turn(
         encoding="utf-8",
     )
     fake_port = _free_port()
+    readiness_nonce = secrets.token_hex(16)
     fake = ManagedProcess(
         argv=[sys.executable, "-c", _FAKE_SERVER, str(fake_port), str(queue_path)],
         env=_process_env(),
@@ -175,6 +193,8 @@ def _run_real_turn(
             str(run_dir),
             "--fake-base-url",
             f"http://127.0.0.1:{fake_port}/v1",
+            "--readiness-nonce",
+            readiness_nonce,
         ]
         + (
             ["--execution-timeout-seconds", str(execution_timeout_seconds)]
@@ -186,6 +206,10 @@ def _run_real_turn(
         pid_file=tmp_path / "baseline.pid",
         stdout_path=tmp_path / "baseline.out",
         stderr_path=tmp_path / "baseline.err",
+        private_dir=run_dir / "private" / "process-streams",
+        readiness_host="127.0.0.1",
+        readiness_port=8001,
+        readiness_nonce=readiness_nonce,
     )
     fake.start()
     fake.wait_ready(f"http://127.0.0.1:{fake_port}/health", timeout=5)
@@ -193,7 +217,10 @@ def _run_real_turn(
     try:
         # A cold checkout can spend over a minute importing individual historical
         # modules from the host filesystem. This is one bounded launch, not a retry.
-        baseline.wait_ready("http://127.0.0.1:8001/api/v1/health", timeout=120)
+        baseline.wait_ready(
+            f"http://127.0.0.1:8001/__live_lab_ready__/{readiness_nonce}",
+            timeout=120,
+        )
         observation = asyncio.run(
             run_baseline_turn(
                 BaselineTurnRequest(
@@ -206,6 +233,19 @@ def _run_real_turn(
                 )
             )
         )
+        if run_second_turn:
+            second = asyncio.run(
+                run_baseline_turn(
+                    BaselineTurnRequest(
+                        run_id=f"size-{size}-second",
+                        data_dir=str(data_dir),
+                        event_path=str(run_dir / "events.jsonl"),
+                        user_message="second turn must not consume late work",
+                        timeout_seconds=0.2,
+                    )
+                )
+            )
+            return manifest, observation, second, run_dir
         return manifest, observation, run_dir
     finally:
         baseline.stop(timeout=5)
@@ -294,6 +334,63 @@ def test_execution_prompt_records_unbounded_history_size(tmp_path: Path) -> None
     assert events[1]["prompt_characters"] > 50_000
 
 
+def test_async_pre_call_observation_failure_does_not_prevent_original() -> None:
+    returned = object()
+    calls = 0
+
+    async def original(**kwargs):
+        nonlocal calls
+        calls += 1
+        return returned
+
+    wrapped = wrap_async_call("interaction_model", original, _FailingSink(fail_store=True))
+
+    assert asyncio.run(wrapped(model="fake", messages=[])) is returned
+    assert calls == 1
+
+
+def test_async_success_observation_failure_does_not_replace_return() -> None:
+    returned = {"choices": []}
+    wrapped = wrap_async_call(
+        "interaction_model",
+        lambda **kwargs: asyncio.sleep(0, result=returned),
+        _FailingSink(fail_append=True),
+    )
+
+    assert asyncio.run(wrapped(model="fake", messages=[])) is returned
+
+
+def test_async_observation_failure_does_not_replace_original_exception() -> None:
+    original_error = RuntimeError("original failure")
+
+    async def original(**kwargs):
+        raise original_error
+
+    wrapped = wrap_async_call("interaction_model", original, _FailingSink(fail_store=True))
+
+    with pytest.raises(RuntimeError) as caught:
+        asyncio.run(wrapped(model="fake", messages=[]))
+    assert caught.value is original_error
+
+
+def test_sync_observation_failure_does_not_replace_return_or_exception() -> None:
+    returned = object()
+    assert wrap_sync_call(
+        "interaction_prompt",
+        lambda: returned,
+        _FailingSink(fail_store=True),
+    )() is returned
+
+    original_error = RuntimeError("sync original failure")
+
+    def fail():
+        raise original_error
+
+    with pytest.raises(RuntimeError) as caught:
+        wrap_sync_call("interaction_prompt", fail, _FailingSink(fail_append=True))()
+    assert caught.value is original_error
+
+
 @pytest.mark.parametrize(
     ("size", "selection", "expected_action"),
     [
@@ -376,6 +473,27 @@ def test_real_historical_late_response_is_not_promoted_to_success(tmp_path: Path
     assert observation.inferred_action == "unobservable"
     assert observation.final_response is not None
     assert {error.code for error in observation.errors} >= {"timeout", "late_response"}
+
+
+def test_late_failed_turn_taints_context_and_cannot_satisfy_next_turn(tmp_path: Path) -> None:
+    responses = _fake_response_queue("AI Video Newsletter Curator")
+    responses[0] = {"_delay": 0.35, "_body": responses[0]}
+
+    _, first, second, _ = _run_real_turn(
+        tmp_path,
+        size=10,
+        selected_name="AI Video Newsletter Curator",
+        responses=responses,
+        timeout_seconds=0.1,
+        late_grace_seconds=2,
+        run_second_turn=True,
+    )
+
+    assert first.inferred_action == "unobservable"
+    assert any(error.code == "late_response" for error in first.errors)
+    assert second.inferred_action == "unobservable"
+    assert second.final_response is None
+    assert any(error.code == "tainted_process" for error in second.errors)
 
 
 def test_real_historical_malformed_tool_args_remain_inconclusive(tmp_path: Path) -> None:

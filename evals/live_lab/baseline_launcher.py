@@ -50,11 +50,20 @@ def _canonical(value: Any) -> bytes:
 class ObservationSink:
     """Write sanitized events and hashed private payloads to separate paths."""
 
-    def __init__(self, event_path: Path, private_dir: Path) -> None:
+    def __init__(
+        self,
+        event_path: Path,
+        private_dir: Path,
+        *,
+        owner_path: Path | None = None,
+        process_nonce: str | None = None,
+    ) -> None:
         self.event_path = Path(event_path)
         self.private_dir = Path(private_dir)
         self.event_path.parent.mkdir(parents=True, exist_ok=True)
         self.private_dir.mkdir(parents=True, exist_ok=True)
+        self.owner_path = Path(owner_path) if owner_path is not None else None
+        self.process_nonce = process_nonce
         self._lock = threading.Lock()
 
     def store_private(self, value: Any) -> str:
@@ -66,7 +75,21 @@ class ObservationSink:
         return digest
 
     def append(self, event: Mapping[str, Any]) -> None:
-        line = json.dumps(dict(event), sort_keys=True, separators=(",", ":"), default=str)
+        public_event = dict(event)
+        if self.process_nonce is not None:
+            public_event["process_nonce"] = self.process_nonce
+        if self.owner_path is not None:
+            try:
+                owner = json.loads(self.owner_path.read_text(encoding="utf-8"))
+            except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
+                owner = None
+            if (
+                isinstance(owner, dict)
+                and owner.get("process_nonce") == self.process_nonce
+                and isinstance(owner.get("owner_token"), str)
+            ):
+                public_event["owner_token"] = owner["owner_token"]
+        line = json.dumps(public_event, sort_keys=True, separators=(",", ":"), default=str)
         with self._lock:
             with self.event_path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
@@ -114,6 +137,33 @@ def _public_tool_arguments(
     return public
 
 
+def _observation_failure(sink: ObservationSink, stage: str, exc: BaseException) -> None:
+    """Best-effort metadata only; observation must never affect baseline control flow."""
+
+    try:
+        sink.append(
+            {
+                "kind": "observation_failure",
+                "stage": stage,
+                "error_type": type(exc).__name__,
+            }
+        )
+    except BaseException:
+        pass
+
+
+def _best_effort_observe(
+    sink: ObservationSink,
+    stage: str,
+    operation: Callable[[], Any],
+) -> Any | None:
+    try:
+        return operation()
+    except BaseException as exc:
+        _observation_failure(sink, stage, exc)
+        return None
+
+
 def _sync_event(component: str, result: Any, elapsed_ms: float, sink: ObservationSink) -> dict[str, Any]:
     prompt = _prompt_text(result)
     digest = sink.store_private(result)
@@ -150,49 +200,56 @@ def wrap_sync_call(component: str, original: Callable[..., Any], sink: Observati
         try:
             result = original(*args, **kwargs)
         except BaseException as exc:
-            error_digest = sink.store_private(
-                {"error_type": type(exc).__name__, "message": str(exc)}
-            )
-            sink.append(
-                {
-                    "kind": component,
-                    "elapsed_ms": (time.perf_counter() - started) * 1000,
-                    "error_type": type(exc).__name__,
-                    "error_sha256": error_digest,
-                }
-            )
+            def observe_error() -> None:
+                error_digest = sink.store_private(
+                    {"error_type": type(exc).__name__, "message": str(exc)}
+                )
+                sink.append(
+                    {
+                        "kind": component,
+                        "elapsed_ms": (time.perf_counter() - started) * 1000,
+                        "error_type": type(exc).__name__,
+                        "error_sha256": error_digest,
+                    }
+                )
+
+            _best_effort_observe(sink, f"{component}:exception", observe_error)
             raise
         elapsed = (time.perf_counter() - started) * 1000
-        if component == "interaction_tool":
-            name = args[0] if args else kwargs.get("name", "")
-            arguments = args[1] if len(args) > 1 else kwargs.get("arguments", {})
-            malformed = False
-            raw_digest = sink.store_private(arguments)
-            if isinstance(arguments, str):
-                try:
-                    normalized = json.loads(arguments) if arguments.strip() else {}
-                except json.JSONDecodeError:
+
+        def observe_success() -> None:
+            if component == "interaction_tool":
+                name = args[0] if args else kwargs.get("name", "")
+                arguments = args[1] if len(args) > 1 else kwargs.get("arguments", {})
+                malformed = False
+                raw_digest = sink.store_private(arguments)
+                if isinstance(arguments, str):
+                    try:
+                        normalized = json.loads(arguments) if arguments.strip() else {}
+                    except json.JSONDecodeError:
+                        normalized = {}
+                        malformed = True
+                elif isinstance(arguments, dict):
+                    normalized = arguments
+                else:
                     normalized = {}
                     malformed = True
-            elif isinstance(arguments, dict):
-                normalized = arguments
+                sink.append(
+                    {
+                        "kind": "tool_call",
+                        "elapsed_ms": elapsed,
+                        "tool_call": {
+                            "name": str(name),
+                            "arguments": _public_tool_arguments(str(name), normalized, sink),
+                            "raw_arguments_sha256": raw_digest,
+                            "malformed": malformed,
+                        },
+                    }
+                )
             else:
-                normalized = {}
-                malformed = True
-            sink.append(
-                {
-                    "kind": "tool_call",
-                    "elapsed_ms": elapsed,
-                    "tool_call": {
-                        "name": str(name),
-                        "arguments": _public_tool_arguments(str(name), normalized, sink),
-                        "raw_arguments_sha256": raw_digest,
-                        "malformed": malformed,
-                    },
-                }
-            )
-        else:
-            sink.append(_sync_event(component, result, elapsed, sink))
+                sink.append(_sync_event(component, result, elapsed, sink))
+
+        _best_effort_observe(sink, f"{component}:success", observe_success)
         return result
 
     return wrapped
@@ -215,7 +272,13 @@ def wrap_async_call(component: str, original: Callable[..., Any], sink: Observat
     @functools.wraps(original)
     async def wrapped(*args: Any, **kwargs: Any) -> Any:
         started = time.perf_counter()
-        request_digest = sink.store_private({"args": args, "kwargs": kwargs})
+        request_digest = _best_effort_observe(
+            sink,
+            f"{component}:request",
+            lambda: sink.store_private({"args": args, "kwargs": kwargs}),
+        )
+        if not isinstance(request_digest, str):
+            request_digest = ""
         model_component = _COMPONENTS.get(component)
         try:
             result = original(*args, **kwargs)
@@ -223,10 +286,44 @@ def wrap_async_call(component: str, original: Callable[..., Any], sink: Observat
                 result = await result
         except BaseException as exc:
             elapsed = (time.perf_counter() - started) * 1000
-            error_digest = sink.store_private(
-                {"error_type": type(exc).__name__, "message": str(exc)}
-            )
+            def observe_error() -> None:
+                error_digest = sink.store_private(
+                    {"error_type": type(exc).__name__, "message": str(exc)}
+                )
+                if model_component:
+                    sink.append(
+                        {
+                            "kind": "model_call",
+                            "model_call": {
+                                "component": model_component,
+                                "model": kwargs.get("model"),
+                                "elapsed_ms": elapsed,
+                                "request_sha256": request_digest,
+                                "message_count": len(kwargs.get("messages") or []),
+                                "tool_names": _tool_names(kwargs.get("tools")),
+                                "error_type": type(exc).__name__,
+                            },
+                            "error_sha256": error_digest,
+                        }
+                    )
+                else:
+                    sink.append(
+                        {
+                            "kind": component,
+                            "elapsed_ms": elapsed,
+                            "error_type": type(exc).__name__,
+                            "error_sha256": error_digest,
+                        }
+                    )
+
+            _best_effort_observe(sink, f"{component}:exception", observe_error)
+            raise
+        elapsed = (time.perf_counter() - started) * 1000
+
+        def observe_success() -> None:
+            response_digest = sink.store_private(result)
             if model_component:
+                choices = result.get("choices") if isinstance(result, dict) else None
                 sink.append(
                     {
                         "kind": "model_call",
@@ -235,11 +332,11 @@ def wrap_async_call(component: str, original: Callable[..., Any], sink: Observat
                             "model": kwargs.get("model"),
                             "elapsed_ms": elapsed,
                             "request_sha256": request_digest,
+                            "response_sha256": response_digest,
                             "message_count": len(kwargs.get("messages") or []),
                             "tool_names": _tool_names(kwargs.get("tools")),
-                            "error_type": type(exc).__name__,
+                            "response_choice_count": len(choices) if isinstance(choices, list) else 0,
                         },
-                        "error_sha256": error_digest,
                     }
                 )
             else:
@@ -247,39 +344,12 @@ def wrap_async_call(component: str, original: Callable[..., Any], sink: Observat
                     {
                         "kind": component,
                         "elapsed_ms": elapsed,
-                        "error_type": type(exc).__name__,
-                        "error_sha256": error_digest,
-                    }
-                )
-            raise
-        elapsed = (time.perf_counter() - started) * 1000
-        response_digest = sink.store_private(result)
-        if model_component:
-            choices = result.get("choices") if isinstance(result, dict) else None
-            sink.append(
-                {
-                    "kind": "model_call",
-                    "model_call": {
-                        "component": model_component,
-                        "model": kwargs.get("model"),
-                        "elapsed_ms": elapsed,
                         "request_sha256": request_digest,
                         "response_sha256": response_digest,
-                        "message_count": len(kwargs.get("messages") or []),
-                        "tool_names": _tool_names(kwargs.get("tools")),
-                        "response_choice_count": len(choices) if isinstance(choices, list) else 0,
-                    },
-                }
-            )
-        else:
-            sink.append(
-                {
-                    "kind": component,
-                    "elapsed_ms": elapsed,
-                    "request_sha256": request_digest,
-                    "response_sha256": response_digest,
-                }
-            )
+                    }
+                )
+
+        _best_effort_observe(sink, f"{component}:success", observe_success)
         return result
 
     return wrapped
@@ -372,20 +442,24 @@ def install_baseline_wrappers(
     @functools.wraps(original_parse_tool_calls)
     def parse_tool_calls_with_rejections(runtime: Any, raw_tool_calls: Any) -> Any:
         parsed = original_parse_tool_calls(runtime, raw_tool_calls)
-        for tool_call in parsed:
-            arguments = getattr(tool_call, "arguments", {})
-            if isinstance(arguments, dict) and "__invalid_arguments__" in arguments:
-                sink.append(
-                    {
-                        "kind": "tool_call",
-                        "tool_call": {
-                            "name": str(getattr(tool_call, "name", "")),
-                            "arguments": {},
-                            "raw_arguments_sha256": sink.store_private(raw_tool_calls),
-                            "malformed": True,
-                        },
-                    }
-                )
+
+        def observe_rejections() -> None:
+            for tool_call in parsed:
+                arguments = getattr(tool_call, "arguments", {})
+                if isinstance(arguments, dict) and "__invalid_arguments__" in arguments:
+                    sink.append(
+                        {
+                            "kind": "tool_call",
+                            "tool_call": {
+                                "name": str(getattr(tool_call, "name", "")),
+                                "arguments": {},
+                                "raw_arguments_sha256": sink.store_private(raw_tool_calls),
+                                "malformed": True,
+                            },
+                        }
+                    )
+
+        _best_effort_observe(sink, "interaction_tool_parse:rejected", observe_rejections)
         return parsed
 
     interaction_runtime.InteractionAgentRuntime._parse_tool_calls = parse_tool_calls_with_rejections
@@ -417,6 +491,7 @@ def build_historical_app(
     run_dir: Path,
     fake_base_url: str,
     model_id: str,
+    process_nonce: str,
     execution_timeout_seconds: float = 90.0,
 ):
     """Import the baseline package only after process-local hooks are ready."""
@@ -426,7 +501,31 @@ def build_historical_app(
     sys.path = [entry for entry in sys.path if Path(entry or ".").resolve() != Path(__file__).resolve().parents[2]]
     sys.path.insert(0, root)
     _configure_historical_state(data_dir.resolve(strict=True), model_id)
-    sink = ObservationSink(run_dir / "events.jsonl", run_dir / "private")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    context_path = run_dir / "process_context.json"
+    previous_nonce: str | None = None
+    try:
+        previous_context = json.loads(context_path.read_text(encoding="utf-8"))
+        if isinstance(previous_context, dict) and isinstance(
+            previous_context.get("process_nonce"), str
+        ):
+            previous_nonce = previous_context["process_nonce"]
+    except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
+        pass
+    if previous_nonce != process_nonce:
+        (run_dir / "active_turn.json").unlink(missing_ok=True)
+        (run_dir / "tainted.json").unlink(missing_ok=True)
+    context_path.write_text(
+        json.dumps({"process_nonce": process_nonce}, sort_keys=True, separators=(",", ":"))
+        + "\n",
+        encoding="utf-8",
+    )
+    sink = ObservationSink(
+        run_dir / "events.jsonl",
+        run_dir / "private",
+        owner_path=run_dir / "active_turn.json",
+        process_nonce=process_nonce,
+    )
     install_baseline_wrappers(
         sink,
         fake_base_url=fake_base_url,
@@ -435,6 +534,16 @@ def build_historical_app(
     app_module = importlib.import_module("server.app")
     app_module.app.router.on_startup.clear()
     app_module.app.router.on_shutdown.clear()
+
+    async def live_lab_ready() -> dict[str, str]:
+        return {"nonce": process_nonce}
+
+    app_module.app.add_api_route(
+        f"/__live_lab_ready__/{process_nonce}",
+        live_lab_ready,
+        methods=["GET"],
+        include_in_schema=False,
+    )
     return app_module.app
 
 
@@ -496,6 +605,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--fake-base-url", default="http://127.0.0.1:8999/v1")
     parser.add_argument("--model-id", default="live-lab/fake-chat-completions")
     parser.add_argument("--execution-timeout-seconds", type=float, default=90.0)
+    parser.add_argument("--readiness-nonce")
     parser.add_argument("--preflight-only", action="store_true")
     return parser
 
@@ -508,6 +618,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _preflight(args)
     if not args.data_dir or not args.run_dir:
         raise ValueError("--data-dir and --run-dir are required unless --preflight-only is used")
+    if not args.readiness_nonce:
+        raise ValueError("--readiness-nonce is required for a measured historical launch")
     verify_baseline_revision(
         Path(args.worktree),
         expected_base=HISTORICAL_BASE_SHA,
@@ -519,6 +631,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_dir=Path(args.run_dir),
         fake_base_url=args.fake_base_url,
         model_id=args.model_id,
+        process_nonce=args.readiness_nonce,
         execution_timeout_seconds=args.execution_timeout_seconds,
     )
     import uvicorn
