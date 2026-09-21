@@ -2,16 +2,18 @@
 
 import inspect
 import json
+from contextlib import nullcontext
 from time import monotonic_ns
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 
 from .agent import ExecutionAgent
 from .tools import get_tool_schemas, get_tool_registry
-from ...config import get_settings
+from ...config import ModelRole, get_settings
 from ...services.evaluation_lab import LabToolPolicy, lab_tool_rejection
 from ...services.evaluation_lab.models import TraceEventKind
 from ...services.evaluation_lab.trace import emit_trace, trace_timing
+from ...services.evaluation_lab.usage import PhaseName, monotonic_phase
 from ...openrouter_client import request_chat_completion
 from ...logging_config import logger
 
@@ -69,7 +71,8 @@ class ExecutionAgentRuntime:
             legacy_storage_key=legacy_storage_key,
         )
         self.api_key = settings.openrouter_api_key
-        self.model = settings.execution_agent_model
+        self.model_config = settings.model_call_config(ModelRole.EXECUTION)
+        self.model = self.model_config.model_id
         self.lab_enabled = settings.lab_enabled
         self.tool_registry = get_tool_registry(agent_name=storage_key, settings=settings)
         self.tool_schemas = get_tool_schemas(settings=settings)
@@ -220,15 +223,21 @@ class ExecutionAgentRuntime:
                 "tool_schema_count": len(tools_to_send) if tools_to_send else 0,
             },
         )
-        with trace_timing(monotonic_ns) as timing:
+        with monotonic_phase(PhaseName.EXECUTION_MODEL, clock=monotonic_ns) as timing:
             logger.info(f"[{self.agent.name}] Calling LLM with model: {self.model}, tools: {len(tools_to_send) if tools_to_send else 0}")
             try:
+                model_policy = (
+                    {"config": self.model_config}
+                    if hasattr(self, "model_config")
+                    else {"model": self.model}
+                )
                 response = await request_chat_completion(
-                    model=self.model,
+                    role=ModelRole.EXECUTION,
                     messages=messages,
                     system=system_prompt,
                     api_key=self.api_key,
-                    tools=tools_to_send
+                    tools=tools_to_send,
+                    **model_policy,
                 )
             except Exception as exc:
                 finished = timing.finish()
@@ -381,9 +390,15 @@ class ExecutionAgentRuntime:
                 return False, result
 
             try:
-                result = tool_func(**arguments)
-                if inspect.isawaitable(result):
-                    result = await result
+                phase = (
+                    monotonic_phase(PhaseName.GMAIL_TOOL, clock=monotonic_ns)
+                    if "gmail" in tool_name.casefold()
+                    else nullcontext()
+                )
+                with phase:
+                    result = tool_func(**arguments)
+                    if inspect.isawaitable(result):
+                        result = await result
                 finished = timing.finish()
                 emit_trace(
                     TraceEventKind.TOOL_CALL,

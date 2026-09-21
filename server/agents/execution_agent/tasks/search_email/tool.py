@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from server.config import get_settings
+from server.config import ModelCallConfig, ModelRole, get_settings
 from server.logging_config import logger
 from server.openrouter_client import request_chat_completion
 from server.services.execution import get_execution_agent_logs
 from server.services.evaluation_lab.models import TraceEventKind
 from server.services.evaluation_lab.trace import emit_trace
+from server.services.evaluation_lab.usage import PhaseName, monotonic_phase
 from server.services.gmail import (
     EmailTextCleaner,
     ProcessedEmail,
@@ -73,13 +74,13 @@ def _validate_gmail_connection() -> Optional[str]:
     return get_active_gmail_user_id()
 
 
-def _validate_openrouter_config() -> Tuple[Optional[str], Optional[str]]:
-    """Validate OpenRouter configuration and return (api_key, model) or (None, error)."""
+def _validate_openrouter_config() -> Tuple[Optional[str], ModelCallConfig | str]:
+    """Validate OpenRouter configuration and return its key and role policy."""
     settings = get_settings()
     api_key = settings.openrouter_api_key
     if not api_key:
         return None, ERROR_OPENROUTER_NOT_CONFIGURED
-    return api_key, settings.execution_agent_search_model
+    return api_key, settings.model_call_config(ModelRole.EMAIL_SEARCH)
 
 
 # Return task tool callables
@@ -107,17 +108,19 @@ async def task_email_search(search_query: str) -> Any:
         logger.error(f"[EMAIL_SEARCH] Gmail not connected")
         return {"error": ERROR_GMAIL_NOT_CONNECTED}
     
-    api_key, model_or_error = _validate_openrouter_config()
+    api_key, config_or_error = _validate_openrouter_config()
     if not api_key:
-        logger.error(f"[EMAIL_SEARCH] OpenRouter not configured: {model_or_error}")
-        return {"error": model_or_error}
+        logger.error(f"[EMAIL_SEARCH] OpenRouter not configured: {config_or_error}")
+        return {"error": config_or_error}
+    assert isinstance(config_or_error, ModelCallConfig)
     
     try:
         result = await _run_email_search(
             search_query=cleaned_query,
             composio_user_id=composio_user_id,
-            model=model_or_error,
+            model=config_or_error.model_id,
             api_key=api_key,
+            model_config=config_or_error,
         )
         logger.info(f"[EMAIL_SEARCH] Found {len(result) if isinstance(result, list) else 0} emails")
         return result
@@ -133,6 +136,7 @@ async def _run_email_search(
     composio_user_id: str,
     model: str,
     api_key: str,
+    model_config: ModelCallConfig | None = None,
 ) -> List[Dict[str, Any]]:
     """Execute the main email search orchestration loop."""
     messages: List[Dict[str, Any]] = [
@@ -150,7 +154,8 @@ async def _run_email_search(
         
         # Get LLM response
         response = await request_chat_completion(
-            model=model,
+            config=model_config or ModelCallConfig(model_id=model),
+            role=ModelRole.EMAIL_SEARCH,
             messages=messages,
             system=get_system_prompt(),
             api_key=api_key,
@@ -338,11 +343,12 @@ async def _perform_search(
     )
 
     try:
-        raw_result = execute_gmail_tool(
-            "GMAIL_FETCH_EMAILS",
-            composio_user_id,
-            arguments=composio_arguments,
-        )
+        with monotonic_phase(PhaseName.GMAIL_TOOL):
+            raw_result = execute_gmail_tool(
+                "GMAIL_FETCH_EMAILS",
+                composio_user_id,
+                arguments=composio_arguments,
+            )
     except Exception as exc:
         logger.error(f"[EMAIL_SEARCH] Gmail API failed for '{query}': {exc}")
         result_model = EmailSearchToolResult(

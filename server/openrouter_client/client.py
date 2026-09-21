@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 import httpx
 
-from ..config import get_settings
+from ..config import ModelCallConfig, ModelRole, get_settings
+from ..services.evaluation_lab.models import TraceEventKind
+from ..services.evaluation_lab.trace import emit_trace
+from ..services.evaluation_lab.usage import emit_usage_evidence
 
 OpenRouterBaseURL = "https://openrouter.ai/api/v1"
 
@@ -46,9 +50,204 @@ def _handle_response_error(exc: httpx.HTTPStatusError) -> None:
     raise OpenRouterError(f"OpenRouter request failed ({response.status_code}): {detail}") from exc
 
 
+def _provider_from_model(model: str) -> str:
+    return model.split("/", 1)[0]
+
+
+def _provider_key(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
+def _tool_names(tools: Optional[List[Dict[str, Any]]]) -> list[str]:
+    names: list[str] = []
+    for tool in tools or []:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        name = function.get("name") if isinstance(function, dict) else None
+        if isinstance(name, str) and name:
+            names.append(name)
+    return names
+
+
+def _malformed_tool_call_count(payload: object) -> int:
+    if not isinstance(payload, dict):
+        return 0
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return 0
+    malformed = 0
+    for choice in choices:
+        message = choice.get("message") if isinstance(choice, dict) else None
+        calls = message.get("tool_calls") if isinstance(message, dict) else None
+        if calls is None:
+            continue
+        if not isinstance(calls, list):
+            malformed += 1
+            continue
+        for call in calls:
+            function = call.get("function") if isinstance(call, dict) else None
+            if not isinstance(function, dict) or not isinstance(function.get("name"), str):
+                malformed += 1
+                continue
+            arguments = function.get("arguments")
+            if isinstance(arguments, dict):
+                continue
+            if not isinstance(arguments, str):
+                malformed += 1
+                continue
+            try:
+                normalized = json.loads(arguments) if arguments.strip() else {}
+            except json.JSONDecodeError:
+                malformed += 1
+                continue
+            if not isinstance(normalized, dict):
+                malformed += 1
+    return malformed
+
+
+def _nested_value(payload: object, *paths: tuple[str, ...]) -> object | None:
+    for path in paths:
+        current = payload
+        for part in path:
+            if not isinstance(current, dict) or part not in current:
+                break
+            current = current[part]
+        else:
+            return current
+    return None
+
+
+def _rate_limit_evidence(response: httpx.Response) -> dict[str, str]:
+    evidence: dict[str, str] = {}
+    for header, target in (
+        ("retry-after", "retry_after_seconds"),
+        ("x-ratelimit-limit", "limit"),
+        ("x-ratelimit-remaining", "remaining"),
+        ("x-ratelimit-reset", "reset"),
+    ):
+        value = response.headers.get(header)
+        if value is not None:
+            evidence[target] = value
+    return evidence
+
+
+def _emit_request_evidence(
+    *,
+    role: ModelRole | None,
+    config: ModelCallConfig | None,
+    model: str,
+    messages: List[Dict[str, str]],
+    tools: Optional[List[Dict[str, Any]]],
+) -> None:
+    emit_trace(
+        TraceEventKind.MODEL_CALL,
+        {
+            "stage": "request",
+            "role": role.value if role is not None else None,
+            "model": model,
+            "provider": _provider_from_model(model),
+            "generation": config.explicit_payload_fields() if config is not None else {},
+            "message_count": len(messages),
+            "tool_names": _tool_names(tools),
+            "requested_seed": config.seed if config is not None else None,
+            "timeout_seconds": config.timeout_seconds if config is not None else 60.0,
+            "max_retries": config.max_retries if config is not None else 0,
+        },
+    )
+
+
+def _emit_response_evidence(
+    *,
+    role: ModelRole | None,
+    config: ModelCallConfig | None,
+    requested_model: str,
+    response: dict[str, Any],
+    http_response: httpx.Response,
+    retry_count: int,
+) -> None:
+    response_model = response.get("model")
+    provider = response.get("provider")
+    requested_provider = _provider_from_model(requested_model)
+    acknowledged_seed = _nested_value(
+        response,
+        ("seed",),
+        ("metadata", "seed"),
+        ("provider_metadata", "seed"),
+    )
+    requested_seed = config.seed if config is not None else None
+    context_limit = _nested_value(
+        response,
+        ("context_length",),
+        ("context_limit",),
+        ("top_provider", "context_length"),
+        ("provider_metadata", "context_length"),
+    )
+    response_provider_key = _provider_key(provider)
+    failover = (
+        response_provider_key is not None
+        and response_provider_key != _provider_key(requested_provider)
+    )
+    emit_trace(
+        TraceEventKind.MODEL_CALL,
+        {
+            "stage": "response",
+            "role": role.value if role is not None else None,
+            "model": response_model if isinstance(response_model, str) else requested_model,
+            "requested_model": requested_model,
+            "provider": provider if isinstance(provider, str) else None,
+            "generation": config.explicit_payload_fields() if config is not None else {},
+            "context_limit": context_limit if isinstance(context_limit, int) else None,
+            "requested_seed": requested_seed,
+            "provider_seed": acknowledged_seed if isinstance(acknowledged_seed, int) else None,
+            "seed_acknowledged": (
+                None
+                if requested_seed is None
+                else acknowledged_seed == requested_seed
+            ),
+            "retry_count": retry_count,
+            "failover": failover,
+            "timeout": False,
+            "rate_limit": _rate_limit_evidence(http_response),
+            "malformed_tool_calls": _malformed_tool_call_count(response),
+        },
+    )
+
+
+def _emit_error_evidence(
+    *,
+    role: ModelRole | None,
+    model: str,
+    config: ModelCallConfig | None,
+    error: BaseException,
+    retry_count: int,
+    response: httpx.Response | None = None,
+) -> None:
+    emit_trace(
+        TraceEventKind.MODEL_CALL,
+        {
+            "stage": "error",
+            "role": role.value if role is not None else None,
+            "model": model,
+            "provider": _provider_from_model(model),
+            "generation": config.explicit_payload_fields() if config is not None else {},
+            "requested_seed": config.seed if config is not None else None,
+            "retry_count": retry_count,
+            "max_retries": config.max_retries if config is not None else 0,
+            "failover": False,
+            "timeout": isinstance(error, httpx.TimeoutException),
+            "status_code": response.status_code if response is not None else None,
+            "rate_limit": _rate_limit_evidence(response) if response is not None else {},
+            "error_type": type(error).__name__,
+        },
+    )
+
+
 async def request_chat_completion(
     *,
-    model: str,
+    model: str | None = None,
+    config: ModelCallConfig | None = None,
+    role: ModelRole | None = None,
     messages: List[Dict[str, str]],
     system: Optional[str] = None,
     api_key: Optional[str] = None,
@@ -57,33 +256,92 @@ async def request_chat_completion(
 ) -> Dict[str, Any]:
     """Request a chat completion and return the raw JSON payload."""
 
+    if config is None and model is None:
+        raise ValueError("model or config is required")
+    if config is not None and model is not None and config.model_id != model:
+        raise ValueError("model and config.model_id must match")
+    resolved_model = config.model_id if config is not None else str(model)
+
     payload: Dict[str, object] = {
-        "model": model,
+        "model": resolved_model,
         "messages": _build_messages(messages, system),
         "stream": False,
     }
     if tools:
         payload["tools"] = tools
+    if config is not None:
+        payload.update(config.explicit_payload_fields())
 
     url = f"{base_url.rstrip('/')}/chat/completions"
+    timeout_seconds = config.timeout_seconds if config is not None else 60.0
+    max_retries = config.max_retries if config is not None else 0
+    _emit_request_evidence(
+        role=role,
+        config=config,
+        model=resolved_model,
+        messages=messages,
+        tools=tools,
+    )
 
     async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                url,
-                headers=_headers(api_key=api_key),
-                json=payload,
-                timeout=60.0,  # Set reasonable timeout instead of None
-            )
+        for attempt in range(max_retries + 1):
+            try:
+                response = await client.post(
+                    url,
+                    headers=_headers(api_key=api_key),
+                    json=payload,
+                    timeout=timeout_seconds,
+                )
+            except httpx.HTTPError as exc:
+                if attempt < max_retries:
+                    continue
+                _emit_error_evidence(
+                    role=role,
+                    model=resolved_model,
+                    config=config,
+                    error=exc,
+                    retry_count=attempt,
+                )
+                raise OpenRouterError(f"OpenRouter request failed: {exc}") from exc
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
+                if attempt < max_retries and response.status_code in {408, 409, 429, 500, 502, 503, 504}:
+                    continue
+                _emit_error_evidence(
+                    role=role,
+                    model=resolved_model,
+                    config=config,
+                    error=exc,
+                    retry_count=attempt,
+                    response=response,
+                )
                 _handle_response_error(exc)
-            return response.json()
-        except httpx.HTTPStatusError as exc:  # pragma: no cover - handled above
-            _handle_response_error(exc)
-        except httpx.HTTPError as exc:
-            raise OpenRouterError(f"OpenRouter request failed: {exc}") from exc
+            raw_response = response.json()
+            if not isinstance(raw_response, dict):
+                error = OpenRouterError("OpenRouter response must be a JSON object")
+                _emit_error_evidence(
+                    role=role,
+                    model=resolved_model,
+                    config=config,
+                    error=error,
+                    retry_count=attempt,
+                    response=response,
+                )
+                raise error
+            _emit_response_evidence(
+                role=role,
+                config=config,
+                requested_model=resolved_model,
+                response=raw_response,
+                http_response=response,
+                retry_count=attempt,
+            )
+            emit_usage_evidence(
+                raw_response,
+                role=role.value if role is not None else "unassigned",
+            )
+            return raw_response
 
     raise OpenRouterError("OpenRouter request failed: unknown error")
 

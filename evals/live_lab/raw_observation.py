@@ -28,6 +28,20 @@ class RawModelCall(_FrozenModel):
     tool_names: tuple[str, ...] = ()
     response_choice_count: int | None = Field(default=None, ge=0)
     response_tool_call_count: int | None = Field(default=None, ge=0)
+    provider: str | None = None
+    generation: dict[str, Any] = Field(default_factory=dict)
+    context_limit: int | None = Field(default=None, ge=1)
+    requested_seed: int | None = None
+    provider_seed: int | None = None
+    seed_acknowledged: bool | None = None
+    retry_count: int = Field(default=0, ge=0)
+    max_retries: int = Field(default=0, ge=0)
+    failover: bool | None = None
+    timeout: bool = False
+    timeout_seconds: float | None = Field(default=None, gt=0)
+    rate_limit: dict[str, Any] = Field(default_factory=dict)
+    malformed_tool_calls: int = Field(default=0, ge=0)
+    usage: dict[str, Any] = Field(default_factory=dict)
     error_type: str | None = None
 
 

@@ -10,7 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from evals.live_lab.baseline_launcher import ObservationSink, wrap_async_call, wrap_sync_call
+from evals.live_lab.baseline_launcher import (
+    ObservationSink,
+    _build_baseline_payload,
+    _build_model_configs,
+    wrap_async_call,
+    wrap_sync_call,
+)
 from evals.live_lab.baseline_observer import run_baseline_turn
 from evals.live_lab.fixtures import build_fixture_manifest, materialize_baseline
 from evals.live_lab.processes import ManagedProcess
@@ -19,6 +25,62 @@ from evals.live_lab.raw_observation import BaselineTurnRequest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 BASELINE_WORKTREE = PROJECT_ROOT.parent / "openpoke-evaluation-baseline"
+
+
+def test_baseline_role_configs_pin_the_same_measured_generation_policy() -> None:
+    configs = _build_model_configs("openai/gpt-4.1-mini")
+
+    assert set(configs) == {
+        "interaction",
+        "execution",
+        "email_search",
+        "summarizer",
+        "classifier",
+    }
+    assert all(
+        config
+        == {
+            "model_id": "openai/gpt-4.1-mini",
+            "temperature": 0.0,
+            "top_p": 1.0,
+            "max_tokens": 1000,
+            "timeout_seconds": 60.0,
+            "max_retries": 0,
+        }
+        for config in configs.values()
+    )
+
+
+def test_baseline_payload_withholds_seed_until_compatibility_is_accepted() -> None:
+    kwargs = {
+        "model": "historical/default",
+        "messages": [{"role": "user", "content": "fixture"}],
+        "system": "system",
+        "tools": [{"function": {"name": "fixture_tool"}}],
+    }
+    withheld = _build_model_configs(
+        "openai/gpt-4.1-mini", seed=1313, seed_compatible=False
+    )["interaction"]
+    accepted = _build_model_configs(
+        "openai/gpt-4.1-mini", seed=1313, seed_compatible=True
+    )["interaction"]
+
+    withheld_payload = _build_baseline_payload(kwargs, withheld)
+    accepted_payload = _build_baseline_payload(kwargs, accepted)
+
+    assert withheld_payload == {
+        "model": "openai/gpt-4.1-mini",
+        "messages": [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "fixture"},
+        ],
+        "stream": False,
+        "tools": [{"function": {"name": "fixture_tool"}}],
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 1000,
+    }
+    assert accepted_payload["seed"] == 1313
 
 
 class _FailingSink:

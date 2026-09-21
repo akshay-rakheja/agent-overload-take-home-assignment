@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List, Optional, TYPE_CHECKING
 
-from ....config import get_settings
+from ....config import ModelCallConfig, ModelRole, get_settings
 from ....logging_config import logger
 from ....openrouter_client import OpenRouterError, request_chat_completion
 from .prompt_builder import SummaryPrompt, build_summarization_prompt
@@ -27,12 +27,19 @@ def _collect_entries(log) -> List[LogEntry]:
     return entries
 
 
-async def _call_openrouter(prompt: SummaryPrompt, model: str, api_key: Optional[str]) -> str:
+async def _call_openrouter(
+    prompt: SummaryPrompt,
+    model: str,
+    api_key: Optional[str],
+    *,
+    model_config: ModelCallConfig | None = None,
+) -> str:
     last_error: Exception | None = None
     for attempt in range(2):
         try:
             response = await request_chat_completion(
-                model=model,
+                config=model_config or ModelCallConfig(model_id=model),
+                role=ModelRole.SUMMARIZER,
                 messages=prompt.messages,
                 system=prompt.system_prompt,
                 api_key=api_key,
@@ -107,7 +114,13 @@ async def summarize_conversation() -> bool:
         },
     )
 
-    summary_text = await _call_openrouter(prompt, settings.summarizer_model, settings.openrouter_api_key)
+    summary_config = settings.model_call_config(ModelRole.SUMMARIZER)
+    summary_text = await _call_openrouter(
+        prompt,
+        summary_config.model_id,
+        settings.openrouter_api_key,
+        model_config=summary_config,
+    )
     summary_body = summary_text if summary_text else state.summary_text
 
     refreshed_entries = _collect_entries(conversation_log)

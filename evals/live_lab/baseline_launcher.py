@@ -13,8 +13,15 @@ import re
 import sys
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
+
+import httpx
+
+from server.services.evaluation_lab.usage import normalize_usage
+from server.services.evaluation_lab.trace import TraceTiming
 
 from .revisions import (
     APPROVED_OVERLAY_PATHS,
@@ -31,6 +38,69 @@ _COMPONENTS = {
     "summarizer_model": "summarizer",
     "classifier_model": "classifier",
 }
+_BASELINE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {}
+_BASELINE_TIMINGS: ContextVar[tuple[TraceTiming, ...]] = ContextVar(
+    "baseline_observation_timings", default=()
+)
+
+
+@contextmanager
+def _baseline_timing():
+    timing = TraceTiming(time.perf_counter_ns)
+    token = _BASELINE_TIMINGS.set((*_BASELINE_TIMINGS.get(), timing))
+    try:
+        yield timing
+    finally:
+        timing.finish()
+        _BASELINE_TIMINGS.reset(token)
+
+
+def _build_model_configs(
+    model_id: str,
+    *,
+    seed: int | None = None,
+    seed_compatible: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """Create one immutable-in-practice measured policy for every baseline role."""
+
+    if not isinstance(model_id, str) or "/" not in model_id or any(
+        character.isspace() for character in model_id
+    ):
+        raise ValueError("model_id must be a provider/model identifier")
+    common: dict[str, Any] = {
+        "model_id": model_id,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 1000,
+        "timeout_seconds": 60.0,
+        "max_retries": 0,
+    }
+    if seed is not None and seed_compatible:
+        common["seed"] = seed
+    return {component: dict(common) for component in _COMPONENTS.values()}
+
+
+def _build_baseline_payload(
+    kwargs: Mapping[str, Any], config: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Build the historical request without editing its checked-out source."""
+
+    messages = list(kwargs.get("messages") or [])
+    system = kwargs.get("system")
+    if isinstance(system, str) and system:
+        messages = [{"role": "system", "content": system}, *messages]
+    payload: dict[str, Any] = {
+        "model": config["model_id"],
+        "messages": messages,
+        "stream": False,
+    }
+    tools = kwargs.get("tools")
+    if tools:
+        payload["tools"] = tools
+    for field in ("temperature", "top_p", "max_tokens", "seed"):
+        if field in config and config[field] is not None:
+            payload[field] = config[field]
+    return payload
 
 
 def _canonical(value: Any) -> bytes:
@@ -157,11 +227,19 @@ def _best_effort_observe(
     stage: str,
     operation: Callable[[], Any],
 ) -> Any | None:
+    observations = tuple(
+        (timing, started)
+        for timing in _BASELINE_TIMINGS.get()
+        if (started := timing._observation_started()) is not None
+    )
     try:
         return operation()
     except BaseException as exc:
         _observation_failure(sink, stage, exc)
         return None
+    finally:
+        for timing, started in observations:
+            timing._observation_finished(started)
 
 
 def _sync_event(component: str, result: Any, elapsed_ms: float, sink: ObservationSink) -> dict[str, Any]:
@@ -196,26 +274,34 @@ def _sync_event(component: str, result: Any, elapsed_ms: float, sink: Observatio
 def wrap_sync_call(component: str, original: Callable[..., Any], sink: ObservationSink):
     @functools.wraps(original)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
-        started = time.perf_counter()
-        try:
-            result = original(*args, **kwargs)
-        except BaseException as exc:
+        caught: BaseException | None = None
+        with _baseline_timing() as timing:
+            try:
+                result = original(*args, **kwargs)
+            except BaseException as error:
+                caught = error
+                timing.finish()
+                elapsed_ms = timing.elapsed_ns / 1_000_000
+            else:
+                timing.finish()
+                elapsed_ms = timing.elapsed_ns / 1_000_000
+        if caught is not None:
             def observe_error() -> None:
                 error_digest = sink.store_private(
-                    {"error_type": type(exc).__name__, "message": str(exc)}
+                    {"error_type": type(caught).__name__, "message": str(caught)}
                 )
                 sink.append(
                     {
                         "kind": component,
-                        "elapsed_ms": (time.perf_counter() - started) * 1000,
-                        "error_type": type(exc).__name__,
+                        "elapsed_ms": elapsed_ms,
+                        "error_type": type(caught).__name__,
                         "error_sha256": error_digest,
                     }
                 )
 
             _best_effort_observe(sink, f"{component}:exception", observe_error)
-            raise
-        elapsed = (time.perf_counter() - started) * 1000
+            raise caught
+        elapsed = elapsed_ms
 
         def observe_success() -> None:
             if component == "interaction_tool":
@@ -284,10 +370,98 @@ def _response_tool_call_count(response: Any) -> int | None:
     return count
 
 
-def wrap_async_call(component: str, original: Callable[..., Any], sink: ObservationSink):
+def _malformed_tool_call_count(response: Any) -> int:
+    if not isinstance(response, dict) or not isinstance(response.get("choices"), list):
+        return 0
+    malformed = 0
+    for choice in response["choices"]:
+        message = choice.get("message") if isinstance(choice, dict) else None
+        calls = message.get("tool_calls") if isinstance(message, dict) else None
+        if calls is None:
+            continue
+        if not isinstance(calls, list):
+            malformed += 1
+            continue
+        for call in calls:
+            function = call.get("function") if isinstance(call, dict) else None
+            arguments = function.get("arguments") if isinstance(function, dict) else None
+            if not isinstance(function, dict) or not isinstance(function.get("name"), str):
+                malformed += 1
+            elif isinstance(arguments, dict):
+                continue
+            elif isinstance(arguments, str):
+                try:
+                    if not isinstance(json.loads(arguments) if arguments.strip() else {}, dict):
+                        malformed += 1
+                except json.JSONDecodeError:
+                    malformed += 1
+            else:
+                malformed += 1
+    return malformed
+
+
+def _model_evidence(
+    model_component: str,
+    kwargs: Mapping[str, Any],
+    *,
+    result: Any | None,
+    elapsed_ms: float,
+    request_digest: str,
+    config: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    policy = dict(config or {})
+    requested_model = str(policy.get("model_id") or kwargs.get("model") or "")
+    requested_seed = policy.get("seed")
+    response_model = result.get("model") if isinstance(result, dict) else None
+    provider = result.get("provider") if isinstance(result, dict) else None
+    provider_seed = result.get("seed") if isinstance(result, dict) else None
+    context_limit = None
+    if isinstance(result, dict):
+        context_limit = result.get("context_length") or result.get("context_limit")
+    requested_provider = requested_model.split("/", 1)[0].casefold()
+    response_provider = provider.casefold() if isinstance(provider, str) else None
+    generation = {
+        key: policy[key]
+        for key in ("temperature", "top_p", "max_tokens", "seed")
+        if key in policy
+    }
+    return {
+        "component": model_component,
+        "model": response_model if isinstance(response_model, str) else requested_model,
+        "provider": provider if isinstance(provider, str) else None,
+        "generation": generation,
+        "context_limit": context_limit if isinstance(context_limit, int) else None,
+        "requested_seed": requested_seed if isinstance(requested_seed, int) else None,
+        "provider_seed": provider_seed if isinstance(provider_seed, int) else None,
+        "seed_acknowledged": (
+            None if requested_seed is None else provider_seed == requested_seed
+        ),
+        "retry_count": 0,
+        "max_retries": int(policy.get("max_retries", 0)),
+        "failover": (
+            response_provider is not None and response_provider != requested_provider
+        ),
+        "timeout": False,
+        "timeout_seconds": float(policy.get("timeout_seconds", 60.0)),
+        "rate_limit": {},
+        "malformed_tool_calls": _malformed_tool_call_count(result),
+        "usage": normalize_usage(result).model_dump(mode="json"),
+        "elapsed_ms": elapsed_ms,
+        "request_sha256": request_digest,
+        "message_count": len(kwargs.get("messages") or []),
+        "tool_names": _tool_names(kwargs.get("tools")),
+    }
+
+
+def wrap_async_call(
+    component: str,
+    original: Callable[..., Any],
+    sink: ObservationSink,
+    *,
+    model_config: Mapping[str, Any] | None = None,
+):
     @functools.wraps(original)
     async def wrapped(*args: Any, **kwargs: Any) -> Any:
-        started = time.perf_counter()
         request_digest = _best_effort_observe(
             sink,
             f"{component}:request",
@@ -296,29 +470,43 @@ def wrap_async_call(component: str, original: Callable[..., Any], sink: Observat
         if not isinstance(request_digest, str):
             request_digest = ""
         model_component = _COMPONENTS.get(component)
-        try:
-            result = original(*args, **kwargs)
-            if inspect.isawaitable(result):
-                result = await result
-        except BaseException as exc:
-            elapsed = (time.perf_counter() - started) * 1000
+        caught: BaseException | None = None
+        with _baseline_timing() as timing:
+            try:
+                result = original(*args, **kwargs)
+                if inspect.isawaitable(result):
+                    result = await result
+            except BaseException as error:
+                caught = error
+                timing.finish()
+                elapsed = timing.elapsed_ns / 1_000_000
+            else:
+                timing.finish()
+                elapsed = timing.elapsed_ns / 1_000_000
+        if caught is not None:
             def observe_error() -> None:
                 error_digest = sink.store_private(
-                    {"error_type": type(exc).__name__, "message": str(exc)}
+                    {"error_type": type(caught).__name__, "message": str(caught)}
                 )
                 if model_component:
+                    evidence = _model_evidence(
+                        model_component,
+                        kwargs,
+                        result=None,
+                        elapsed_ms=elapsed,
+                        request_digest=request_digest,
+                        config=model_config,
+                    )
+                    evidence.update(
+                        {
+                            "error_type": type(caught).__name__,
+                            "timeout": isinstance(caught, (TimeoutError, httpx.TimeoutException)),
+                        }
+                    )
                     sink.append(
                         {
                             "kind": "model_call",
-                            "model_call": {
-                                "component": model_component,
-                                "model": kwargs.get("model"),
-                                "elapsed_ms": elapsed,
-                                "request_sha256": request_digest,
-                                "message_count": len(kwargs.get("messages") or []),
-                                "tool_names": _tool_names(kwargs.get("tools")),
-                                "error_type": type(exc).__name__,
-                            },
+                            "model_call": evidence,
                             "error_sha256": error_digest,
                         }
                     )
@@ -327,33 +515,37 @@ def wrap_async_call(component: str, original: Callable[..., Any], sink: Observat
                         {
                             "kind": component,
                             "elapsed_ms": elapsed,
-                            "error_type": type(exc).__name__,
+                            "error_type": type(caught).__name__,
                             "error_sha256": error_digest,
                         }
                     )
 
             _best_effort_observe(sink, f"{component}:exception", observe_error)
-            raise
-        elapsed = (time.perf_counter() - started) * 1000
+            raise caught
 
         def observe_success() -> None:
             response_digest = sink.store_private(result)
             if model_component:
                 choices = result.get("choices") if isinstance(result, dict) else None
+                evidence = _model_evidence(
+                    model_component,
+                    kwargs,
+                    result=result,
+                    elapsed_ms=elapsed,
+                    request_digest=request_digest,
+                    config=model_config,
+                )
+                evidence.update(
+                    {
+                        "response_sha256": response_digest,
+                        "response_choice_count": len(choices) if isinstance(choices, list) else 0,
+                        "response_tool_call_count": _response_tool_call_count(result),
+                    }
+                )
                 sink.append(
                     {
                         "kind": "model_call",
-                        "model_call": {
-                            "component": model_component,
-                            "model": kwargs.get("model"),
-                            "elapsed_ms": elapsed,
-                            "request_sha256": request_digest,
-                            "response_sha256": response_digest,
-                            "message_count": len(kwargs.get("messages") or []),
-                            "tool_names": _tool_names(kwargs.get("tools")),
-                            "response_choice_count": len(choices) if isinstance(choices, list) else 0,
-                            "response_tool_call_count": _response_tool_call_count(result),
-                        },
+                        "model_call": evidence,
                     }
                 )
             else:
@@ -378,7 +570,18 @@ def _purge_server_modules() -> None:
             del sys.modules[name]
 
 
-def _configure_historical_state(data_dir: Path, model_id: str) -> None:
+def _configure_historical_state(
+    data_dir: Path,
+    model_id: str,
+    *,
+    seed: int | None = None,
+    seed_compatible: bool = False,
+) -> None:
+    global _BASELINE_MODEL_CONFIGS
+
+    _BASELINE_MODEL_CONFIGS = _build_model_configs(
+        model_id, seed=seed, seed_compatible=seed_compatible
+    )
     config = importlib.import_module("server.config")
     settings = config.Settings(
         server_host="127.0.0.1",
@@ -416,13 +619,52 @@ def _configure_historical_state(data_dir: Path, model_id: str) -> None:
     timezone_module._timezone_store = timezone_module.TimezoneStore(data_dir / "timezone.txt")
 
 
-def _transport(fake_base_url: str):
+def _transport(fake_base_url: str, component: str):
     client_module = importlib.import_module("server.openrouter_client.client")
-    original = client_module.request_chat_completion
+    role = _COMPONENTS[component]
+    config = _BASELINE_MODEL_CONFIGS[role]
 
     async def request_chat_completion(**kwargs: Any) -> Any:
-        kwargs["base_url"] = fake_base_url
-        return await original(**kwargs)
+        url = f"{fake_base_url.rstrip('/')}/chat/completions"
+        payload = _build_baseline_payload(kwargs, config)
+        timeout_seconds = float(config["timeout_seconds"])
+        max_retries = int(config["max_retries"])
+        async with httpx.AsyncClient() as client:
+            for attempt in range(max_retries + 1):
+                try:
+                    response = await client.post(
+                        url,
+                        headers=client_module._headers(api_key=kwargs.get("api_key")),
+                        json=payload,
+                        timeout=timeout_seconds,
+                    )
+                except httpx.HTTPError as exc:
+                    if attempt < max_retries:
+                        continue
+                    raise client_module.OpenRouterError(
+                        f"OpenRouter request failed: {exc}"
+                    ) from exc
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    if attempt < max_retries and response.status_code in {
+                        408,
+                        409,
+                        429,
+                        500,
+                        502,
+                        503,
+                        504,
+                    }:
+                        continue
+                    client_module._handle_response_error(exc)
+                result = response.json()
+                if not isinstance(result, dict):
+                    raise client_module.OpenRouterError(
+                        "OpenRouter response must be a JSON object"
+                    )
+                return result
+        raise client_module.OpenRouterError("OpenRouter request failed: unknown error")
 
     return request_chat_completion
 
@@ -490,16 +732,36 @@ def install_baseline_wrappers(
     interaction_tools.handle_tool_call = tool_wrapper
     interaction_runtime.handle_tool_call = tool_wrapper
 
-    transport = _transport(fake_base_url)
     interaction_runtime.request_chat_completion = wrap_async_call(
-        "interaction_model", transport, sink
+        "interaction_model",
+        _transport(fake_base_url, "interaction_model"),
+        sink,
+        model_config=_BASELINE_MODEL_CONFIGS["interaction"],
     )
     execution_runtime.request_chat_completion = wrap_async_call(
-        "execution_model", transport, sink
+        "execution_model",
+        _transport(fake_base_url, "execution_model"),
+        sink,
+        model_config=_BASELINE_MODEL_CONFIGS["execution"],
     )
-    email_search.request_chat_completion = wrap_async_call("email_search_model", transport, sink)
-    summarizer.request_chat_completion = wrap_async_call("summarizer_model", transport, sink)
-    classifier.request_chat_completion = wrap_async_call("classifier_model", transport, sink)
+    email_search.request_chat_completion = wrap_async_call(
+        "email_search_model",
+        _transport(fake_base_url, "email_search_model"),
+        sink,
+        model_config=_BASELINE_MODEL_CONFIGS["email_search"],
+    )
+    summarizer.request_chat_completion = wrap_async_call(
+        "summarizer_model",
+        _transport(fake_base_url, "summarizer_model"),
+        sink,
+        model_config=_BASELINE_MODEL_CONFIGS["summarizer"],
+    )
+    classifier.request_chat_completion = wrap_async_call(
+        "classifier_model",
+        _transport(fake_base_url, "classifier_model"),
+        sink,
+        model_config=_BASELINE_MODEL_CONFIGS["classifier"],
+    )
 
 
 def build_historical_app(
@@ -510,6 +772,8 @@ def build_historical_app(
     fake_base_url: str,
     model_id: str,
     process_nonce: str,
+    seed: int | None = None,
+    seed_compatible: bool = False,
     execution_timeout_seconds: float = 90.0,
 ):
     """Import the baseline package only after process-local hooks are ready."""
@@ -518,7 +782,12 @@ def build_historical_app(
     root = str(worktree.resolve(strict=True))
     sys.path = [entry for entry in sys.path if Path(entry or ".").resolve() != Path(__file__).resolve().parents[2]]
     sys.path.insert(0, root)
-    _configure_historical_state(data_dir.resolve(strict=True), model_id)
+    _configure_historical_state(
+        data_dir.resolve(strict=True),
+        model_id,
+        seed=seed,
+        seed_compatible=seed_compatible,
+    )
     run_dir.mkdir(parents=True, exist_ok=True)
     context_path = run_dir / "process_context.json"
     previous_nonce: str | None = None
@@ -589,6 +858,11 @@ def _preflight(args: argparse.Namespace) -> int:
         roster = json.loads(roster_path.read_text(encoding="utf-8"))
         roster_count = len(roster) if isinstance(roster, list) else 0
     model_id = args.model_id
+    configs = _build_model_configs(
+        model_id,
+        seed=args.seed,
+        seed_compatible=args.seed_compatible,
+    )
     print(
         json.dumps(
             {
@@ -601,6 +875,7 @@ def _preflight(args: argparse.Namespace) -> int:
                     "interaction": model_id,
                     "summarizer": model_id,
                 },
+                "model_configs": configs,
                 "overlay_diff_sha256": revision.overlay_diff_sha256,
                 "overlay_head_sha": revision.overlay_head_sha,
                 "port": args.port,
@@ -621,7 +896,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-dir")
     parser.add_argument("--run-dir")
     parser.add_argument("--fake-base-url", default="http://127.0.0.1:8999/v1")
-    parser.add_argument("--model-id", default="live-lab/fake-chat-completions")
+    parser.add_argument("--model-id", default="openai/gpt-4.1-mini")
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--seed-compatible", action="store_true")
     parser.add_argument("--execution-timeout-seconds", type=float, default=90.0)
     parser.add_argument("--readiness-nonce")
     parser.add_argument("--preflight-only", action="store_true")
@@ -650,6 +927,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         fake_base_url=args.fake_base_url,
         model_id=args.model_id,
         process_nonce=args.readiness_nonce,
+        seed=args.seed,
+        seed_compatible=args.seed_compatible,
         execution_timeout_seconds=args.execution_timeout_seconds,
     )
     import uvicorn

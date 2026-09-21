@@ -7,10 +7,11 @@ from typing import Any, Dict, List, Optional, Set
 
 from .agent import build_candidate_context, build_system_prompt, prepare_message_with_history
 from .tools import DispatchContext, ToolResult, get_tool_schemas, handle_tool_call
-from ...config import get_settings
+from ...config import ModelRole, get_settings
 from ...services.conversation import get_conversation_log, get_working_memory_log
 from ...services.evaluation_lab.models import TraceEventKind
 from ...services.evaluation_lab.trace import emit_trace, trace_timing
+from ...services.evaluation_lab.usage import PhaseName, monotonic_phase
 from ...services.execution import AgentDirectory, RoutingAction, get_agent_directory
 from ...openrouter_client import request_chat_completion
 from ...logging_config import logger
@@ -54,7 +55,8 @@ class InteractionAgentRuntime:
     def __init__(self, *, directory: AgentDirectory | None = None) -> None:
         settings = get_settings()
         self.api_key = settings.openrouter_api_key
-        self.model = settings.interaction_agent_model
+        self.model_config = settings.model_call_config(ModelRole.INTERACTION)
+        self.model = self.model_config.model_id
         self.settings = settings
         self.conversation_log = get_conversation_log()
         self.working_memory_log = get_working_memory_log()
@@ -303,18 +305,26 @@ class InteractionAgentRuntime:
                 "tool_schema_count": len(self.tool_schemas),
             },
         )
-        with trace_timing(monotonic_ns) as timing:
+        with monotonic_phase(
+            PhaseName.INTERACTION_MODEL, clock=monotonic_ns
+        ) as timing:
             logger.debug(
                 "Interaction agent calling LLM",
                 extra={"model": self.model, "tools": len(self.tool_schemas)},
             )
             try:
+                model_policy = (
+                    {"config": self.model_config}
+                    if hasattr(self, "model_config")
+                    else {"model": self.model}
+                )
                 response = await request_chat_completion(
-                    model=self.model,
+                    role=ModelRole.INTERACTION,
                     messages=messages,
                     system=system_prompt,
                     api_key=self.api_key,
                     tools=self.tool_schemas,
+                    **model_policy,
                 )
             except Exception as exc:
                 finished = timing.finish()

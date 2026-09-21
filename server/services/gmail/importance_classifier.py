@@ -6,7 +6,7 @@ import json
 from typing import Any, Dict, Optional
 
 from .processing import ProcessedEmail
-from ...config import get_settings
+from ...config import ModelRole, get_settings
 from ...logging_config import logger
 from ...openrouter_client import OpenRouterError, request_chat_completion
 
@@ -82,7 +82,7 @@ async def classify_email_importance(email: ProcessedEmail) -> Optional[str]:
 
     settings = get_settings()
     api_key = settings.openrouter_api_key
-    model = settings.email_classifier_model
+    model_config = settings.model_call_config(ModelRole.CLASSIFIER)
 
     if not api_key:
         logger.warning("Skipping importance check; OpenRouter API key missing")
@@ -93,7 +93,8 @@ async def classify_email_importance(email: ProcessedEmail) -> Optional[str]:
 
     try:
         response = await request_chat_completion(
-            model=model,
+            config=model_config,
+            role=ModelRole.CLASSIFIER,
             messages=messages,
             system=_SYSTEM_PROMPT,
             api_key=api_key,
