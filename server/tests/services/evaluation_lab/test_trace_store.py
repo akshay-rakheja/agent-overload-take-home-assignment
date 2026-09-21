@@ -7,6 +7,7 @@ import multiprocessing
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -24,6 +25,7 @@ from server.services.evaluation_lab.trace import (
     NullTraceSink,
     emit_trace,
     trace_scope,
+    trace_timing,
 )
 from server.services.evaluation_lab import trace as trace_module
 
@@ -329,6 +331,153 @@ def test_trace_scope_allocates_unique_sequences_to_same_run_async_fanout() -> No
 
     assert [event.sequence for event in events] == [1, 2]
     assert {event.payload["operation_name"] for event in events} == {"first", "second"}
+
+
+def test_trace_timing_counts_overlapping_copied_context_observations_once() -> None:
+    clock_lock = threading.Lock()
+    clock_value = {"now": 0}
+    allow_second_worker = threading.Event()
+    second_worker_sampled = threading.Event()
+
+    def set_clock(value: int) -> None:
+        with clock_lock:
+            clock_value["now"] = value
+
+    def clock() -> int:
+        with clock_lock:
+            value = clock_value["now"]
+        if (
+            threading.current_thread().name == "trace-worker-b"
+            and allow_second_worker.is_set()
+        ):
+            second_worker_sampled.set()
+        return value
+
+    class CoordinatedSink(_CollectingSink):
+        def emit(self, event: TraceEvent) -> None:
+            label = event.payload["operation_name"]
+            if label == "first":
+                set_clock(10)
+                allow_second_worker.set()
+                assert second_worker_sampled.wait(timeout=5)
+                set_clock(20)
+            else:
+                set_clock(30)
+            super().emit(event)
+
+    sink = CoordinatedSink()
+    worker_errors: list[BaseException] = []
+
+    def run_worker(context, label: str) -> None:
+        try:
+            context.run(
+                emit_trace,
+                TraceEventKind.TOOL_CALL,
+                {"operation_name": label},
+            )
+        except BaseException as exc:  # pragma: no cover - thread sentinel
+            worker_errors.append(exc)
+
+    def run_second_worker(context) -> None:
+        try:
+            if not allow_second_worker.wait(timeout=5):
+                raise AssertionError("second worker not released")
+            context.run(
+                emit_trace,
+                TraceEventKind.TOOL_CALL,
+                {"operation_name": "second"},
+            )
+        except BaseException as exc:  # pragma: no cover - thread sentinel
+            worker_errors.append(exc)
+
+    with trace_scope(_context(), sink):
+        with trace_timing(clock) as timing:
+            first_context = copy_context()
+            second_context = copy_context()
+            first = threading.Thread(
+                target=run_worker,
+                args=(first_context, "first"),
+                name="trace-worker-a",
+            )
+            second = threading.Thread(
+                target=run_second_worker,
+                args=(second_context,),
+                name="trace-worker-b",
+            )
+            second.start()
+            first.start()
+            first.join(timeout=5)
+            second.join(timeout=5)
+            assert first.is_alive() is False
+            assert second.is_alive() is False
+            set_clock(40)
+            timing.finish()
+
+    assert worker_errors == []
+    assert timing.started_monotonic_ns == 0
+    assert timing.finished_monotonic_ns == 40
+    assert timing.elapsed_ns == 10
+    assert [event.sequence for event in sink.events] == [1, 2]
+
+
+def test_trace_timing_clips_observation_that_ends_after_parent_endpoint() -> None:
+    clock_lock = threading.Lock()
+    clock_value = {"now": 0}
+    observation_sampled = threading.Event()
+    parent_finished = threading.Event()
+
+    def set_clock(value: int) -> None:
+        with clock_lock:
+            clock_value["now"] = value
+
+    def clock() -> int:
+        with clock_lock:
+            value = clock_value["now"]
+        if threading.current_thread().name == "trace-worker":
+            observation_sampled.set()
+        return value
+
+    class EndpointCrossingSink(_CollectingSink):
+        def emit(self, event: TraceEvent) -> None:
+            assert parent_finished.wait(timeout=5)
+            set_clock(30)
+            super().emit(event)
+
+    sink = EndpointCrossingSink()
+    worker_errors: list[BaseException] = []
+
+    def run_worker(context) -> None:
+        try:
+            context.run(
+                emit_trace,
+                TraceEventKind.TOOL_CALL,
+                {"operation_name": "crossing"},
+            )
+        except BaseException as exc:  # pragma: no cover - thread sentinel
+            worker_errors.append(exc)
+
+    with trace_scope(_context(), sink):
+        with trace_timing(clock) as timing:
+            set_clock(10)
+            worker_context = copy_context()
+            worker = threading.Thread(
+                target=run_worker,
+                args=(worker_context,),
+                name="trace-worker",
+            )
+            worker.start()
+            assert observation_sampled.wait(timeout=5)
+            set_clock(20)
+            timing.finish()
+            parent_finished.set()
+            worker.join(timeout=5)
+            assert worker.is_alive() is False
+
+    assert worker_errors == []
+    assert timing.started_monotonic_ns == 0
+    assert timing.finished_monotonic_ns == 20
+    assert timing.elapsed_ns == 10
+    assert [event.sequence for event in sink.events] == [1]
 
 
 def test_same_run_async_fanout_persists_every_event_without_sink_degradation(

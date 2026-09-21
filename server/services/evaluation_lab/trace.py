@@ -64,7 +64,7 @@ class TraceTiming:
         "_clock",
         "_finished_monotonic_ns",
         "_lock",
-        "_trace_overhead_ns",
+        "_trace_observation_intervals",
         "started_monotonic_ns",
     )
 
@@ -73,7 +73,7 @@ class TraceTiming:
         self._clock = clock
         self._finished_monotonic_ns: int | None = None
         self._lock = threading.RLock()
-        self._trace_overhead_ns = 0
+        self._trace_observation_intervals: list[tuple[int, int]] = []
         self.started_monotonic_ns = clock()
 
     def _observation_started(self) -> int | None:
@@ -93,10 +93,10 @@ class TraceTiming:
             return
         if not isinstance(finished, int) or isinstance(finished, bool):
             return
-        overhead = max(0, finished - started)
+        if finished <= started:
+            return
         with self._lock:
-            if self._active:
-                self._trace_overhead_ns += overhead
+            self._trace_observation_intervals.append((started, finished))
 
     def finish(self) -> int:
         """Freeze the phase endpoint before its terminal trace event is emitted."""
@@ -116,7 +116,27 @@ class TraceTiming:
         finished = self.finish()
         with self._lock:
             gross = max(0, finished - self.started_monotonic_ns)
-            trace_overhead = min(gross, max(0, self._trace_overhead_ns))
+            clipped = sorted(
+                (
+                    max(self.started_monotonic_ns, started),
+                    min(finished, observation_finished),
+                )
+                for started, observation_finished in self._trace_observation_intervals
+                if observation_finished > self.started_monotonic_ns
+                and started < finished
+            )
+
+        trace_overhead = 0
+        if clipped:
+            union_start, union_end = clipped[0]
+            for interval_start, interval_end in clipped[1:]:
+                if interval_start <= union_end:
+                    union_end = max(union_end, interval_end)
+                    continue
+                trace_overhead += max(0, union_end - union_start)
+                union_start, union_end = interval_start, interval_end
+            trace_overhead += max(0, union_end - union_start)
+        trace_overhead = min(gross, trace_overhead)
         return gross - trace_overhead
 
 
