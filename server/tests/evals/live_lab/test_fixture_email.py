@@ -102,8 +102,12 @@ def test_sanitized_fact_manifest_has_a_reproducible_self_digest(tmp_path: Path) 
     canonical = json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
     assert first.manifest_sha256 == hashlib.sha256(canonical).hexdigest()
 
-    destination = tmp_path / ".lab" / "pre-send" / "facts.json"
-    written = write_pre_send_manifest(destination, messages)
+    allowed_root = tmp_path / ".lab"
+    allowed_root.mkdir()
+    destination = allowed_root / "pre-send" / "facts.json"
+    written = write_pre_send_manifest(
+        destination, messages, allowed_root=allowed_root
+    )
     assert written == first
     assert json.loads(destination.read_text(encoding="utf-8"))["manifest_sha256"] == first.manifest_sha256
 
@@ -112,4 +116,45 @@ def test_pre_send_manifest_refuses_tracked_destinations(tmp_path: Path) -> None:
     messages = render_fixture_messages("manifest_7Yp4kD2x")
 
     with pytest.raises(ValueError, match="ignored .lab"):
-        write_pre_send_manifest(tmp_path / "facts.json", messages)
+        write_pre_send_manifest(
+            tmp_path / "facts.json", messages, allowed_root=tmp_path / ".lab"
+        )
+
+
+def test_pre_send_manifest_rejects_parent_traversal_and_existing_destination(
+    tmp_path: Path,
+) -> None:
+    messages = render_fixture_messages("manifest_7Yp4kD2x")
+    allowed_root = tmp_path / ".lab"
+    allowed_root.mkdir()
+
+    with pytest.raises(ValueError, match="traversal|inside"):
+        write_pre_send_manifest(
+            allowed_root / ".." / "outside.json",
+            messages,
+            allowed_root=allowed_root,
+        )
+    assert not (tmp_path / "outside.json").exists()
+
+    destination = allowed_root / "facts.json"
+    destination.write_text("preserve", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        write_pre_send_manifest(destination, messages, allowed_root=allowed_root)
+    assert destination.read_text(encoding="utf-8") == "preserve"
+
+
+def test_pre_send_manifest_rejects_symlink_escape(tmp_path: Path) -> None:
+    messages = render_fixture_messages("manifest_7Yp4kD2x")
+    allowed_root = tmp_path / ".lab"
+    allowed_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (allowed_root / "escape").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        write_pre_send_manifest(
+            allowed_root / "escape" / "facts.json",
+            messages,
+            allowed_root=allowed_root,
+        )
+    assert not (outside / "facts.json").exists()

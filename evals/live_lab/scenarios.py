@@ -5,12 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from collections.abc import Mapping as MappingABC
 from enum import Enum
 from importlib.resources import files
 from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, Mapping, Sequence
-from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -18,6 +18,7 @@ from server.services.evaluation_lab.repetitions import ScheduledPair, build_repe
 
 from .contracts import ExpectedAction
 from .fixture_email import fixture_fact_ids
+from .fixtures import fixture_agent_contract
 
 
 class ScenarioTrack(str, Enum):
@@ -43,22 +44,6 @@ REQUIRED_CONTROLLED_FAMILIES = frozenset(
         "thousand_agent_overload",
     }
 )
-_KNOWN_IDENTITIES = frozenset(
-    {
-        "instagram-security",
-        "instagram-engagement",
-        "ai-video-newsletter",
-        "ai-video-receipts",
-        "slug-space",
-        "slug-hyphen",
-        "same-name-retention",
-        "same-name-partners",
-        "unicode-accented",
-        "unicode-plain",
-        "new:calendar-workflow",
-        "new:clipweaver-auditor",
-    }
-)
 _BANNED = re.compile(
     r"[\w.+-]+@[\w.-]+|https?://|\boauth\b|\bbearer\b|"
     r"api[_ -]?key|access[_ -]?token|client[_ -]?secret|authorization[_ -]?code",
@@ -66,8 +51,31 @@ _BANNED = re.compile(
 )
 
 
+def _validate_safe_tree(value: object) -> None:
+    if isinstance(value, BaseModel):
+        _validate_safe_tree(value.model_dump(mode="python"))
+        return
+    if isinstance(value, MappingABC):
+        for key, item in value.items():
+            _validate_safe_tree(str(key))
+            _validate_safe_tree(item)
+        return
+    if isinstance(value, (list, tuple, set, frozenset)):
+        for item in value:
+            _validate_safe_tree(item)
+        return
+    if isinstance(value, str) and _BANNED.search(value):
+        raise ValueError("controlled scenario contains banned address, secret, or auth URL pattern")
+
+
 class _FrozenModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_banned_nested_values(cls, value: object) -> object:
+        _validate_safe_tree(value)
+        return value
 
 
 class ResetProfile(_FrozenModel):
@@ -145,6 +153,20 @@ class ScenarioOutcome(_FrozenModel):
         return self
 
 
+class ScenarioIdentityContract(_FrozenModel):
+    logical_identity: str
+    name: str
+    purpose: str
+    preexisting: bool
+    agent_id: str | None = None
+
+    @model_validator(mode="after")
+    def _stable_id_only_for_preexisting(self) -> "ScenarioIdentityContract":
+        if self.preexisting != (self.agent_id is not None):
+            raise ValueError("only preexisting fixture identities carry a stable agent ID")
+        return self
+
+
 class ScenarioDefinition(_FrozenModel):
     scenario_id: str
     track: Literal[ScenarioTrack.CONTROLLED] = ScenarioTrack.CONTROLLED
@@ -152,6 +174,7 @@ class ScenarioDefinition(_FrozenModel):
     title: str
     turns: tuple[ScenarioTurn, ...]
     expected: ScenarioOutcome
+    identity_contract: ScenarioIdentityContract | None = None
     gmail: GmailExpectation
     reset_profile: ResetProfile
     repetitions: int = Field(ge=3)
@@ -170,8 +193,17 @@ class ScenarioDefinition(_FrozenModel):
     def _coherent(self) -> "ScenarioDefinition":
         if not self.turns:
             raise ValueError("scenario turns must be nonempty")
-        if self.expected.logical_identity not in _KNOWN_IDENTITIES | {None}:
-            raise ValueError("unknown logical identity")
+        if self.expected.action is ExpectedAction.ABSTAIN:
+            if self.identity_contract is not None:
+                raise ValueError("abstain scenario cannot carry an identity contract")
+        else:
+            contract = self.identity_contract
+            if contract is None or contract.logical_identity != self.expected.logical_identity:
+                raise ValueError("scenario identity must resolve through the selected reset contract")
+            if self.expected.action is ExpectedAction.REUSE and not contract.preexisting:
+                raise ValueError("reuse identity must exist in the selected reset manifest")
+            if self.expected.action is ExpectedAction.CREATE_NEW and contract.preexisting:
+                raise ValueError("create identity must be novel to the selected reset manifest")
         unknown_facts = set(self.gmail.fact_ids) - fixture_fact_ids()
         if unknown_facts:
             raise ValueError(f"unknown fact ids: {sorted(unknown_facts)}")
@@ -179,19 +211,24 @@ class ScenarioDefinition(_FrozenModel):
             raise ValueError("optional controlled scenarios must be budget guarded")
         if self.reset_profile.roster_size == 1000 and not self.optional:
             raise ValueError("1,000-agent scenario must be optional and budget guarded")
+        if self.family == "thousand_agent_overload":
+            if self.reset_profile.profile_id != "scale-1000":
+                raise ValueError("thousand-agent family requires the scale-1000 profile")
+        elif self.reset_profile.profile_id != "standard-100":
+            raise ValueError("non-thousand controlled families require the standard-100 profile")
         return self
 
     @property
     def expected_agent_id(self) -> str | None:
-        identity = self.expected.logical_identity
-        if identity is None or identity.startswith("new:"):
-            return None
-        return str(
-            uuid5(
-                NAMESPACE_URL,
-                f"openpoke-live-lab:{self.reset_profile.fixture_seed}:{identity}",
-            )
-        )
+        return self.identity_contract.agent_id if self.identity_contract is not None else None
+
+    @property
+    def expected_identity_name(self) -> str | None:
+        return self.identity_contract.name if self.identity_contract is not None else None
+
+    @property
+    def expected_identity_purpose(self) -> str | None:
+        return self.identity_contract.purpose if self.identity_contract is not None else None
 
 
 class _RawScenario(_FrozenModel):
@@ -208,8 +245,29 @@ class _RawScenario(_FrozenModel):
     budget_guarded: bool = False
 
 
+class _NovelIdentity(_FrozenModel):
+    logical_identity: str
+    name: str
+    purpose: str
+
+    @field_validator("logical_identity", "name", "purpose")
+    @classmethod
+    def _bounded_contract_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or len(normalized) > 200:
+            raise ValueError("novel identity contract text must be bounded and nonempty")
+        return normalized
+
+    @model_validator(mode="after")
+    def _novel_prefix(self) -> "_NovelIdentity":
+        if not self.logical_identity.startswith("new:"):
+            raise ValueError("novel identity keys must start with new:")
+        return self
+
+
 class _ScenarioDocument(_FrozenModel):
     schema_version: Literal[1]
+    novel_identities: tuple[_NovelIdentity, ...]
     scenarios: tuple[_RawScenario, ...]
 
 
@@ -222,8 +280,6 @@ def load_controlled_scenarios(path: Path | None = None) -> tuple[ScenarioDefinit
 
     source = Path(path) if path is not None else _default_controlled_path()
     rendered = source.read_text(encoding="utf-8")
-    if _BANNED.search(rendered):
-        raise ValueError("controlled scenario contains banned address, secret, or auth URL pattern")
     try:
         document = _ScenarioDocument.model_validate_json(rendered)
     except ValidationError as exc:
@@ -232,16 +288,61 @@ def load_controlled_scenarios(path: Path | None = None) -> tuple[ScenarioDefinit
     ids = [item.scenario_id for item in document.scenarios]
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate controlled scenario id")
+    novel_ids = [item.logical_identity for item in document.novel_identities]
+    if len(novel_ids) != len(set(novel_ids)):
+        raise ValueError("duplicate novel identity contract")
+    novel_contracts = {item.logical_identity: item for item in document.novel_identities}
+    referenced_novel_ids = {
+        item.expected.logical_identity
+        for item in document.scenarios
+        if item.expected.action is ExpectedAction.CREATE_NEW
+    }
+    if referenced_novel_ids != set(novel_contracts):
+        raise ValueError("novel identity contracts must exactly match controlled create scenarios")
+    if len({item.name.casefold() for item in document.novel_identities}) != len(document.novel_identities):
+        raise ValueError("novel identity names must be unique")
     scenarios: list[ScenarioDefinition] = []
     for raw in document.scenarios:
         profile = RESET_PROFILES.get(raw.reset_profile)
         if profile is None:
             raise ValueError(f"unknown reset profile: {raw.reset_profile}")
+        fixture_contracts = fixture_agent_contract(
+            seed=profile.fixture_seed, roster_size=profile.roster_size
+        )
+        fixture_names = {item.name.casefold() for item in fixture_contracts.values()}
+        logical_identity = raw.expected.logical_identity
+        identity_contract: ScenarioIdentityContract | None = None
+        if raw.expected.action is ExpectedAction.REUSE:
+            fixture = fixture_contracts.get(logical_identity or "")
+            if fixture is None:
+                raise ValueError("reuse identity must exist in selected reset profile")
+            identity_contract = ScenarioIdentityContract(
+                logical_identity=fixture.logical_identity,
+                name=fixture.name,
+                purpose=fixture.purpose,
+                preexisting=True,
+                agent_id=fixture.agent_id,
+            )
+        elif raw.expected.action is ExpectedAction.CREATE_NEW:
+            novel = novel_contracts.get(logical_identity or "")
+            if (
+                novel is None
+                or logical_identity in fixture_contracts
+                or novel.name.casefold() in fixture_names
+            ):
+                raise ValueError("create identity must be declared novel and absent from reset profile")
+            identity_contract = ScenarioIdentityContract(
+                logical_identity=novel.logical_identity,
+                name=novel.name,
+                purpose=novel.purpose,
+                preexisting=False,
+            )
         try:
             scenarios.append(
                 ScenarioDefinition(
                     **raw.model_dump(exclude={"reset_profile"}),
                     reset_profile=profile,
+                    identity_contract=identity_contract,
                 )
             )
         except ValidationError as exc:

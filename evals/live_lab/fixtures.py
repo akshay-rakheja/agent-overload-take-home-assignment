@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from importlib.resources import files
 from pathlib import Path
@@ -28,6 +29,15 @@ _ALLOWED_ROSTER_SIZES = {10, 100, 500, 1_000}
 _BASE_TIME = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
 
 
+@dataclass(frozen=True)
+class FixtureAgentContract:
+    logical_identity: str
+    agent_id: str
+    name: str
+    purpose: str
+    status: str
+
+
 def _read_spec() -> dict[str, object]:
     resource = files("evals.live_lab").joinpath("fixture_spec.json")
     return json.loads(resource.read_text(encoding="utf-8"))
@@ -35,6 +45,29 @@ def _read_spec() -> dict[str, object]:
 
 def _logical_id(seed: int, key: str) -> str:
     return str(uuid5(NAMESPACE_URL, f"openpoke-live-lab:{seed}:{key}"))
+
+
+def fixture_agent_contract(
+    *, seed: int, roster_size: int
+) -> dict[str, FixtureAgentContract]:
+    """Return the canonical named identities present in a reset manifest."""
+
+    if roster_size not in _ALLOWED_ROSTER_SIZES:
+        raise ValueError(f"roster_size must be one of {sorted(_ALLOWED_ROSTER_SIZES)}")
+    spec = _read_spec()
+    named = tuple(dict(item) for item in spec["named_agents"])  # type: ignore[index]
+    if roster_size < len(named):
+        raise ValueError("roster_size cannot omit canonical named fixture identities")
+    return {
+        str(item["key"]): FixtureAgentContract(
+            logical_identity=str(item["key"]),
+            agent_id=_logical_id(seed, str(item["key"])),
+            name=str(item["name"]),
+            purpose=str(item["purpose"]),
+            status=str(item["status"]),
+        )
+        for item in named
+    }
 
 
 def _entry(tag: str, offset: int, payload: str) -> JournalEntry:

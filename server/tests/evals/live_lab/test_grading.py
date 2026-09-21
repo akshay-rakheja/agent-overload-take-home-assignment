@@ -28,6 +28,8 @@ def _replace(result: SystemRunResult, **updates) -> SystemRunResult:
 def _result(scenario_id: str, *, system: str = "enhanced"):
     scenario = next(item for item in load_controlled_scenarios() if item.scenario_id == scenario_id)
     expected_id = scenario.expected_agent_id
+    action = scenario.expected.action.value
+    selected_id = expected_id or "00000000-0000-4000-8000-000000000123"
     response = " ".join(
         fact
         for fact_id in scenario.gmail.fact_ids
@@ -39,18 +41,37 @@ def _result(scenario_id: str, *, system: str = "enhanced"):
         system=system,
         decision=_available({"action": scenario.expected.action.value, "agent_id": expected_id}),
         candidates=_available(
-            ([{"agent_id": expected_id, "logical_identity": scenario.expected.logical_identity}]
+            ([{"agent_id": expected_id, "name": scenario.expected_identity_name}]
              if expected_id else [])
         ),
-        attempted_dispatch=_available({"attempted": True, "reference_type": "reuse"}),
+        attempted_dispatch=_available(
+            {
+                "reference_type": "reuse" if action == "reuse" else "create",
+                "requested_agent_id": expected_id,
+                "routing_action": action,
+                "authorized_ids": [expected_id] if expected_id else [],
+            }
+        ),
         accepted_dispatch=_available(
-            {"status": "accepted", "success": True, "selected_agent_id": expected_id}
+            {"status": "accepted", "success": True, "selected_agent_id": selected_id}
         ),
-        selected_identity=_available({"agent_id": expected_id}) if expected_id else _available({"logical_identity": scenario.expected.logical_identity}),
+        authorized_ids=_available([expected_id] if expected_id else []),
+        selected_identity=(
+            _available({"agent_id": selected_id, "name": scenario.expected_identity_name})
+        ),
+        created_identity=(
+            _available({"agent_id": selected_id, "name": scenario.expected_identity_name})
+            if action == "create_new"
+            else {"availability": Availability.NOT_APPLICABLE, "reason": "not created"}
+        ),
         identity_delta=_available(
-            {"directory_count_before": 100, "directory_count_after": 100}
+            {
+                "directory_count_before": 100,
+                "directory_count_after": 101 if action == "create_new" else 100,
+                "created_agent_ids": [selected_id] if action == "create_new" else [],
+                "selected_agent_ids": [selected_id] if action != "abstain" else [],
+            }
         ),
-        duplicates=_available([]),
         gmail_evidence=_available(
             [
                 {
@@ -175,15 +196,16 @@ def test_ambiguity_requires_no_dispatch_and_explicit_clarification() -> None:
     scenario, result = _result("ambiguous-creator-clarification")
     result = _replace(
         result,
-        attempted_dispatch=_available({"attempted": False}),
-        accepted_dispatch=_available({"status": "not_attempted"}),
+        authorized_ids=_available([]),
+        attempted_dispatch={"availability": Availability.UNAVAILABLE, "reason": "not emitted"},
+        accepted_dispatch={"availability": Availability.UNAVAILABLE, "reason": "not emitted"},
         selected_identity={
             "availability": Availability.NOT_APPLICABLE,
             "reason": "abstained before dispatch",
         },
-        identity_delta=_available(
-            {"directory_count_before": 100, "directory_count_after": 100}
-        ),
+        identity_delta={"availability": Availability.UNAVAILABLE, "reason": "not emitted"},
+        gmail_evidence={"availability": Availability.UNAVAILABLE, "reason": "not emitted"},
+        context_metrics={"availability": Availability.UNAVAILABLE, "reason": "not emitted"},
         final_response=_available(
             "Which Instagram workflow should handle this: security or engagement?"
         ),
@@ -192,10 +214,11 @@ def test_ambiguity_requires_no_dispatch_and_explicit_clarification() -> None:
     scorecard = grade_scenario(scenario, result)
     assert scorecard.routing.status is GradeStatus.PASS
     assert scorecard.response.status is GradeStatus.PASS
-    assert scorecard.identity.status is GradeStatus.PASS
+    assert scorecard.identity.status is GradeStatus.NOT_APPLICABLE
+    assert scorecard.gmail_safety.status is GradeStatus.NOT_APPLICABLE
 
     dispatched = _replace(result, attempted_dispatch=_available({"attempted": True}))
-    assert grade_scenario(scenario, dispatched).routing.status is GradeStatus.FAIL
+    assert grade_scenario(scenario, dispatched).routing.status is GradeStatus.CONTRADICTORY
 
 
 def test_no_result_requires_query_empty_evidence_explicit_absence_and_no_invention() -> None:
@@ -223,6 +246,148 @@ def test_no_result_requires_query_empty_evidence_explicit_absence_and_no_inventi
 
     invented = _replace(result, final_response=_available("No result, but it was CAD 47.80."))
     assert grade_scenario(scenario, invented).response.status is GradeStatus.FAIL
+
+
+def test_no_result_rejects_any_nonempty_failed_or_paginated_matching_event() -> None:
+    scenario, result = _result("honest-no-result")
+    empty = {
+        "operation_name": scenario.gmail.operation,
+        "stage": "completed",
+        "query_sha256": _query_sha256(scenario.gmail.query),
+        "result_count": 0,
+        "fact_ids": [],
+        "has_more": False,
+        "sdk_executed": True,
+    }
+    contradictions = [
+        {**empty, "result_count": 1, "fact_ids": ["SEC-7419"]},
+        {**empty, "stage": "failed"},
+        {**empty, "has_more": True},
+    ]
+    for contradiction in contradictions:
+        card = grade_scenario(
+            scenario,
+            _replace(
+                result,
+                gmail_evidence=_available([empty, contradiction]),
+                final_response=_available("No matching fixture email was found."),
+            ),
+        )
+        assert card.response.status in {GradeStatus.FAIL, GradeStatus.CONTRADICTORY}
+
+
+def test_response_rejects_contradictory_expected_fields_and_unknown_facts() -> None:
+    scenario, result = _result("exact-instagram-security")
+    canonical = " ".join(fixture_response_facts("SEC-7419"))
+    contradictory = _replace(
+        result,
+        final_response=_available(
+            f"{canonical}. Correction: device was Pixel 9 in Paris, not Lisbon."
+        ),
+    )
+    assert grade_scenario(scenario, contradictory).response.status is GradeStatus.FAIL
+
+    no_result, empty = _result("honest-no-result")
+    empty = _replace(
+        empty,
+        gmail_evidence=_available(
+            [
+                {
+                    "operation_name": no_result.gmail.operation,
+                    "stage": "completed",
+                    "query_sha256": _query_sha256(no_result.gmail.query),
+                    "result_count": 0,
+                    "fact_ids": [],
+                    "has_more": False,
+                    "sdk_executed": True,
+                }
+            ]
+        ),
+        final_response=_available(
+            "No matching fixture email was found. CAD 999.99, code XYZ-2222."
+        ),
+    )
+    assert grade_scenario(no_result, empty).response.status is GradeStatus.FAIL
+
+
+def test_routing_rejects_rejected_wrong_or_unauthorized_dispatch() -> None:
+    scenario, result = _result("exact-instagram-security")
+    wrong_id = "00000000-0000-4000-8000-000000000999"
+    cases = [
+        _replace(result, authorized_ids=_available([])),
+        _replace(
+            result,
+            attempted_dispatch=_available(
+                {
+                    "reference_type": "reuse",
+                    "requested_agent_id": wrong_id,
+                    "routing_action": "reuse",
+                    "authorized_ids": [scenario.expected_agent_id],
+                }
+            ),
+        ),
+        _replace(
+            result,
+            accepted_dispatch=_available(
+                {
+                    "status": "rejected",
+                    "success": False,
+                    "code": "routing_not_authorized",
+                }
+            ),
+        ),
+    ]
+
+    for case in cases:
+        assert grade_scenario(scenario, case).routing.status in {
+            GradeStatus.FAIL,
+            GradeStatus.CONTRADICTORY,
+        }
+
+
+def test_abstain_rejects_any_accepted_dispatch_even_without_attempt_event() -> None:
+    scenario, result = _result("ambiguous-creator-clarification")
+    result = _replace(
+        result,
+        authorized_ids=_available([]),
+        attempted_dispatch={"availability": Availability.UNAVAILABLE, "reason": "not emitted"},
+        accepted_dispatch=_available(
+            {
+                "status": "accepted",
+                "success": True,
+                "selected_agent_id": "00000000-0000-4000-8000-000000000999",
+            }
+        ),
+        final_response=_available("Which workflow should handle this?"),
+    )
+    assert grade_scenario(scenario, result).routing.status is GradeStatus.CONTRADICTORY
+
+
+def test_stable_id_conflict_overrides_matching_logical_or_name_fallback() -> None:
+    scenario, result = _result("exact-instagram-security")
+    wrong_id = "00000000-0000-4000-8000-000000000999"
+    result = _replace(
+        result,
+        selected_identity=_available(
+            {
+                "agent_id": wrong_id,
+                "logical_identity": scenario.expected.logical_identity,
+                "name": scenario.expected_identity_name,
+            }
+        ),
+        candidates=_available(
+            [
+                {
+                    "agent_id": wrong_id,
+                    "logical_identity": scenario.expected.logical_identity,
+                    "name": scenario.expected_identity_name,
+                }
+            ]
+        ),
+    )
+    card = grade_scenario(scenario, result)
+    assert card.identity.status is GradeStatus.FAIL
+    assert card.candidate_rank.availability is Availability.UNAVAILABLE
 
 
 def test_duplicate_prevention_uses_stable_identity_and_directory_delta() -> None:

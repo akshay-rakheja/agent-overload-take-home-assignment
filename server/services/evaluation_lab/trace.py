@@ -687,6 +687,11 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
     gmail_evidence: list[JsonValue] = []
     timings: list[JsonValue] = []
     errors: list[JsonValue] = []
+    identity_deltas: list[dict[str, JsonValue]] = []
+    created_agent_ids: list[str] = []
+    selected_agent_ids: list[str] = []
+    dispatch_attempts: list[dict[str, JsonValue]] = []
+    dispatch_results: list[dict[str, JsonValue]] = []
     usage_by_attempt: dict[
         str, dict[tuple[str, int], ObservedValue[Any]]
     ] = {}
@@ -721,8 +726,10 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
             values["authorized_ids"] = _available(payload["authorized_ids"])
         elif event.kind is TraceEventKind.DISPATCH_ATTEMPT:
             values["attempted_dispatch"] = _available(payload)
+            dispatch_attempts.append(payload)
         elif event.kind is TraceEventKind.DISPATCH_RESULT:
             values["accepted_dispatch"] = _available(payload)
+            dispatch_results.append(payload)
         elif event.kind is TraceEventKind.IDENTITY:
             for source, target in (
                 ("selected", "selected_identity"),
@@ -732,6 +739,16 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
             ):
                 if source in payload:
                     values[target] = _available(payload[source])
+            delta = payload.get("delta")
+            if isinstance(delta, dict):
+                identity_deltas.append(delta)
+            for source, target in (
+                ("created", created_agent_ids),
+                ("selected", selected_agent_ids),
+            ):
+                identity = payload.get(source)
+                if isinstance(identity, dict) and isinstance(identity.get("agent_id"), str):
+                    target.append(identity["agent_id"])
         elif event.kind is TraceEventKind.GMAIL_EVIDENCE:
             gmail_evidence.append(payload)
         elif event.kind is TraceEventKind.FINAL_RESPONSE and "response" in payload:
@@ -800,6 +817,25 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
         values["timings"] = _available(timings)
     if errors:
         values["errors"] = _available(errors)
+    if dispatch_attempts:
+        combined_attempt = dict(dispatch_attempts[-1])
+        combined_attempt["events"] = list(dispatch_attempts)
+        values["attempted_dispatch"] = _available(combined_attempt)
+    if dispatch_results:
+        combined_result = dict(dispatch_results[-1])
+        combined_result["events"] = list(dispatch_results)
+        values["accepted_dispatch"] = _available(combined_result)
+    if identity_deltas:
+        combined_delta = dict(identity_deltas[-1])
+        first_before = identity_deltas[0].get("directory_count_before")
+        last_after = identity_deltas[-1].get("directory_count_after")
+        if isinstance(first_before, int) and not isinstance(first_before, bool):
+            combined_delta["directory_count_before"] = first_before
+        if isinstance(last_after, int) and not isinstance(last_after, bool):
+            combined_delta["directory_count_after"] = last_after
+        combined_delta["created_agent_ids"] = list(created_agent_ids)
+        combined_delta["selected_agent_ids"] = list(selected_agent_ids)
+        values["identity_delta"] = _available(combined_delta)
 
     missing_attempt = ObservedValue(
         availability=Availability.UNAVAILABLE,

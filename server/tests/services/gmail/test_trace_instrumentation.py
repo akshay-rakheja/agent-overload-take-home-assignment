@@ -11,7 +11,9 @@ from uuid import uuid4
 
 import pytest
 
+from evals.live_lab.fixture_email import build_fact_manifest, render_fixture_messages
 from server.agents.execution_agent.tasks.search_email import tool as email_search
+from server.agents.execution_agent.tasks.search_email.schemas import GmailSearchEmail
 from server.config import Settings
 from server.services.evaluation_lab.models import TraceContext, TraceEventKind
 from server.services.evaluation_lab.trace import trace_scope
@@ -395,16 +397,22 @@ def test_email_search_traces_sanitized_facts_from_exact_processed_result(
         "private@example.invalid",
         "private body",
     )
+    fixture_message = next(
+        item
+        for item in render_fixture_messages("run_A7k29mQ4")
+        if item.fact_id == "SEC-7419"
+    )
+    manifest = build_fact_manifest(render_fixture_messages("run_A7k29mQ4"))
     processed = ProcessedEmail(
         id=private_markers[0],
         thread_id=private_markers[1],
         query="from:private@example.invalid",
-        subject="[OpenPoke Interview Fixture] run_A7k29mQ4 security SEC-7419",
+        subject=fixture_message.subject,
         sender=private_markers[2],
         recipient="recipient@example.invalid",
         timestamp=datetime(2026, 9, 21, tzinfo=timezone.utc),
         label_ids=["INBOX"],
-        clean_text=private_markers[3],
+        clean_text=fixture_message.body,
         has_attachments=True,
         attachment_count=2,
         attachment_filenames=["private.pdf"],
@@ -425,15 +433,16 @@ def test_email_search_traces_sanitized_facts_from_exact_processed_result(
     emails = {}
     sink = CollectingSink()
 
-    with trace_scope(_trace_context(), sink):
-        result = asyncio.run(
-            email_search._perform_search(
-                arguments={"query": "from:private@example.invalid", "max_results": 5},
-                queries=queries,
-                emails=emails,
-                composio_user_id="opaque-lab-user",
+    with email_search.fixture_fact_manifest_scope(manifest):
+        with trace_scope(_trace_context(), sink):
+            result = asyncio.run(
+                email_search._perform_search(
+                    arguments={"query": "from:private@example.invalid", "max_results": 5},
+                    queries=queries,
+                    emails=emails,
+                    composio_user_id="opaque-lab-user",
+                )
             )
-        )
 
     event = _gmail_events(sink)[-1]
     serialized_event = json.dumps(event.model_dump(mode="json"))
@@ -454,3 +463,74 @@ def test_email_search_traces_sanitized_facts_from_exact_processed_result(
     }
     for marker in private_markers:
         assert marker not in serialized_event
+
+
+def _fixture_search_email(*, subject: str, body: str) -> GmailSearchEmail:
+    return GmailSearchEmail(
+        id="private-message-id",
+        thread_id="private-thread-id",
+        query="private query",
+        subject=subject,
+        sender="private@example.invalid",
+        recipient="recipient@example.invalid",
+        timestamp=datetime(2026, 9, 21, tzinfo=timezone.utc),
+        clean_text=body,
+    )
+
+
+def test_fixture_fact_capture_requires_active_current_manifest() -> None:
+    messages = render_fixture_messages("run_A7k29mQ4")
+    security = next(item for item in messages if item.fact_id == "SEC-7419")
+    email = _fixture_search_email(subject=security.subject, body=security.body)
+
+    assert email_search._captured_fixture_fact_ids([email]) == []
+    with email_search.fixture_fact_manifest_scope(build_fact_manifest(messages)):
+        assert email_search._captured_fixture_fact_ids([email]) == ["SEC-7419"]
+
+
+@pytest.mark.parametrize(
+    ("subject", "body"),
+    [
+        (
+            "[OpenPoke Interview Fixture] run_A7k29mQ4 spoof SEC-7419",
+            "Completely unrelated body. NF-99999 private ticket.",
+        ),
+        (
+            "[OpenPoke Interview Fixture] otherRun9 security SEC-7419",
+            "Fabricated security notice SEC-7419 from Lisbon on Pixel 10 indigo-orbit.",
+        ),
+        (
+            "[OpenPoke Interview Fixture] run_A7k29mQ4 unknown NF-99999",
+            "NF-99999 with all unrelated values.",
+        ),
+    ],
+)
+def test_fixture_fact_capture_rejects_spoof_wrong_run_and_unknown_id(
+    subject: str, body: str
+) -> None:
+    manifest = build_fact_manifest(render_fixture_messages("run_A7k29mQ4"))
+    email = _fixture_search_email(subject=subject, body=body)
+
+    with email_search.fixture_fact_manifest_scope(manifest):
+        assert email_search._captured_fixture_fact_ids([email]) == []
+
+
+def test_fixture_fact_capture_rejects_missing_or_contradictory_values() -> None:
+    messages = render_fixture_messages("run_A7k29mQ4")
+    security = next(item for item in messages if item.fact_id == "SEC-7419")
+    manifest = build_fact_manifest(messages)
+    missing = _fixture_search_email(
+        subject=security.subject,
+        body="Fabricated security notice SEC-7419 from Lisbon.",
+    )
+    contradictory = _fixture_search_email(
+        subject=security.subject,
+        body=(
+            "Fabricated security notice SEC-7419 at 2026-09-18 04:12 UTC from "
+            "Paris on Pixel 9. Verification phrase: indigo-orbit."
+        ),
+    )
+
+    with email_search.fixture_fact_manifest_scope(manifest):
+        assert email_search._captured_fixture_fact_ids([missing]) == []
+        assert email_search._captured_fixture_fact_ids([contradictory]) == []

@@ -1,5 +1,17 @@
 {
   "schema_version": 1,
+  "novel_identities": [
+    {
+      "logical_identity": "new:calendar-workflow",
+      "name": "Calendar Digest Workflow",
+      "purpose": "Summarize fabricated calendar digests"
+    },
+    {
+      "logical_identity": "new:clipweaver-auditor",
+      "name": "ClipWeaver Invoice Auditor",
+      "purpose": "Audit fabricated ClipWeaver invoices"
+    }
+  ],
   "scenarios": [
     {
       "scenario_id": "exact-instagram-security",

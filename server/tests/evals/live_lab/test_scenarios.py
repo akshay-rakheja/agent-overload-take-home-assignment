@@ -12,11 +12,18 @@ import pytest
 
 from evals.live_lab.fixture_email import fixture_fact_ids
 from evals.live_lab.scenarios import (
+    GmailExpectation,
     REQUIRED_CONTROLLED_FAMILIES,
+    RESET_PROFILES,
+    ScenarioDefinition,
+    ScenarioOutcome,
     ScenarioTrack,
+    ScenarioTurn,
     load_controlled_scenarios,
     predeclare_controlled_scenarios,
 )
+from evals.live_lab.contracts import ExpectedAction
+from pydantic import ValidationError
 
 
 def _raw_controlled() -> dict[str, object]:
@@ -88,6 +95,81 @@ def test_loader_fails_closed_on_invalid_predeclarations(tmp_path, mutate, match:
     mutate(raw)
 
     with pytest.raises(ValueError, match=match):
+        load_controlled_scenarios(_write(tmp_path, raw))
+
+
+@pytest.mark.parametrize(
+    ("encoded", "match"),
+    [
+        ("user\\u0040example.com", "banned"),
+        ("\\u0068ttps:\\/\\/example.com", "banned"),
+        ("CLIENT\\u005fSeCrEt = value", "banned"),
+        ("Bearer\\u0020opaque-token", "banned"),
+    ],
+)
+def test_loader_rejects_banned_content_after_json_decoding(
+    tmp_path: Path, encoded: str, match: str
+) -> None:
+    raw = _raw_controlled()
+    rendered = json.dumps(raw).replace(
+        "Ask Instagram Security Monitor to summarize fixture SEC-7419.",
+        encoded,
+    )
+    path = tmp_path / "controlled.json"
+    path.write_text(rendered, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=match):
+        load_controlled_scenarios(path)
+
+
+def test_direct_scenario_construction_rejects_nested_banned_content() -> None:
+    with pytest.raises(ValidationError, match="banned"):
+        ScenarioDefinition(
+            scenario_id="direct-invalid",
+            family="exact_named_reuse",
+            title="Direct invalid",
+            turns=(ScenarioTurn(text="nested user@example.com"),),
+            expected=ScenarioOutcome(
+                action=ExpectedAction.REUSE,
+                logical_identity="instagram-security",
+            ),
+            gmail=GmailExpectation(
+                operation="GMAIL_FETCH_EMAILS",
+                query='subject:"[OpenPoke Interview Fixture]" "SEC-7419"',
+                fact_ids=("SEC-7419",),
+            ),
+            reset_profile=RESET_PROFILES["standard-100"],
+            repetitions=3,
+        )
+
+
+@pytest.mark.parametrize(
+    ("action", "logical_identity"),
+    [
+        ("reuse", "new:calendar-workflow"),
+        ("create_new", "instagram-security"),
+    ],
+)
+def test_loader_rejects_crossed_action_identity_contracts(
+    tmp_path: Path, action: str, logical_identity: str
+) -> None:
+    raw = _raw_controlled()
+    raw["scenarios"][0]["expected"] = {
+        "action": action,
+        "logical_identity": logical_identity,
+    }
+
+    with pytest.raises(ValueError, match="identity|reuse|create"):
+        load_controlled_scenarios(_write(tmp_path, raw))
+
+
+def test_loader_rejects_family_crossed_to_wrong_reset_profile(tmp_path: Path) -> None:
+    raw = _raw_controlled()
+    raw["scenarios"][0]["reset_profile"] = "scale-1000"
+    raw["scenarios"][0]["optional"] = True
+    raw["scenarios"][0]["budget_guarded"] = True
+
+    with pytest.raises(ValueError, match="profile"):
         load_controlled_scenarios(_write(tmp_path, raw))
 
 

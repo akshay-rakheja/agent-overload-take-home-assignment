@@ -7,6 +7,7 @@ import json
 import os
 import re
 import secrets
+import stat
 from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, Mapping
@@ -40,15 +41,16 @@ class FixtureMessage(_FrozenModel):
 class ManifestFact(_FrozenModel):
     template_id: str
     subject_sha256: str
+    body_sha256: str
     envelope: Literal["self"] = "self"
     response_facts: tuple[str, ...]
 
-    @field_validator("subject_sha256")
+    @field_validator("subject_sha256", "body_sha256")
     @classmethod
     def _sha256(cls, value: str) -> str:
         normalized = value.casefold()
         if len(normalized) != 64 or any(character not in "0123456789abcdef" for character in normalized):
-            raise ValueError("subject_sha256 must be SHA-256")
+            raise ValueError("manifest hashes must be SHA-256")
         return normalized
 
 
@@ -231,6 +233,7 @@ def build_fact_manifest(messages: tuple[FixtureMessage, ...]) -> FixtureFactMani
         item.fact_id: ManifestFact(
             template_id=item.template_id,
             subject_sha256=hashlib.sha256(item.subject.encode("utf-8")).hexdigest(),
+            body_sha256=hashlib.sha256(item.body.encode("utf-8")).hexdigest(),
             response_facts=item.response_facts,
         )
         for item in messages
@@ -242,12 +245,31 @@ def build_fact_manifest(messages: tuple[FixtureMessage, ...]) -> FixtureFactMani
 def write_pre_send_manifest(
     destination: Path,
     messages: tuple[FixtureMessage, ...],
+    *,
+    allowed_root: Path,
 ) -> FixtureFactManifest:
-    """Atomically write the sanitized manifest below the ignored ``.lab`` root."""
+    """Atomically create a manifest inside one explicit, existing ``.lab`` root."""
 
     path = Path(destination)
-    if ".lab" not in path.parts:
-        raise ValueError("pre-send manifests must be written below the ignored .lab directory")
+    root = Path(allowed_root)
+    if root.name != ".lab" or ".." in root.parts:
+        raise ValueError("allowed root must be the explicit ignored .lab directory")
+    if ".." in path.parts:
+        raise ValueError("pre-send manifest path traversal is forbidden")
+    root_absolute = Path(os.path.abspath(root))
+    path_absolute = Path(os.path.abspath(path))
+    try:
+        relative = path_absolute.relative_to(root_absolute)
+    except ValueError as exc:
+        raise ValueError("pre-send manifest must be inside the ignored .lab root") from exc
+    if not relative.parts or relative.name in {"", ".", ".."}:
+        raise ValueError("pre-send manifest destination must name a file")
+    try:
+        root_stat = root_absolute.lstat()
+    except FileNotFoundError as exc:
+        raise ValueError("explicit ignored .lab root must already exist") from exc
+    if root_absolute.is_symlink() or not stat.S_ISDIR(root_stat.st_mode):
+        raise ValueError("explicit ignored .lab root must not be a symlink")
     manifest = build_fact_manifest(messages)
     payload = json.dumps(
         manifest.model_dump(mode="json"),
@@ -255,14 +277,53 @@ def write_pre_send_manifest(
         separators=(",", ":"),
     ) + "\n"
     _validate_safe(payload, label="fact manifest")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    root_descriptor = os.open(root_absolute, directory_flags)
+    directory_descriptor = root_descriptor
+    temporary_name = f".{relative.name}.{secrets.token_hex(8)}.tmp"
     try:
-        with temporary.open("x", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        for component in relative.parts[:-1]:
+            try:
+                os.mkdir(component, mode=0o700, dir_fd=directory_descriptor)
+            except FileExistsError:
+                pass
+            try:
+                child = os.open(component, directory_flags, dir_fd=directory_descriptor)
+            except OSError as exc:
+                raise ValueError("pre-send manifest parent must not contain a symlink") from exc
+            if directory_descriptor != root_descriptor:
+                os.close(directory_descriptor)
+            directory_descriptor = child
+        file_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        file_descriptor = os.open(
+            temporary_name, file_flags, 0o600, dir_fd=directory_descriptor
+        )
+        try:
+            encoded = payload.encode("utf-8")
+            offset = 0
+            while offset < len(encoded):
+                offset += os.write(file_descriptor, encoded[offset:])
+            os.fsync(file_descriptor)
+        finally:
+            os.close(file_descriptor)
+        try:
+            os.link(
+                temporary_name,
+                relative.name,
+                src_dir_fd=directory_descriptor,
+                dst_dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+        except FileExistsError:
+            raise
+        os.unlink(temporary_name, dir_fd=directory_descriptor)
+        os.fsync(directory_descriptor)
     finally:
-        temporary.unlink(missing_ok=True)
+        try:
+            os.unlink(temporary_name, dir_fd=directory_descriptor)
+        except FileNotFoundError:
+            pass
+        if directory_descriptor != root_descriptor:
+            os.close(directory_descriptor)
+        os.close(root_descriptor)
     return manifest

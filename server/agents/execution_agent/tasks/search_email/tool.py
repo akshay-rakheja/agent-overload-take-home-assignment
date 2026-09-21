@@ -5,7 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+from evals.live_lab.fixture_email import (
+    FixtureFactManifest,
+    build_fact_manifest,
+    render_fixture_messages,
+)
 
 from server.config import ModelCallConfig, ModelRole, get_settings
 from server.logging_config import logger
@@ -50,19 +58,58 @@ _COMPLETION_TOOL_SCHEMA = get_completion_schema()
 _LOG_STORE = get_execution_agent_logs()
 _EMAIL_CLEANER = EmailTextCleaner(max_url_length=40)
 _FIXTURE_SUBJECT_PREFIX = "[OpenPoke Interview Fixture]"
-_FIXTURE_FACT_ID = re.compile(r"\b(?:SEC|ENG|NF|VF|MS|CW|ARC|AMB)-\d{4,5}\b")
+_ACTIVE_FIXTURE_MANIFEST: ContextVar[FixtureFactManifest | None] = ContextVar(
+    "active_fixture_fact_manifest", default=None
+)
 
 
 def _query_sha256(query: str) -> str:
     return hashlib.sha256(query.encode("utf-8")).hexdigest()
 
 
+def _validate_manifest(manifest: FixtureFactManifest) -> FixtureFactManifest:
+    validated = FixtureFactManifest.model_validate(manifest.model_dump(mode="python"))
+    unsigned = validated.model_dump(mode="json", exclude={"manifest_sha256"})
+    digest = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    if digest != validated.manifest_sha256:
+        raise ValueError("fixture fact manifest digest does not match its contents")
+    canonical = build_fact_manifest(render_fixture_messages(validated.run_id))
+    if validated != canonical:
+        raise ValueError("fixture fact manifest does not match the approved templates")
+    return validated
+
+
+@contextmanager
+def fixture_fact_manifest_scope(manifest: FixtureFactManifest):
+    """Bind one sanitized pre-send manifest to the current lab run."""
+
+    token = _ACTIVE_FIXTURE_MANIFEST.set(_validate_manifest(manifest))
+    try:
+        yield
+    finally:
+        _ACTIVE_FIXTURE_MANIFEST.reset(token)
+
+
 def _captured_fixture_fact_ids(emails: Sequence[GmailSearchEmail]) -> list[str]:
+    manifest = _ACTIVE_FIXTURE_MANIFEST.get()
+    if manifest is None:
+        return []
     captured: set[str] = set()
     for email in emails:
-        if not email.subject.startswith(_FIXTURE_SUBJECT_PREFIX):
+        if not email.subject.startswith(
+            f"{_FIXTURE_SUBJECT_PREFIX} {manifest.run_id} "
+        ):
             continue
-        captured.update(_FIXTURE_FACT_ID.findall(f"{email.subject}\n{email.clean_text}"))
+        subject_sha256 = hashlib.sha256(email.subject.encode("utf-8")).hexdigest()
+        body_sha256 = hashlib.sha256(email.clean_text.encode("utf-8")).hexdigest()
+        for fact_id, fact in manifest.facts.items():
+            if fact.subject_sha256 != subject_sha256 or fact.body_sha256 != body_sha256:
+                continue
+            normalized = " ".join(f"{email.subject}\n{email.clean_text}".casefold().split())
+            if all(" ".join(value.casefold().split()) in normalized for value in fact.response_facts):
+                captured.add(fact_id)
     return sorted(captured)
 
 
