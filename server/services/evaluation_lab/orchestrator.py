@@ -703,6 +703,30 @@ class PairedRunOrchestrator:
         task.add_done_callback(_done)
 
     @staticmethod
+    async def _finalize_completed_work(
+        work: _SideWork,
+        *,
+        cancellation_resistant: bool = False,
+    ) -> None:
+        """Retire observer bookkeeping once authoritative work is terminal."""
+
+        if work.thread is None or not work.done or work.task.done():
+            return
+        work.task.cancel()
+        try:
+            await work.task
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if (
+                not cancellation_resistant
+                and current is not None
+                and current.cancelling()
+            ):
+                raise
+        except Exception:
+            pass
+
+    @staticmethod
     async def _join_supervised_work(work: _SideWork) -> None:
         """Retain ownership until work ends, even if the observer is cancelled."""
 
@@ -716,6 +740,10 @@ class PairedRunOrchestrator:
                 continue
             except Exception:
                 pass
+        await PairedRunOrchestrator._finalize_completed_work(
+            work,
+            cancellation_resistant=True,
+        )
 
     @staticmethod
     def _late_from_outcome(outcome: PersistedSideOutcome) -> LateCompletion:
@@ -852,6 +880,7 @@ class PairedRunOrchestrator:
         try:
             await asyncio.wait({work.task}, timeout=self._side_timeout)
             if work.done:
+                await self._finalize_completed_work(work)
                 return self._completed_outcome(
                     work,
                     record=record,
@@ -866,6 +895,7 @@ class PairedRunOrchestrator:
             if self._late_grace:
                 await asyncio.wait({work.task}, timeout=self._late_grace)
                 if work.done:
+                    await self._finalize_completed_work(work)
                     late = self._late_from_outcome(
                         self._completed_outcome(
                             work,

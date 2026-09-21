@@ -685,6 +685,100 @@ async def test_synchronous_success_and_failure_are_terminalized_normally(tmp_pat
     assert not orchestrator.active_tasks
 
 
+@pytest.mark.parametrize("attempt", range(3))
+@pytest.mark.anyio
+async def test_sync_completion_before_deadline_finalizes_pending_observer(
+    tmp_path, attempt
+) -> None:
+    scenario = _scenario()
+
+    def runner(*, run_id, system, scheduled, **_kwargs):
+        time.sleep(0.002)
+        return SideRunOutput(
+            status=OutcomeStatus.SUCCESS,
+            model_id="fake/model",
+            results=(_result(run_id, system, scheduled.pair_id),),
+        )
+
+    orchestrator = _offline_orchestrator(
+        store=RunStore(tmp_path / ".lab" / "runs"),
+        scenarios=(scenario,),
+        resetter=lambda **kwargs: _verification(kwargs["system"]),
+        runners={system: runner for system in MeasuredSystem},
+        side_timeout_seconds=0.004,
+        late_completion_grace_seconds=0.001,
+    )
+    run_id = (
+        await orchestrator.start(
+            StartRunRequest(request_id=REQUEST_ID, scenario_ids=(scenario.scenario_id,))
+        )
+    ).run_id
+
+    result = await orchestrator.execute(run_id)
+
+    assert result.status is RunStatus.COMPLETE
+    assert len([outcome for pair in result.pairs for outcome in pair.outcomes]) == 6
+    assert not orchestrator.active_tasks
+
+
+@pytest.mark.anyio
+async def test_sync_completion_after_deadline_persists_late_evidence_once(
+    tmp_path, monkeypatch
+) -> None:
+    scenario = _scenario()
+    store = RunStore(tmp_path / ".lab" / "runs")
+    late_saves = 0
+    releases = 0
+    real_save = store.save
+    real_release = store.release_execution
+
+    def counted_save(record):
+        nonlocal late_saves
+        if record.trace and record.trace[-1].kind == "late":
+            late_saves += 1
+        return real_save(record)
+
+    def counted_release(run_id, owner_id):
+        nonlocal releases
+        releases += 1
+        return real_release(run_id, owner_id)
+
+    def runner(*, run_id, system, scheduled, **_kwargs):
+        time.sleep(0.008)
+        return SideRunOutput(
+            status=OutcomeStatus.SUCCESS,
+            model_id="fake/model",
+            results=(_result(run_id, system, scheduled.pair_id),),
+        )
+
+    monkeypatch.setattr(store, "save", counted_save)
+    monkeypatch.setattr(store, "release_execution", counted_release)
+    orchestrator = _offline_orchestrator(
+        store=store,
+        scenarios=(scenario,),
+        resetter=lambda **kwargs: _verification(kwargs["system"]),
+        runners={system: runner for system in MeasuredSystem},
+        side_timeout_seconds=0.004,
+        late_completion_grace_seconds=0.001,
+    )
+    run_id = (
+        await orchestrator.start(
+            StartRunRequest(request_id=REQUEST_ID, scenario_ids=(scenario.scenario_id,))
+        )
+    ).run_id
+
+    result = await orchestrator.execute(run_id)
+    assert result.status is RunStatus.BLOCKED
+    assert result.pairs[0].outcomes[0].status is OutcomeStatus.TIMEOUT
+    await asyncio.gather(*orchestrator.active_tasks, return_exceptions=True)
+    observed = orchestrator.status(run_id)
+
+    assert observed.pairs[0].outcomes[0].late_completion is not None
+    assert sum(event.kind == "late" for event in observed.trace) == 1
+    assert late_saves == 1
+    assert releases == 1
+
+
 def _blocking_sync_runner(started, release, finished):
     def runner(*, run_id, system, scheduled, **_kwargs):
         started.set()
@@ -697,6 +791,48 @@ def _blocking_sync_runner(started, release, finished):
         )
 
     return runner
+
+
+@pytest.mark.anyio
+async def test_cancelling_sync_late_observer_keeps_live_worker_owned(tmp_path) -> None:
+    scenario = _scenario()
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    root = tmp_path / ".lab" / "runs"
+    runner = _blocking_sync_runner(started, release, finished)
+    owner = _offline_orchestrator(
+        store=RunStore(root),
+        scenarios=(scenario,),
+        resetter=lambda **kwargs: _verification(kwargs["system"]),
+        runners={system: runner for system in MeasuredSystem},
+        side_timeout_seconds=0.001,
+        late_completion_grace_seconds=0,
+    )
+    run_id = (
+        await owner.start(
+            StartRunRequest(request_id=REQUEST_ID, scenario_ids=(scenario.scenario_id,))
+        )
+    ).run_id
+    await owner.execute(run_id)
+    monitor = next(
+        task for task in owner.active_tasks if task.get_name().startswith("lab-late-")
+    )
+    monitor.cancel()
+    await asyncio.sleep(0)
+
+    try:
+        assert started.is_set() and not finished.is_set()
+        assert not monitor.done()
+        assert RunStore(root).execution_lease() is not None
+    finally:
+        release.set()
+        await asyncio.gather(*owner.active_tasks, return_exceptions=True)
+
+    observed = owner.status(run_id).pairs[0].outcomes[0]
+    assert observed.late_completion is not None
+    assert observed.late_completion.status is OutcomeStatus.SUCCESS
+    assert RunStore(root).execution_lease() is None
 
 
 @pytest.mark.anyio
