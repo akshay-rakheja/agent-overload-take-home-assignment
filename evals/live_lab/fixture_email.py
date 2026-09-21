@@ -1,0 +1,268 @@
+"""Deterministic fabricated self-envelope Gmail fixtures."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import secrets
+from pathlib import Path
+from types import MappingProxyType
+from typing import Literal, Mapping
+
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+
+
+SUBJECT_PREFIX = "[OpenPoke Interview Fixture]"
+_RUN_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+_BANNED = re.compile(
+    r"[\w.+-]+@[\w.-]+|https?://|\boauth\b|\bbearer\b|"
+    r"api[_ -]?key|access[_ -]?token|client[_ -]?secret|authorization[_ -]?code",
+    re.IGNORECASE,
+)
+
+
+class _FrozenModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class FixtureMessage(_FrozenModel):
+    template_id: str
+    fact_id: str
+    envelope_from: Literal["self"] = "self"
+    envelope_to: Literal["self"] = "self"
+    subject: str
+    body: str
+    response_facts: tuple[str, ...]
+
+
+class ManifestFact(_FrozenModel):
+    template_id: str
+    subject_sha256: str
+    envelope: Literal["self"] = "self"
+    response_facts: tuple[str, ...]
+
+    @field_validator("subject_sha256")
+    @classmethod
+    def _sha256(cls, value: str) -> str:
+        normalized = value.casefold()
+        if len(normalized) != 64 or any(character not in "0123456789abcdef" for character in normalized):
+            raise ValueError("subject_sha256 must be SHA-256")
+        return normalized
+
+
+class FixtureFactManifest(_FrozenModel):
+    schema_version: Literal[1] = 1
+    run_id: str
+    facts: Mapping[str, ManifestFact]
+    manifest_sha256: str
+
+    @field_validator("facts", mode="after")
+    @classmethod
+    def _freeze_facts(cls, value: Mapping[str, ManifestFact]) -> Mapping[str, ManifestFact]:
+        return MappingProxyType(dict(value))
+
+    @field_serializer("facts")
+    def _serialize_facts(self, value: Mapping[str, ManifestFact]) -> dict[str, ManifestFact]:
+        return dict(value)
+
+
+class _Template(_FrozenModel):
+    template_id: str
+    fact_id: str
+    subject_label: str
+    body: str
+    response_facts: tuple[str, ...]
+
+
+_TEMPLATES = (
+    _Template(
+        template_id="instagram-security",
+        fact_id="SEC-7419",
+        subject_label="Instagram security notice SEC-7419",
+        body=(
+            "Fabricated security notice SEC-7419. A sign-in was recorded at "
+            "2026-09-18 04:12 UTC from Lisbon on Pixel 10. Verification phrase: indigo-orbit."
+        ),
+        response_facts=("SEC-7419", "2026-09-18 04:12 UTC", "Lisbon", "Pixel 10", "indigo-orbit"),
+    ),
+    _Template(
+        template_id="instagram-engagement",
+        fact_id="ENG-2284",
+        subject_label="Instagram engagement digest ENG-2284",
+        body="Fabricated engagement digest ENG-2284: Aurora Loop received 183 likes and 27 comments.",
+        response_facts=("ENG-2284", "Aurora Loop", "183 likes", "27 comments"),
+    ),
+    _Template(
+        template_id="nebulaframe-newsletter",
+        fact_id="NF-3207",
+        subject_label="NebulaFrame newsletter NF-3207",
+        body=(
+            "Fabricated NebulaFrame bulletin NF-3207. Prism Cut 2.4 releases on "
+            "2026-10-07 with the Storyboard Lock feature."
+        ),
+        response_facts=("NF-3207", "Prism Cut 2.4", "2026-10-07", "Storyboard Lock"),
+    ),
+    _Template(
+        template_id="vidforge-receipt",
+        fact_id="VF-20481",
+        subject_label="VidForge receipt VF-20481",
+        body=(
+            "Fabricated receipt VF-20481 for Pro Render Monthly. Total CAD 47.80 "
+            "on 2026-09-19."
+        ),
+        response_facts=("VF-20481", "Pro Render Monthly", "CAD 47.80", "2026-09-19"),
+    ),
+    _Template(
+        template_id="motionsynth-newsletter",
+        fact_id="MS-8820",
+        subject_label="MotionSynth newsletter MS-8820",
+        body=(
+            "Fabricated MotionSynth bulletin MS-8820. Temporal Layers session at "
+            "2026-10-11 17:30 UTC. Reference code GLASS-52."
+        ),
+        response_facts=("MS-8820", "Temporal Layers", "2026-10-11 17:30 UTC", "GLASS-52"),
+    ),
+    _Template(
+        template_id="clipweaver-invoice",
+        fact_id="CW-8117",
+        subject_label="ClipWeaver invoice CW-8117",
+        body=(
+            "Fabricated ClipWeaver invoice CW-8117 for CAD 312.40, due 2026-10-15, "
+            "purchase order PO-4406."
+        ),
+        response_facts=("CW-8117", "CAD 312.40", "2026-10-15", "PO-4406"),
+    ),
+    _Template(
+        template_id="long-history-anchor",
+        fact_id="ARC-1042",
+        subject_label="Archive anchor ARC-1042",
+        body=(
+            "Fabricated archive anchor ARC-1042 for Cedar Comet dated 2026-08-29. "
+            "Checksum prefix 9f2c7a."
+        ),
+        response_facts=("ARC-1042", "Cedar Comet", "2026-08-29", "9f2c7a"),
+    ),
+    _Template(
+        template_id="ambiguous-creator-notice",
+        fact_id="AMB-6063",
+        subject_label="Ambiguous creator notice AMB-6063",
+        body=(
+            "Fabricated creator notice AMB-6063 combines account-security language "
+            "with an engagement-performance update. Clarification is required before routing."
+        ),
+        response_facts=("AMB-6063", "account-security", "engagement-performance"),
+    ),
+)
+
+
+def _validate_safe(value: str, *, label: str) -> None:
+    if _BANNED.search(value):
+        raise ValueError(f"{label} contains banned address, secret, or authenticated URL content")
+
+
+def fixture_fact_ids() -> set[str]:
+    return {template.fact_id for template in _TEMPLATES}
+
+
+def fixture_response_facts(fact_id: str) -> tuple[str, ...]:
+    for template in _TEMPLATES:
+        if template.fact_id == fact_id:
+            return template.response_facts
+    raise KeyError(fact_id)
+
+
+def render_fixture_messages(run_id: str) -> tuple[FixtureMessage, ...]:
+    """Render the eight fixed fabricated templates for one opaque run ID."""
+
+    if not isinstance(run_id, str) or _RUN_ID.fullmatch(run_id) is None:
+        raise ValueError("run_id must be 8-64 opaque URL-safe characters")
+    _validate_safe(run_id, label="run_id")
+    messages = tuple(
+        FixtureMessage(
+            template_id=template.template_id,
+            fact_id=template.fact_id,
+            subject=f"{SUBJECT_PREFIX} {run_id} {template.subject_label}",
+            body=template.body,
+            response_facts=template.response_facts,
+        )
+        for template in _TEMPLATES
+    )
+    rendered = "\n".join(
+        f"{item.subject}\n{item.body}\n{item.envelope_from}\n{item.envelope_to}"
+        for item in messages
+    )
+    _validate_safe(rendered, label="fixture envelope")
+    if len(messages) != 8 or len({item.subject for item in messages}) != 8:
+        raise RuntimeError("fixture templates must render exactly eight unique subjects")
+    return messages
+
+
+def _canonical_manifest_payload(
+    run_id: str,
+    facts: Mapping[str, ManifestFact],
+) -> bytes:
+    payload = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "facts": {
+            key: value.model_dump(mode="json")
+            for key, value in sorted(facts.items())
+        },
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def build_fact_manifest(messages: tuple[FixtureMessage, ...]) -> FixtureFactManifest:
+    """Build a body-free, address-free manifest for pre-send verification."""
+
+    if len(messages) != 8 or {item.fact_id for item in messages} != fixture_fact_ids():
+        raise ValueError("fact manifest requires the exact eight rendered fixture messages")
+    run_ids = {
+        item.subject[len(SUBJECT_PREFIX) + 1 :].split(" ", 1)[0]
+        for item in messages
+        if item.subject.startswith(f"{SUBJECT_PREFIX} ")
+    }
+    if len(run_ids) != 1:
+        raise ValueError("fixture messages must share one opaque run_id")
+    run_id = next(iter(run_ids))
+    facts = {
+        item.fact_id: ManifestFact(
+            template_id=item.template_id,
+            subject_sha256=hashlib.sha256(item.subject.encode("utf-8")).hexdigest(),
+            response_facts=item.response_facts,
+        )
+        for item in messages
+    }
+    digest = hashlib.sha256(_canonical_manifest_payload(run_id, facts)).hexdigest()
+    return FixtureFactManifest(run_id=run_id, facts=facts, manifest_sha256=digest)
+
+
+def write_pre_send_manifest(
+    destination: Path,
+    messages: tuple[FixtureMessage, ...],
+) -> FixtureFactManifest:
+    """Atomically write the sanitized manifest below the ignored ``.lab`` root."""
+
+    path = Path(destination)
+    if ".lab" not in path.parts:
+        raise ValueError("pre-send manifests must be written below the ignored .lab directory")
+    manifest = build_fact_manifest(messages)
+    payload = json.dumps(
+        manifest.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    ) + "\n"
+    _validate_safe(payload, label="fact manifest")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    try:
+        with temporary.open("x", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return manifest

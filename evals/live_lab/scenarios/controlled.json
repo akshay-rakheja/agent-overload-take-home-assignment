@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "scenarios": [
+    {
+      "scenario_id": "exact-instagram-security",
+      "track": "controlled",
+      "family": "exact_named_reuse",
+      "title": "Exact named Instagram security reuse",
+      "turns": [{"text": "Ask Instagram Security Monitor to summarize fixture SEC-7419."}],
+      "expected": {"action": "reuse", "logical_identity": "instagram-security"},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" \"SEC-7419\"", "fact_ids": ["SEC-7419"]},
+      "reset_profile": "standard-100",
+      "repetitions": 3
+    },
+    {
+      "scenario_id": "paraphrase-video-news",
+      "track": "controlled",
+      "family": "paraphrased_reuse",
+      "title": "Paraphrased AI video newsletter reuse",
+      "turns": [{"text": "Use the editor who curates model release bulletins to report the NebulaFrame fixture."}],
+      "expected": {"action": "reuse", "logical_identity": "ai-video-newsletter"},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" \"NF-3207\"", "fact_ids": ["NF-3207"]},
+      "reset_profile": "standard-100",
+      "repetitions": 3
+    },
+    {
+      "scenario_id": "pronoun-receipt-follow-up",
+      "track": "controlled",
+      "family": "pronoun_follow_up",
+      "title": "Pronoun follow-up reuses receipt agent",
+      "turns": [{"text": "Have the receipt reconciler find VidForge."}, {"text": "What amount did it find?"}],
+      "expected": {"action": "reuse", "logical_identity": "ai-video-receipts"},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" \"VF-20481\"", "fact_ids": ["VF-20481"]},
+      "reset_profile": "standard-100",
+      "repetitions": 3
+    },
+    {
+      "scenario_id": "ambiguous-creator-clarification",
+      "track": "controlled",
+      "family": "ambiguity_abstention",
+      "title": "Ambiguous creator notice requires clarification",
+      "turns": [{"text": "Handle the ambiguous creator notice with the right Instagram agent."}],
+      "expected": {"action": "abstain", "logical_identity": null, "require_clarification": true},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" \"AMB-6063\"", "fact_ids": ["AMB-6063"]},
+      "reset_profile": "standard-100",
+      "repetitions": 3
+    },
+    {
+      "scenario_id": "novel-calendar-creation",
+      "track": "controlled",
+      "family": "novel_creation",
+      "title": "Novel calendar workflow creates one identity",
+      "turns": [{"text": "Create a new workflow for a calendar digest, then search for the MotionSynth fixture."}],
+      "expected": {"action": "create_new", "logical_identity": "new:calendar-workflow"},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" \"MS-8820\"", "fact_ids": ["MS-8820"]},
+      "reset_profile": "standard-100",
+      "repetitions": 3
+    },
+    {
+      "scenario_id": "duplicate-clipweaver-prevention",
+      "track": "controlled",
+      "family": "duplicate_prevention",
+      "title": "Repeated creation intent preserves one stable identity",
+      "turns": [{"text": "Create an invoice auditor for ClipWeaver."}, {"text": "Use that same auditor to check the invoice again."}],
+      "expected": {"action": "create_new", "logical_identity": "new:clipweaver-auditor"},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" \"CW-8117\"", "fact_ids": ["CW-8117"]},
+      "reset_profile": "standard-100",
+      "repetitions": 3
+    },
+    {
+      "scenario_id": "old-security-relevant",
+      "track": "controlled",
+      "family": "old_relevant_recent_distractor",
+      "title": "Old relevant security history beats recent engagement distractor",
+      "turns": [{"text": "Find the older account-protection notice, not the recent engagement digest."}],
+      "expected": {"action": "reuse", "logical_identity": "instagram-security"},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" \"SEC-7419\"", "fact_ids": ["SEC-7419"]},
+      "reset_profile": "standard-100",
+      "repetitions": 3
+    },
+    {
+      "scenario_id": "honest-no-result",
+      "track": "controlled",
+      "family": "honest_no_result",
+      "title": "Read-only search honestly reports no result",
+      "turns": [{"text": "Search fixtures for the nonexistent reference ZERO-0000 and report only what exists."}],
+      "expected": {"action": "reuse", "logical_identity": "ai-video-newsletter"},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" \"ZERO-0000\"", "fact_ids": [], "expect_no_result": true},
+      "reset_profile": "standard-100",
+      "repetitions": 3
+    },
+    {
+      "scenario_id": "hundred-agent-engagement",
+      "track": "controlled",
+      "family": "hundred_agent_overload",
+      "title": "Engagement routing under one hundred agents",
+      "turns": [{"text": "Among all one hundred workflows, use the engagement digest for Aurora Loop."}],
+      "expected": {"action": "reuse", "logical_identity": "instagram-engagement"},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" \"ENG-2284\"", "fact_ids": ["ENG-2284"]},
+      "reset_profile": "standard-100",
+      "repetitions": 3
+    },
+    {
+      "scenario_id": "ten-thousand-history-anchor",
+      "track": "controlled",
+      "family": "ten_thousand_history",
+      "title": "Long-history follow-up finds archive anchor",
+      "turns": [{"text": "Use the video newsletter curator and recover the Cedar Comet archive anchor."}],
+      "expected": {"action": "reuse", "logical_identity": "ai-video-newsletter"},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" \"ARC-1042\"", "fact_ids": ["ARC-1042"]},
+      "reset_profile": "standard-100",
+      "repetitions": 3
+    },
+    {
+      "scenario_id": "instagram-security-not-engagement",
+      "track": "controlled",
+      "family": "instagram_security_vs_engagement",
+      "title": "Instagram security and engagement identities stay separate",
+      "turns": [{"text": "Check the login device and location; do not use the likes-and-comments workflow."}],
+      "expected": {"action": "reuse", "logical_identity": "instagram-security"},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" \"SEC-7419\"", "fact_ids": ["SEC-7419"]},
+      "reset_profile": "standard-100",
+      "repetitions": 3
+    },
+    {
+      "scenario_id": "similar-video-clarification",
+      "track": "controlled",
+      "family": "similar_video_ambiguity",
+      "title": "Two similar video newsletters require clarification",
+      "turns": [{"text": "Use the video update workflow for the new feature notice, whichever one applies."}],
+      "expected": {"action": "abstain", "logical_identity": null, "require_clarification": true},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" (\"NF-3207\" OR \"MS-8820\")", "fact_ids": ["NF-3207", "MS-8820"]},
+      "reset_profile": "standard-100",
+      "repetitions": 3
+    },
+    {
+      "scenario_id": "dormant-receipt-recovery",
+      "track": "controlled",
+      "family": "dormant_archived_recovery",
+      "title": "Dormant receipt identity is recovered without duplication",
+      "turns": [{"text": "Recover the dormant AI video receipt workflow and reconcile VidForge."}],
+      "expected": {"action": "reuse", "logical_identity": "ai-video-receipts"},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" \"VF-20481\"", "fact_ids": ["VF-20481"]},
+      "reset_profile": "standard-100",
+      "repetitions": 3
+    },
+    {
+      "scenario_id": "optional-thousand-agent-news",
+      "track": "controlled",
+      "family": "thousand_agent_overload",
+      "title": "Optional budget-guarded one thousand agent overload",
+      "turns": [{"text": "Among one thousand workflows, use the AI video newsletter curator for NebulaFrame."}],
+      "expected": {"action": "reuse", "logical_identity": "ai-video-newsletter"},
+      "gmail": {"operation": "GMAIL_FETCH_EMAILS", "query": "subject:\"[OpenPoke Interview Fixture]\" \"NF-3207\"", "fact_ids": ["NF-3207"]},
+      "reset_profile": "scale-1000",
+      "repetitions": 3,
+      "optional": true,
+      "budget_guarded": true
+    }
+  ]
+}
