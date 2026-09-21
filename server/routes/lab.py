@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import threading
+from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -24,6 +27,8 @@ from ..services.evaluation_lab.trace import JsonlTraceStore, consolidate_trace
 
 
 router = APIRouter(prefix="/lab", tags=["lab"])
+_ORCHESTRATORS: dict[Path, Any] = {}
+_ORCHESTRATORS_LOCK = threading.Lock()
 
 
 def _require_lab(
@@ -55,7 +60,31 @@ def _store(settings: Settings) -> JsonlTraceStore:
     return JsonlTraceStore(settings.lab_trace_root)
 
 
-def _stable_response(model) -> Response:
+def _unconfigured_reset(**_kwargs):
+    raise RuntimeError("paired side execution is not configured in the API process")
+
+
+def _run_orchestrator(settings: Settings) -> Any:
+    # Lazy imports keep the historical baseline subprocess free of the enhanced
+    # fixture/scenario import graph while it imports ``server.app``.
+    from ..services.evaluation_lab.orchestrator import PairedRunOrchestrator
+    from ..services.evaluation_lab.run_store import RunStore
+
+    key = settings.lab_run_root.absolute()
+    with _ORCHESTRATORS_LOCK:
+        existing = _ORCHESTRATORS.get(key)
+        if existing is not None:
+            return existing
+        created = PairedRunOrchestrator(
+            store=RunStore(settings.lab_run_root),
+            resetter=_unconfigured_reset,
+            runners={},
+        )
+        _ORCHESTRATORS[key] = created
+        return created
+
+
+def _stable_response(model, *, status_code: int = status.HTTP_200_OK) -> Response:
     safe_payload = redact_value(model.model_dump(mode="json"))
     content = json.dumps(
         safe_payload,
@@ -64,7 +93,11 @@ def _stable_response(model) -> Response:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
-    return Response(content=content, media_type="application/json")
+    return Response(
+        content=content,
+        media_type="application/json",
+        status_code=status_code,
+    )
 
 
 def _storage_error(exc: ValueError) -> HTTPException:
@@ -72,6 +105,61 @@ def _storage_error(exc: ValueError) -> HTTPException:
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Trace storage is unavailable",
     )
+
+
+@router.get("/scenarios")
+def scenarios(settings: Settings = Depends(_require_lab)) -> Response:
+    from evals.live_lab.scenarios import load_controlled_scenarios
+
+    definitions = load_controlled_scenarios()
+    payload = {
+        "schema_version": 1,
+        "scenario_count": len(definitions),
+        "scenarios": [
+            {
+                "scenario_id": item.scenario_id,
+                "family": item.family,
+                "title": item.title,
+                "repetitions": item.repetitions,
+                "optional": item.optional,
+                "budget_guarded": item.budget_guarded,
+                "reset_profile": item.reset_profile.model_dump(mode="json"),
+                "turn_count": len(item.turns),
+            }
+            for item in definitions
+        ],
+    }
+    content = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return Response(content=content, media_type="application/json")
+
+
+@router.post("/runs", status_code=status.HTTP_202_ACCEPTED)
+async def create_run(
+    request: dict[str, object],
+    settings: Settings = Depends(_require_lab),
+) -> Response:
+    from ..services.evaluation_lab.orchestrator import RunConflict, StartRunRequest
+
+    try:
+        validated = StartRunRequest.model_validate(request)
+        handle = await _run_orchestrator(settings).start(validated)
+    except RunConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    return _stable_response(handle, status_code=status.HTTP_202_ACCEPTED)
 
 
 @router.get("/directory", response_model=LabDirectoryResponse)
@@ -179,6 +267,21 @@ def delete_trace(run_id: str, settings: Settings = Depends(_require_lab)) -> Res
             detail="Trace run not found",
         )
     return _stable_response(LabTraceDeleteResponse(run_id=safe_id))
+
+
+@router.get("/runs/{run_id}")
+def get_run(run_id: str, settings: Settings = Depends(_require_lab)) -> Response:
+    safe_id = _run_id_or_404(run_id)
+    try:
+        observed = _run_orchestrator(settings).status(safe_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Evaluation Lab run not found",
+        ) from exc
+    except ValueError as exc:
+        raise _storage_error(exc) from exc
+    return _stable_response(observed)
 
 
 __all__ = ["router"]

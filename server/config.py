@@ -252,6 +252,14 @@ class Settings(BaseModel):
             )
         )
     )
+    lab_run_root: Path = Field(
+        default_factory=lambda: Path(
+            os.getenv(
+                "OPENPOKE_LAB_RUN_ROOT",
+                str(Path(__file__).resolve().parent.parent / ".lab" / "runs"),
+            )
+        )
+    )
     lab_revision: Optional[str] = Field(
         default_factory=lambda: _env_optional("OPENPOKE_LAB_REVISION")
     )
