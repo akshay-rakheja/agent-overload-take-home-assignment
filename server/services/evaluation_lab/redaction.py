@@ -91,10 +91,12 @@ def _matches_key(
     return key is not None and (key in exact or key.endswith(suffixes))
 
 
+def _is_address_key(key: str | None) -> bool:
+    return key is not None and "address" in key
+
+
 def _is_oauth_wrapper(key: str | None) -> bool:
-    return key is not None and (
-        key == "authorization" or key.endswith(("oauth", "oauthresponse"))
-    )
+    return key is not None and ("oauth" in key or "authorization" in key)
 
 
 def _redact_url(value: str) -> str:
@@ -134,6 +136,7 @@ def redact_value(
     if (
         _matches_key(key, _SECRET_KEYS, _SECRET_SUFFIXES)
         or _matches_key(key, _MAIL_KEYS, _MAIL_SUFFIXES)
+        or _is_address_key(key)
         or _matches_key(key, _ERROR_KEYS)
         or _matches_key(key, _QUERY_KEYS)
     ):

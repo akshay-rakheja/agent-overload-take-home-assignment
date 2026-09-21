@@ -177,3 +177,57 @@ def test_redaction_covers_address_suffixes_and_provider_oauth_codes() -> None:
 def test_redaction_rejects_non_finite_floats(value: float) -> None:
     with pytest.raises(ValueError, match="finite"):
         redact_value({"metric": value})
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "shippingAddressLine1",
+        "billing_address_line_2",
+        "recipientPostalAddressValue",
+        "return_address_city",
+        "addressComponent",
+    ],
+)
+def test_redaction_matches_address_concept_within_compound_keys(key: str) -> None:
+    source = {"wrapper": {key: "private address component"}}
+
+    assert redact_value(source) == {"wrapper": {key: REDACTED}}
+
+
+def test_redaction_covers_address_component_nested_under_auth() -> None:
+    source = {"auth": {"addressLine1": "123 Private Street", "allowed": True}}
+
+    assert redact_value(source) == {
+        "auth": {"addressLine1": REDACTED, "allowed": True}
+    }
+
+
+@pytest.mark.parametrize(
+    "parent_key",
+    [
+        "providerOAuthData",
+        "provider_oauth_data",
+        "googleOAuthTokenResponse",
+        "authorizationData",
+        "authorization_response_wrapper",
+    ],
+)
+def test_redaction_matches_oauth_or_authorization_concept_in_code_parent(
+    parent_key: str,
+) -> None:
+    source = {parent_key: {"code": "opaque-provider-code", "granted": True}}
+
+    assert redact_value(source) == {
+        parent_key: {"code": REDACTED, "granted": True}
+    }
+
+
+def test_redaction_preserves_unrelated_status_and_error_codes() -> None:
+    source = {
+        "status": {"code": "ready"},
+        "error": {"code": "timeout"},
+        "operation_name": "fixture_operation",
+    }
+
+    assert redact_value(source) == source
