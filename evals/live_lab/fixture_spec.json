@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "depth_episode_count": 2500,
+  "named_agents": [
+    {
+      "key": "instagram-security",
+      "name": "Instagram Security Monitor",
+      "purpose": "Review Instagram security notices and account-protection events",
+      "aliases": ["IG security", "Instagram login alerts"],
+      "status": "hot",
+      "memory_summary": "Security notices are separated from engagement reporting.",
+      "history_template": "old_relevant"
+    },
+    {
+      "key": "instagram-engagement",
+      "name": "Instagram Engagement Digest",
+      "purpose": "Summarize Instagram engagement and audience activity",
+      "aliases": ["IG engagement", "social performance"],
+      "status": "hot",
+      "memory_summary": "Engagement summaries exclude account-security events.",
+      "history_template": "recent_distractor"
+    },
+    {
+      "key": "ai-video-newsletter",
+      "name": "AI Video Newsletter Curator",
+      "purpose": "Curate AI-video product updates for a fabricated newsletter",
+      "aliases": ["video model bulletin", "AI-video digest"],
+      "status": "hot",
+      "memory_summary": "Durable summary: prefer product releases with reproducible technical notes.",
+      "history_template": "depth"
+    },
+    {
+      "key": "ai-video-receipts",
+      "name": "AI Video Receipt Reconciler",
+      "purpose": "Reconcile fabricated AI-video software receipts",
+      "aliases": ["video tool receipts", "software charges"],
+      "status": "dormant",
+      "memory_summary": "Receipt reconciliation is intentionally separate from editorial work.",
+      "history_template": "standard"
+    },
+    {
+      "key": "slug-space",
+      "name": "A B",
+      "purpose": "Handle the space-delimited collision fixture",
+      "aliases": ["space fixture"],
+      "status": "hot",
+      "memory_summary": "Ambiguous legacy storage must remain quarantined.",
+      "history_template": "collision_a"
+    },
+    {
+      "key": "slug-hyphen",
+      "name": "A-B",
+      "purpose": "Handle the hyphen-delimited collision fixture",
+      "aliases": ["hyphen fixture"],
+      "status": "hot",
+      "memory_summary": "Ambiguous legacy storage must remain quarantined.",
+      "history_template": "collision_b"
+    },
+    {
+      "key": "same-name-retention",
+      "name": "Campaign Desk",
+      "purpose": "Coordinate fabricated customer-retention campaigns",
+      "aliases": ["retention desk"],
+      "status": "hot",
+      "memory_summary": "This identity owns retention work only.",
+      "history_template": "same_name_a"
+    },
+    {
+      "key": "same-name-partners",
+      "name": "Campaign Desk",
+      "purpose": "Coordinate fabricated partner-outreach campaigns",
+      "aliases": ["partner desk"],
+      "status": "archived",
+      "memory_summary": "This identity owns partner outreach only.",
+      "history_template": "same_name_b"
+    },
+    {
+      "key": "unicode-accented",
+      "name": "José Research",
+      "purpose": "Track the accented Unicode research fixture",
+      "aliases": ["accented research"],
+      "status": "hot",
+      "memory_summary": "Preserve the accented filesystem owner.",
+      "history_template": "unicode_a"
+    },
+    {
+      "key": "unicode-plain",
+      "name": "Jose Research",
+      "purpose": "Track the plain Unicode research fixture",
+      "aliases": ["plain research"],
+      "status": "archived",
+      "memory_summary": "Preserve the plain filesystem owner.",
+      "history_template": "unicode_b"
+    }
+  ],
+  "scenarios": [
+    {"scenario_id": "reuse-instagram-security", "action": "reuse", "agent_key": "instagram-security"},
+    {"scenario_id": "reuse-instagram-engagement", "action": "reuse", "agent_key": "instagram-engagement"},
+    {"scenario_id": "reuse-video-newsletter", "action": "reuse", "agent_key": "ai-video-newsletter"},
+    {"scenario_id": "reuse-video-receipts", "action": "reuse", "agent_key": "ai-video-receipts"},
+    {"scenario_id": "reuse-campaign-retention", "action": "reuse", "agent_key": "same-name-retention"},
+    {"scenario_id": "create-new-calendar-workflow", "action": "create_new", "agent_key": null},
+    {"scenario_id": "abstain-ambiguous-collision", "action": "abstain", "agent_key": null}
+  ]
+}

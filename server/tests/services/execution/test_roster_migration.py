@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from evals.live_lab.fixtures import build_fixture_manifest, materialize_baseline
 from server.services.execution.directory import AgentDirectory
 from server.services.execution.roster import AgentRoster
 
@@ -116,3 +117,31 @@ def test_compatibility_roster_clear_empties_directory(tmp_path) -> None:
     assert roster.get_agents() == []
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload == {"agents": [], "schema_version": 1}
+
+
+def test_generated_legacy_fixture_migration_preserves_all_raw_journal_bytes(tmp_path) -> None:
+    data_dir = tmp_path / "server" / "data"
+    manifest = build_fixture_manifest(seed=1313, roster_size=100)
+    materialize_baseline(manifest, data_dir)
+    execution_dir = data_dir / "execution_agents"
+    before = {
+        path.relative_to(execution_dir): path.read_bytes()
+        for path in sorted(execution_dir.glob("*.log"))
+    }
+
+    records = AgentDirectory(execution_dir / "roster.json").list_records()
+    after = {
+        path.relative_to(execution_dir): path.read_bytes()
+        for path in sorted(execution_dir.glob("*.log"))
+    }
+
+    assert len(records) == 100
+    assert before == after
+    assert [record.legacy_storage_key for record in records if record.name in {"A B", "A-B"}] == [
+        None,
+        None,
+    ]
+    same_name = [record for record in records if record.name == "Campaign Desk"]
+    assert len(same_name) == 2
+    assert len({record.agent_id for record in same_name}) == 2
+    assert all(record.legacy_storage_key is None for record in same_name)
