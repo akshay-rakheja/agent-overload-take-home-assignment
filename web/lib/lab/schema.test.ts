@@ -38,6 +38,11 @@ describe('Python serialization boundary', () => {
     expect(LabPreflightSchema.safeParse({ runnable: true }).success).toBe(false);
     expect(LabPreflightSchema.safeParse({ ...preflight, schema_version: 2 }).success).toBe(false);
   });
+  it('rejects raw mailbox addresses and OAuth handoff URLs in displayable fields', () => {
+    for (const reason of ['Mailbox person@example.test failed', 'https://accounts.example.test/oauth?code=private']) {
+      expect(LabPreflightSchema.safeParse({ ...preflight, blockers: [reason] }).success).toBe(false);
+    }
+  });
   it('accepts only the current backend start body and unique bounded scenario IDs', () => {
     expect(StartRunRequestSchema.safeParse({ request_id: backend.handle.request_id, scenario_ids: ['fixture'] }).success).toBe(true);
     expect(StartRunRequestSchema.safeParse({ scenarioId: 'fixture', repetitions: 3 }).success).toBe(false);

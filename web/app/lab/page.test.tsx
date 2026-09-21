@@ -45,3 +45,43 @@ it('aborts active reads when navigating away', async () => {
   expect(signals.length).toBeGreaterThan(0);
   expect(signals.every((signal) => signal.aborted)).toBe(true);
 });
+
+it('does not permit another submission after an unconfirmed start', async () => {
+  const writes: number[] = [];
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    if (url.endsWith('preflight')) return json(preflight);
+    if (url.endsWith('scenarios')) return json(backend.scenarios);
+    if (init.method === 'POST') { writes.push(1); throw new TypeError('network'); }
+    return json(backend.run);
+  });
+  render(<Page />);
+  const button = screen.getByRole('button', { name: 'Run scenario' });
+  await waitFor(() => expect(button).toBeEnabled());
+  fireEvent.click(button);
+  expect(await screen.findByText(/The start could not be confirmed/)).toBeVisible();
+  expect(button).toBeDisabled();
+  fireEvent.click(button);
+  expect(writes).toHaveLength(1);
+});
+
+it('can resume a failed status read without submitting another scenario', async () => {
+  const methods: string[] = [];
+  let failRead = true;
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    if (url.endsWith('preflight')) return json(preflight);
+    if (url.endsWith('scenarios')) return json(backend.scenarios);
+    methods.push(init.method!);
+    if (init.method === 'POST') return json(backend.handle, 202);
+    return failRead ? json({}, 503) : json(backend.run);
+  });
+  render(<Page />);
+  const button = screen.getByRole('button', { name: 'Run scenario' });
+  await waitFor(() => expect(button).toBeEnabled());
+  fireEvent.click(button);
+  const resume = await screen.findByRole('button', { name: 'Resume status checks' });
+  expect(button).toBeDisabled();
+  failRead = false;
+  fireEvent.click(resume);
+  expect(await screen.findByText('Partial failure')).toBeVisible();
+  expect(methods).toEqual(['POST', 'GET', 'GET']);
+});

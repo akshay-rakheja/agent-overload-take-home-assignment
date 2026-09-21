@@ -131,9 +131,57 @@ npm install --prefix web
 npm run dev --prefix web
 ```
 
-Open `http://localhost:3000` and connect Gmail from Settings. Optional routing
+Open `http://127.0.0.1:3000` and connect Gmail from Settings. Optional routing
 and context budgets are listed in `.env.example`; the default offline path does
 not require a `.env` file.
+
+## Local Evaluation Lab UI
+
+The separate interview route is **http://127.0.0.1:3000/lab**. Both `npm run dev
+--prefix web` and `npm run start --prefix web` bind only to `127.0.0.1:3000`.
+The original chat remains at `/`. The test tooling requires Node 22.12+ or a
+supported newer LTS release (verified with Node 24.19.0).
+
+The browser talks only to explicit `/api/lab` handlers. They forward to the fixed
+enhanced origin `http://127.0.0.1:8002/api/v1/lab`, validate strict response
+contracts, reject unknown fields/versions and private data, and never forward
+browser credentials or arbitrary URLs. Run IDs must be UUIDs. Starts require a
+same-origin request and a fresh server `runnable` preflight result. The start body
+is the current Python contract: `request_id` plus `scenario_ids`; repetitions are
+selected by the server. Failed starts are not automatically retried. A lost start
+response locks further submission; interrupted status checks can resume reads
+without starting another scenario. Terminal states stop polling.
+
+**Integration boundary:** Tasks 07–10 currently supply scenarios and paired-run
+contracts, but do not implement `/lab/preflight`, `/lab/gmail/status`, or
+`/lab/gmail/link`. Their frontend contracts are explicitly prospective. The UI
+fails closed on these missing routes; it does not manufacture readiness or
+perform Gmail/model calls. The backend must supply the server-owned readiness
+decision covering both revisions/backends, fixture equivalence, identical model
+and configuration, Gmail policy, and budget before the UI can start a run.
+
+The prospective version-1 preflight wire shape is defined in
+`web/lib/lab/schema.ts`: `runnable`, `blockers`, `warnings`, `baseline`, `enhanced`,
+`fixture_equivalence`, `gmail_safety`, and `budget`, all required. Each system has
+`reachable`, `revision`, `model`, and `config_fingerprint`; budget values are
+server-provided text. Gmail proxy responses currently accept sanitized status
+and message fields only, with no OAuth URL or credential handling; an actual
+handoff contract remains future integration work. Detailed evidence panels,
+Gmail handoff UI, and full browser/accessibility coverage are Task 12.
+
+```bash
+npm test --prefix web
+npm run typecheck --prefix web
+npm run lint --prefix web
+npm run build --prefix web
+```
+
+`test:watch` provides watch mode; `test:e2e` is configured for Task 12's future
+Playwright suite. Contract tests use `web/tests/fixtures/backend.json`, generated
+offline from the current Python models by
+`.venv/bin/python web/tests/export_lab_fixtures.py`. This exporter prints sanitized
+JSON only and makes no provider or Gmail calls. The preflight fixture is separately
+marked prospective and is not evidence of a working backend preflight endpoint.
 
 ## Known limitations and future work
 
