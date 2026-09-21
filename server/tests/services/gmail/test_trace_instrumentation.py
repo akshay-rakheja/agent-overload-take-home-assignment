@@ -73,6 +73,7 @@ def test_gmail_client_traces_policy_rejection_before_sdk_execution(
         gmail_client,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),
@@ -123,6 +124,7 @@ def test_gmail_client_traces_only_sanitized_read_only_result_facts(monkeypatch) 
         gmail_client,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),
@@ -174,6 +176,7 @@ def test_gmail_observation_failure_does_not_change_provider_result(monkeypatch) 
         gmail_client,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),
@@ -214,6 +217,7 @@ def test_gmail_supported_collection_shapes_have_available_exact_counts(
         gmail_client,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),
@@ -240,6 +244,7 @@ def test_gmail_unknown_collection_shape_is_unavailable_not_empty(monkeypatch) ->
         gmail_client,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),
@@ -266,6 +271,7 @@ def test_gmail_non_collection_operation_is_not_applicable_not_empty(monkeypatch)
         gmail_client,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),
@@ -290,6 +296,7 @@ def test_gmail_client_acquisition_failure_reports_sdk_not_executed(monkeypatch) 
         gmail_client,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),
@@ -324,6 +331,7 @@ def test_gmail_sdk_callable_failure_reports_sdk_executed(monkeypatch) -> None:
         gmail_client,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),

@@ -426,6 +426,7 @@ def test_interaction_tool_timing_excludes_nested_send_draft_trace_sink_latency(
         interaction_tools,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),
@@ -583,6 +584,7 @@ def test_lab_send_draft_emits_rejection_at_policy_boundary_without_recording(
         interaction_tools,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),
@@ -622,6 +624,7 @@ def test_interaction_runtime_labels_send_draft_result_rejected(monkeypatch) -> N
         interaction_tools,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),

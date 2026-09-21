@@ -41,6 +41,7 @@ def _schema_names(schemas):
 
 def test_lab_registry_exposes_only_policy_approved_tools():
     settings = Settings(
+        server_host="127.0.0.1",
         lab_enabled=True,
         lab_composio_user_id="opaque-lab-user",
     )
@@ -119,6 +120,7 @@ def test_raw_composio_bypass_is_blocked_before_sdk_execution(monkeypatch):
         gmail_client,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),
@@ -150,6 +152,7 @@ def test_local_interaction_draft_is_blocked_without_recording(monkeypatch):
         interaction_tools,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),

@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
-from ..config import Settings, get_settings
+from ..config import Settings, get_settings, is_loopback_host
 from ..services import get_agent_directory
 from ..services.evaluation_lab.models import (
     Availability,
@@ -26,9 +26,18 @@ from ..services.evaluation_lab.trace import JsonlTraceStore, consolidate_trace
 router = APIRouter(prefix="/lab", tags=["lab"])
 
 
-def _require_lab(settings: Settings = Depends(get_settings)) -> Settings:
+def _require_lab(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Settings:
     if not settings.lab_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    client_host = request.client.host if request.client is not None else ""
+    if not is_loopback_host(client_host):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Evaluation Lab is available only from the local host",
+        )
     return settings
 
 

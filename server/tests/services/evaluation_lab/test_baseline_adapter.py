@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+from pathlib import Path
 from uuid import UUID
 
+from evals.live_lab import baseline_observer as observer_module
+from evals.live_lab.baseline_observer import _failed_observation, run_baseline_turn
 from evals.live_lab.raw_observation import (
     BaselineObservation,
+    BaselineTurnRequest,
     ObservedError,
     RawModelCall,
 )
@@ -14,6 +20,45 @@ from server.services.evaluation_lab.models import Availability
 
 
 RUN_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+
+class _ObserverResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, object]:
+        return self._payload
+
+
+class _MissingAfterAndPromptClient:
+    def __init__(self, roster_path: Path, **kwargs) -> None:
+        del kwargs
+        self.roster_path = roster_path
+        self.get_count = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args) -> None:
+        del args
+
+    async def get(self, url: str) -> _ObserverResponse:
+        del url
+        self.get_count += 1
+        messages = (
+            []
+            if self.get_count == 1
+            else [{"role": "assistant", "content": "done"}]
+        )
+        return _ObserverResponse({"messages": messages})
+
+    async def post(self, url: str, json: dict[str, object]) -> _ObserverResponse:
+        del url, json
+        self.roster_path.write_text("{partial", encoding="utf-8")
+        return _ObserverResponse({})
 
 
 def _observation(
@@ -209,3 +254,80 @@ def test_non_uuid_historical_run_label_gets_deterministic_transport_identity() -
     assert first.run_id == second.run_id
     assert first.turn_id == second.turn_id
     assert first.run_id != first.turn_id
+
+
+def test_real_early_failed_observation_does_not_export_placeholder_zeroes(
+    tmp_path,
+) -> None:
+    request = BaselineTurnRequest(
+        run_id="early-failure",
+        data_dir=str(tmp_path / "missing-data"),
+        event_path=str(tmp_path / "run" / "events.jsonl"),
+        user_message="fixture",
+    )
+    observation = _failed_observation(
+        request,
+        code="invalid_manifest",
+        phase="preflight",
+        message="Bearer private-preflight-token",
+    )
+
+    result = adapt_baseline(observation)
+
+    for field in ("roster_count", "prompt_exposure", "identity_delta", "timings"):
+        observed = getattr(result, field)
+        assert observed.availability is Availability.UNAVAILABLE
+        assert observed.value is None
+        assert observed.reason
+    assert "private-preflight-token" not in result.model_dump_json()
+
+
+def test_real_missing_after_prompt_and_model_evidence_stays_unavailable(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    execution_dir = data_dir / "execution_agents"
+    execution_dir.mkdir(parents=True)
+    roster_path = execution_dir / "roster.json"
+    roster_path.write_text(json.dumps(["Known"]), encoding="utf-8")
+    (execution_dir / "known.log").write_text(
+        "<agent_request>before</agent_request>\n",
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "process_context.json").write_text(
+        json.dumps({"process_nonce": "adapter-fixture"}),
+        encoding="utf-8",
+    )
+    event_path = run_dir / "events.jsonl"
+    monkeypatch.setattr(
+        observer_module.httpx,
+        "AsyncClient",
+        lambda **kwargs: _MissingAfterAndPromptClient(roster_path, **kwargs),
+    )
+    observation = asyncio.run(
+        run_baseline_turn(
+            BaselineTurnRequest(
+                run_id="missing-after-prompt",
+                data_dir=str(data_dir),
+                event_path=str(event_path),
+                user_message="fixture",
+                timeout_seconds=0.1,
+            )
+        )
+    )
+
+    result = adapt_baseline(observation)
+
+    assert {error.phase for error in observation.errors} >= {
+        "snapshot_after",
+        "events",
+    }
+    assert result.roster_count.availability is Availability.AVAILABLE
+    assert result.roster_count.value == 1
+    for field in ("prompt_exposure", "identity_delta", "timings"):
+        observed = getattr(result, field)
+        assert observed.availability is Availability.UNAVAILABLE
+        assert observed.value is None

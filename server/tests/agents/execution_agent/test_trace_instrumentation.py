@@ -230,6 +230,7 @@ def test_execution_tool_timing_excludes_nested_gmail_trace_sink_latency(
         gmail_client,
         "get_settings",
         lambda: Settings(
+            server_host="127.0.0.1",
             lab_enabled=True,
             lab_composio_user_id="opaque-lab-user",
         ),

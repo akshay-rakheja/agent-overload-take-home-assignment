@@ -7,7 +7,7 @@ import logging
 import uvicorn
 
 from .app import app
-from .config import get_settings
+from .config import get_settings, is_loopback_host
 
 
 def main() -> None:
@@ -20,6 +20,8 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=default_port, help=f"Port to bind (default: {default_port})")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
     args = parser.parse_args()
+    if settings.lab_enabled and not is_loopback_host(args.host):
+        parser.error("Evaluation Lab requires a loopback --host")
 
     # Reduce uvicorn access log noise - only show warnings and errors
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

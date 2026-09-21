@@ -8,8 +8,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from server.config import Settings, get_settings
 from server.routes import api_router
@@ -52,16 +54,21 @@ def _settings(
     return Settings(
         lab_enabled=enabled,
         lab_composio_user_id="opaque-fixture-user" if enabled else None,
+        server_host="127.0.0.1",
         lab_trace_root=trace_root or tmp_path / ".lab" / "traces",
         lab_revision="revision-fixture-07",
     )
 
 
-def _client(settings: Settings) -> TestClient:
+def _client(
+    settings: Settings,
+    *,
+    client_host: str = "127.0.0.1",
+) -> TestClient:
     app = FastAPI()
     app.include_router(api_router)
     app.dependency_overrides[get_settings] = lambda: settings
-    return TestClient(app)
+    return TestClient(app, client=(client_host, 40_000))
 
 
 def _write_trace(
@@ -121,6 +128,37 @@ def test_lab_off_all_routes_are_404_and_do_not_create_trace_directory(tmp_path) 
 
     assert [response.status_code for response in responses] == [404, 404, 404, 404]
     assert not root.exists()
+
+
+def test_lab_enabled_rejects_non_loopback_reads_and_delete_without_mutation(
+    tmp_path,
+) -> None:
+    root = tmp_path / ".lab" / "traces"
+    _write_trace(root)
+    original = JsonlTraceStore(root).path_for(RUN_A).read_bytes()
+    client = _client(
+        _settings(tmp_path, enabled=True, trace_root=root),
+        client_host="203.0.113.41",
+    )
+
+    responses = (
+        client.get("/api/v1/lab/directory"),
+        client.get(f"/api/v1/lab/runs/{RUN_A}/status"),
+        client.get(f"/api/v1/lab/runs/{RUN_A}/trace"),
+        client.delete(f"/api/v1/lab/runs/{RUN_A}/trace"),
+    )
+
+    assert [response.status_code for response in responses] == [403, 403, 403, 403]
+    assert JsonlTraceStore(root).path_for(RUN_A).read_bytes() == original
+
+
+def test_lab_enabled_settings_reject_unsafe_all_interface_bind() -> None:
+    with pytest.raises(ValidationError, match="loopback"):
+        Settings(
+            lab_enabled=True,
+            lab_composio_user_id="opaque-fixture-user",
+            server_host="0.0.0.0",
+        )
 
 
 def test_directory_returns_stable_revision_and_direct_persisted_summaries(

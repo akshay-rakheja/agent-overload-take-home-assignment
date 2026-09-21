@@ -99,14 +99,19 @@ def test_connect_uses_link_and_normalizes_link_response(case_name, monkeypatch):
 
 def test_lab_settings_require_an_opaque_user_id():
     with pytest.raises(ValidationError, match="OPENPOKE_LAB_COMPOSIO_USER_ID"):
-        Settings(lab_enabled=True, lab_composio_user_id=None)
+        Settings(
+            server_host="127.0.0.1",
+            lab_enabled=True,
+            lab_composio_user_id=None,
+        )
 
 
 def test_lab_settings_parse_environment_without_changing_model_defaults(monkeypatch):
     monkeypatch.setenv("OPENPOKE_LAB_ENABLED", "true")
     monkeypatch.setenv("OPENPOKE_LAB_COMPOSIO_USER_ID", "opaque-env-user")
+    monkeypatch.setenv("OPENPOKE_HOST", "127.0.0.1")
 
-    settings = Settings()
+    settings = Settings(server_host="127.0.0.1")
 
     assert settings.lab_enabled is True
     assert settings.lab_composio_user_id == "opaque-env-user"
@@ -126,6 +131,7 @@ def test_lab_connect_uses_configured_user_and_rejects_conflicting_payload(monkey
     )
     monkeypatch.setattr(gmail_client, "_CLIENT", FakeComposio(accounts))
     settings = Settings(
+        server_host="127.0.0.1",
         lab_enabled=True,
         lab_composio_user_id="opaque-lab-user",
         composio_gmail_auth_config_id="fixture-auth-config",

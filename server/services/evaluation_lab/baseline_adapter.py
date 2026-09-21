@@ -81,6 +81,18 @@ def adapt_baseline(observation: BaselineObservation) -> SystemRunResult:
     unsupported_identity = "historical baseline has no enhanced stable identity contract"
     unsupported_authorization = "historical baseline has no deterministic authorization set"
     dispatch_unavailable = "raw baseline observation does not expose exact dispatch acceptance"
+    failed_placeholder = (
+        observation.inference_reason
+        == "baseline observation failed before trustworthy evidence was available"
+    )
+    before_available = not failed_placeholder or bool(
+        observation.roster_before or observation.journal_hashes_before
+    )
+    after_available = not failed_placeholder and not any(
+        error.phase == "snapshot_after" for error in observation.errors
+    )
+    prompt_available = bool(observation.prompt_xml_sha256)
+    timings_available = bool(observation.raw_model_calls)
 
     selected_identity: ObservedValue[Any]
     if (
@@ -128,14 +140,22 @@ def adapt_baseline(observation: BaselineObservation) -> SystemRunResult:
             "full_roster",
             "historical baseline observer captures the full-roster selection path",
         ),
-        "roster_count": _available(len(observation.roster_before)),
-        "prompt_exposure": _available(
-            {
-                "prompt_xml_sha256": observation.prompt_xml_sha256,
-                "prompt_characters": observation.prompt_characters,
-                "exposed_names": list(observation.exposed_names),
-                "exposed_name_count": len(observation.exposed_names),
-            }
+        "roster_count": (
+            _available(len(observation.roster_before))
+            if before_available
+            else _unavailable("baseline pre-turn roster evidence was not observed")
+        ),
+        "prompt_exposure": (
+            _available(
+                {
+                    "prompt_xml_sha256": observation.prompt_xml_sha256,
+                    "prompt_characters": observation.prompt_characters,
+                    "exposed_names": list(observation.exposed_names),
+                    "exposed_name_count": len(observation.exposed_names),
+                }
+            )
+            if prompt_available
+            else _unavailable("baseline interaction prompt evidence was not observed")
         ),
         "candidates": _not_applicable(unsupported_ranking),
         "decision": _inferred(
@@ -151,13 +171,17 @@ def adapt_baseline(observation: BaselineObservation) -> SystemRunResult:
         "accepted_dispatch": _unavailable(dispatch_unavailable),
         "selected_identity": selected_identity,
         "created_identity": created_identity,
-        "identity_delta": _available(
-            {
-                "roster_before_count": len(observation.roster_before),
-                "roster_after_count": len(observation.roster_after),
-                "added_names": added_names,
-                "removed_names": removed_names,
-            }
+        "identity_delta": (
+            _available(
+                {
+                    "roster_before_count": len(observation.roster_before),
+                    "roster_after_count": len(observation.roster_after),
+                    "added_names": added_names,
+                    "removed_names": removed_names,
+                }
+            )
+            if before_available and after_available
+            else _unavailable("baseline post-turn roster evidence was not observed")
         ),
         "duplicates": _not_applicable(unsupported_identity),
         "gmail_evidence": _unavailable(
@@ -171,7 +195,11 @@ def adapt_baseline(observation: BaselineObservation) -> SystemRunResult:
         "context_metrics": _unavailable(
             "historical baseline has no bounded enhanced context metrics"
         ),
-        "timings": _available(timings),
+        "timings": (
+            _available(timings)
+            if timings_available
+            else _unavailable("baseline model timing evidence was not observed")
+        ),
         "errors": _available(errors),
     }
     result = SystemRunResult(

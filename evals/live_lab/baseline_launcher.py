@@ -381,6 +381,7 @@ def _purge_server_modules() -> None:
 def _configure_historical_state(data_dir: Path, model_id: str) -> None:
     config = importlib.import_module("server.config")
     settings = config.Settings(
+        server_host="127.0.0.1",
         openrouter_api_key="live-lab-fake-key",
         lab_enabled=True,
         lab_composio_user_id="live-lab-local-user",

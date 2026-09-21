@@ -2,6 +2,7 @@
 
 import os
 from functools import lru_cache
+from ipaddress import ip_address
 from pathlib import Path
 from typing import List, Optional
 
@@ -60,6 +61,18 @@ def _env_optional(name: str) -> Optional[str]:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def is_loopback_host(value: str) -> bool:
+    """Return whether a configured bind/client host is strictly local."""
+
+    normalized = value.strip().strip("[]")
+    if normalized.casefold() == "localhost":
+        return True
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 class Settings(BaseModel):
@@ -158,6 +171,10 @@ class Settings(BaseModel):
         if self.lab_enabled and not normalized:
             raise ValueError(
                 "OPENPOKE_LAB_COMPOSIO_USER_ID is required when Evaluation Lab mode is enabled"
+            )
+        if self.lab_enabled and not is_loopback_host(self.server_host):
+            raise ValueError(
+                "OPENPOKE_HOST must be a loopback host when Evaluation Lab mode is enabled"
             )
         return self
 
