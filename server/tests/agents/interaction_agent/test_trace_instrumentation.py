@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+from contextvars import copy_context
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from types import SimpleNamespace
@@ -31,7 +33,7 @@ from server.agents.interaction_agent.tools import (
 )
 from server.config import Settings
 from server.services.evaluation_lab.models import TraceContext, TraceEventKind
-from server.services.evaluation_lab.trace import NullTraceSink, trace_scope
+from server.services.evaluation_lab.trace import NullTraceSink, emit_trace, trace_scope
 from server.services.execution.directory import AgentDirectory
 from server.services.execution.log_store import ExecutionAgentLogStore
 from server.services.execution.models import AgentRecord, AgentStatus
@@ -455,6 +457,115 @@ def test_interaction_tool_timing_excludes_nested_send_draft_trace_sink_latency(
         ("tool_call", "rejected"),
     ]
     assert sink.events[-1].payload["elapsed_ns"] == 0
+
+
+def test_interaction_terminal_elapsed_freezes_in_progress_copied_context_observation(
+    monkeypatch,
+) -> None:
+    clock_lock = threading.Lock()
+    clock_value = {"now": 0}
+    observation_in_sink = threading.Event()
+    release_observation = threading.Event()
+    observer_threads: list[threading.Thread] = []
+    worker_errors: list[BaseException] = []
+    terminal_payloads_before_release: list[dict] = []
+
+    def set_clock(value: int) -> None:
+        with clock_lock:
+            clock_value["now"] = value
+
+    def clock() -> int:
+        with clock_lock:
+            return clock_value["now"]
+
+    class EndpointBlockingSink(CollectingSink):
+        def emit(self, event) -> None:
+            if event.kind is TraceEventKind.GMAIL_EVIDENCE:
+                observation_in_sink.set()
+                assert release_observation.wait(timeout=5)
+                set_clock(30)
+            super().emit(event)
+
+    def run_observer(context) -> None:
+        try:
+            context.run(
+                emit_trace,
+                TraceEventKind.GMAIL_EVIDENCE,
+                {
+                    "boundary": "fixture_child",
+                    "operation_name": "fixture_read",
+                    "stage": "completed",
+                },
+            )
+        except BaseException as exc:  # pragma: no cover - thread sentinel
+            worker_errors.append(exc)
+
+    expected_result = ToolResult(success=True, payload={"status": "fixture"})
+
+    def fake_handle_tool_call(name, arguments, *, dispatch_context):
+        del name, arguments, dispatch_context
+        set_clock(10)
+        observer_context = copy_context()
+        observer = threading.Thread(
+            target=run_observer,
+            args=(observer_context,),
+            name="trace-observer",
+        )
+        observer_threads.append(observer)
+        observer.start()
+        assert observation_in_sink.wait(timeout=5)
+        set_clock(20)
+        return expected_result
+
+    real_runtime_emit = interaction_runtime.emit_trace
+
+    def release_on_terminal_emit(kind, payload):
+        if (
+            kind is TraceEventKind.TOOL_CALL
+            and payload.get("stage") == "completed"
+        ):
+            terminal_payloads_before_release.append(dict(payload))
+            release_observation.set()
+            observer_threads[0].join(timeout=5)
+            assert observer_threads[0].is_alive() is False
+        real_runtime_emit(kind, payload)
+
+    monkeypatch.setattr(interaction_runtime, "monotonic_ns", clock)
+    monkeypatch.setattr(interaction_runtime, "handle_tool_call", fake_handle_tool_call)
+    monkeypatch.setattr(interaction_runtime, "emit_trace", release_on_terminal_emit)
+    runtime = InteractionAgentRuntime.__new__(InteractionAgentRuntime)
+    runtime.dispatch_context = DispatchContext()
+    sink = EndpointBlockingSink()
+
+    try:
+        with trace_scope(_trace_context(), sink):
+            result = runtime._execute_tool(
+                _ToolCall(
+                    identifier="call-1",
+                    name="fixture_tool",
+                    arguments={},
+                )
+            )
+    finally:
+        release_observation.set()
+        for observer in observer_threads:
+            observer.join(timeout=5)
+
+    assert worker_errors == []
+    assert result is expected_result
+    assert terminal_payloads_before_release[0]["finished_monotonic_ns"] == 20
+    assert terminal_payloads_before_release[0]["elapsed_ns"] == 10
+    assert [event.sequence for event in sink.events] == [1, 2, 3]
+    assert [
+        (event.kind.value, event.payload["stage"])
+        for event in sink.events
+    ] == [
+        ("tool_call", "started"),
+        ("gmail_evidence", "completed"),
+        ("tool_call", "completed"),
+    ]
+    assert sink.events[-1].payload["finished_monotonic_ns"] == 20
+    assert sink.events[-1].payload["elapsed_ns"] == 10
 
 
 def test_lab_send_draft_emits_rejection_at_policy_boundary_without_recording(

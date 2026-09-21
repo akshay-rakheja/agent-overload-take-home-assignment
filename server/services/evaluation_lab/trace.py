@@ -61,70 +61,73 @@ class TraceTiming:
 
     __slots__ = (
         "_active",
+        "_active_observations",
         "_clock",
+        "_final_elapsed_ns",
         "_finished_monotonic_ns",
         "_lock",
+        "_next_observation_id",
         "_trace_observation_intervals",
         "started_monotonic_ns",
     )
 
     def __init__(self, clock: Callable[[], int]) -> None:
         self._active = True
+        self._active_observations: dict[int, int] = {}
         self._clock = clock
+        self._final_elapsed_ns: int | None = None
         self._finished_monotonic_ns: int | None = None
         self._lock = threading.RLock()
+        self._next_observation_id = 0
         self._trace_observation_intervals: list[tuple[int, int]] = []
         self.started_monotonic_ns = clock()
 
-    def _observation_started(self) -> int | None:
+    def _observation_started(self) -> tuple[int, int] | None:
         with self._lock:
             if not self._active:
                 return None
-        try:
-            value = self._clock()
-        except Exception:
-            return None
-        return value if isinstance(value, int) and not isinstance(value, bool) else None
+            try:
+                value = self._clock()
+            except Exception:
+                return None
+            if not isinstance(value, int) or isinstance(value, bool):
+                return None
+            self._next_observation_id += 1
+            observation_id = self._next_observation_id
+            self._active_observations[observation_id] = value
+            return observation_id, value
 
-    def _observation_finished(self, started: int) -> None:
+    def _observation_finished(self, observation: tuple[int, int]) -> None:
+        observation_id, started = observation
         try:
             finished = self._clock()
         except Exception:
-            return
-        if not isinstance(finished, int) or isinstance(finished, bool):
-            return
-        if finished <= started:
-            return
+            finished = None
         with self._lock:
-            self._trace_observation_intervals.append((started, finished))
+            self._active_observations.pop(observation_id, None)
+            if (
+                self._final_elapsed_ns is None
+                and isinstance(finished, int)
+                and not isinstance(finished, bool)
+                and finished > started
+            ):
+                self._trace_observation_intervals.append((started, finished))
 
-    def finish(self) -> int:
-        """Freeze the phase endpoint before its terminal trace event is emitted."""
-
-        with self._lock:
-            if self._finished_monotonic_ns is None:
-                self._finished_monotonic_ns = self._clock()
-                self._active = False
-            return self._finished_monotonic_ns
-
-    @property
-    def finished_monotonic_ns(self) -> int:
-        return self.finish()
-
-    @property
-    def elapsed_ns(self) -> int:
-        finished = self.finish()
-        with self._lock:
-            gross = max(0, finished - self.started_monotonic_ns)
-            clipped = sorted(
-                (
-                    max(self.started_monotonic_ns, started),
-                    min(finished, observation_finished),
-                )
-                for started, observation_finished in self._trace_observation_intervals
-                if observation_finished > self.started_monotonic_ns
-                and started < finished
+    def _elapsed_at_locked(self, finished: int) -> int:
+        gross = max(0, finished - self.started_monotonic_ns)
+        intervals = [
+            *self._trace_observation_intervals,
+            *((started, finished) for started in self._active_observations.values()),
+        ]
+        clipped = sorted(
+            (
+                max(self.started_monotonic_ns, started),
+                min(finished, observation_finished),
             )
+            for started, observation_finished in intervals
+            if observation_finished > self.started_monotonic_ns
+            and started < finished
+        )
 
         trace_overhead = 0
         if clipped:
@@ -136,8 +139,30 @@ class TraceTiming:
                 trace_overhead += max(0, union_end - union_start)
                 union_start, union_end = interval_start, interval_end
             trace_overhead += max(0, union_end - union_start)
-        trace_overhead = min(gross, trace_overhead)
-        return gross - trace_overhead
+        return gross - min(gross, trace_overhead)
+
+    def finish(self) -> int:
+        """Freeze the phase endpoint before its terminal trace event is emitted."""
+
+        with self._lock:
+            if self._finished_monotonic_ns is None:
+                self._finished_monotonic_ns = self._clock()
+                self._active = False
+                self._final_elapsed_ns = self._elapsed_at_locked(
+                    self._finished_monotonic_ns
+                )
+            return self._finished_monotonic_ns
+
+    @property
+    def finished_monotonic_ns(self) -> int:
+        return self.finish()
+
+    @property
+    def elapsed_ns(self) -> int:
+        self.finish()
+        with self._lock:
+            assert self._final_elapsed_ns is not None
+            return self._final_elapsed_ns
 
 
 _TRACE_SCOPE: ContextVar[_ScopeState | None] = ContextVar(
