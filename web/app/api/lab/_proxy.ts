@@ -26,7 +26,11 @@ async function upstream(path: string, schema: z.ZodTypeAny, signal: AbortSignal,
     throw new ProxyError(status, status === 404 ? 'Lab endpoint unavailable' : status === 409 ? 'Run blocked by the lab service' : 'Lab service unavailable');
   }
   let payload: unknown;
-  try { payload = await response.json(); } catch { throw new ProxyError(502, 'Lab response could not be verified', 'INVALID_UPSTREAM_RESPONSE'); }
+  try { payload = await response.json(); } catch (error) {
+    if (error instanceof SyntaxError) throw new ProxyError(502, 'Lab response could not be verified', 'INVALID_UPSTREAM_RESPONSE');
+    // Preserve body-stream failures for the sanitized transport/timeout boundary.
+    throw error;
+  }
   const parsed = schema.safeParse(payload);
   if (!parsed.success) throw new ProxyError(502, 'Lab response could not be verified', 'INVALID_UPSTREAM_RESPONSE');
   return { data: parsed.data, status: response.status };

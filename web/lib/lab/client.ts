@@ -25,7 +25,10 @@ async function request<T>(path: string, schema: z.ZodType<T>, signal?: AbortSign
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     if (!response.ok) {
-      const proxyError = LabProxyErrorSchema.safeParse(await response.json().catch(() => null));
+      const proxyError = LabProxyErrorSchema.safeParse(await response.json().catch((error) => {
+        if (!(error instanceof SyntaxError)) throw error;
+        return null;
+      }));
       if (proxyError.success) {
         const retryableRead = !body && (
           (response.status === 502 && proxyError.data.code === 'UPSTREAM_TRANSPORT') ||
@@ -37,7 +40,11 @@ async function request<T>(path: string, schema: z.ZodType<T>, signal?: AbortSign
       throw new LabClientError(message);
     }
     let payload: unknown;
-    try { payload = await response.json(); } catch { throw new LabClientError('Lab response could not be verified'); }
+    try { payload = await response.json(); } catch (error) {
+      if (error instanceof SyntaxError) throw new LabClientError('Lab response could not be verified');
+      // The headers may have arrived before the connection failed during the body.
+      throw error;
+    }
     const parsed = schema.safeParse(payload);
     if (!parsed.success) throw new LabClientError('Lab response could not be verified');
     return parsed.data;

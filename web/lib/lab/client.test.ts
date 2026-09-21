@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import backend from '../../tests/fixtures/backend.json';
 import { preflight } from '../../tests/fixtures/preflight';
+import { interruptedJson } from '../../tests/fixtures/transport';
 import { getPreflight, listScenarios, startRun, getRun, pollRun } from './client';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
@@ -8,6 +9,16 @@ const json = (data: unknown, status = 200) => new Response(JSON.stringify(data),
 const runAt = (status: string) => ({ ...backend.run, status });
 
 describe('lab requests', () => {
+  it.each([202, 502])('does not retry a start whose HTTP %s body connection fails', async (status) => {
+    const sent: unknown[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(init.body as string));
+      return interruptedJson(status);
+    });
+    const body = { request_id: backend.handle.request_id, scenario_ids: ['fixture'] };
+    await expect(startRun(body)).rejects.toMatchObject({ message: 'Connection unavailable', retryable: false });
+    expect(sent).toEqual([body]);
+  });
   it('reads only the same-origin preflight and scenario paths', async () => {
     const requests: string[] = [];
     vi.stubGlobal('fetch', async (url: string) => { requests.push(url); return json(url.endsWith('preflight') ? preflight : backend.scenarios); });
@@ -44,6 +55,24 @@ describe('lab requests', () => {
 });
 
 describe('read-only polling', () => {
+  it.each([200, 502])('retries a connection lost while receiving the HTTP %s body', async (status) => {
+    vi.useFakeTimers();
+    const methods: string[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      methods.push(init.method!);
+      return methods.length === 1 ? interruptedJson(status) : json(backend.run);
+    });
+    const pending = pollRun(backend.handle.run_id, new AbortController().signal).catch((error) => error);
+    await vi.runAllTimersAsync();
+    expect((await pending).status).toBe('partial_failure');
+    expect(methods).toEqual(['GET', 'GET']);
+  });
+  it('does not retry a fully received body containing invalid JSON syntax', async () => {
+    const reads: number[] = [];
+    vi.stubGlobal('fetch', async () => { reads.push(1); return new Response('{"status":'); });
+    await expect(pollRun(backend.handle.run_id, new AbortController().signal)).rejects.toMatchObject({ message: 'Lab response could not be verified', retryable: false });
+    expect(reads).toHaveLength(1);
+  });
   it('retries a typed upstream timeout and accepts the next terminal read', async () => {
     vi.useFakeTimers();
     const reads: number[] = [];

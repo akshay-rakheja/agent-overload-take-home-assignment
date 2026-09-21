@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import backend from '../../../tests/fixtures/backend.json';
 import { preflight } from '../../../tests/fixtures/preflight';
+import { interruptedJson } from '../../../tests/fixtures/transport';
 import { proxyLab } from './_proxy';
 import { GET as readRun } from './runs/[runId]/route';
 import { POST as createRun } from './runs/route';
@@ -97,12 +98,27 @@ it('retries a backend connection failure through the actual proxy and retains te
   expect(methods).toEqual(['GET', 'GET']);
 });
 
-it('caps backend transport retries through the proxy at three retries', async () => {
+it('recovers through the actual proxy when the backend connection fails after headers', async () => {
   vi.useFakeTimers();
   const methods: string[] = [];
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
     if (url.startsWith('/api/lab/')) return readRun(new Request(`http://127.0.0.1:3000${url}`, { signal: init.signal }), { params: { runId: backend.handle.run_id } });
     methods.push(init.method!);
+    return methods.length === 1 ? interruptedJson() : json(backend.run);
+  });
+  const pending = pollRun(backend.handle.run_id, new AbortController().signal).catch((error) => error);
+  await vi.runAllTimersAsync();
+  expect((await pending).status).toBe('partial_failure');
+  expect(methods).toEqual(['GET', 'GET']);
+});
+
+it.each(['before headers', 'during body'])('caps backend transport retries through the proxy at three retries: %s', async (failureStage) => {
+  vi.useFakeTimers();
+  const methods: string[] = [];
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    if (url.startsWith('/api/lab/')) return readRun(new Request(`http://127.0.0.1:3000${url}`, { signal: init.signal }), { params: { runId: backend.handle.run_id } });
+    methods.push(init.method!);
+    if (failureStage === 'during body') return interruptedJson();
     throw new TypeError('private backend error');
   });
   const pending = pollRun(backend.handle.run_id, new AbortController().signal).catch((error) => error);
@@ -111,23 +127,24 @@ it('caps backend transport retries through the proxy at three retries', async ()
   expect(methods).toEqual(['GET', 'GET', 'GET', 'GET']);
 });
 
-it('does not retry a schema rejection from the actual proxy', async () => {
+it.each(['schema', 'JSON syntax'])('does not retry a %s rejection from the actual proxy', async (invalidKind) => {
   const reads: number[] = [];
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
     if (url.startsWith('/api/lab/')) return readRun(new Request(`http://127.0.0.1:3000${url}`, { signal: init.signal }), { params: { runId: backend.handle.run_id } });
     reads.push(1);
-    return json({ private_payload: 'not a run' });
+    return invalidKind === 'schema' ? json({ private_payload: 'not a run' }) : new Response('{"status":');
   });
   await expect(pollRun(backend.handle.run_id, new AbortController().signal)).rejects.toMatchObject({ message: 'Lab response could not be verified', retryable: false });
   expect(reads).toHaveLength(1);
 });
 
-it('never retries a start whose backend response is lost through the actual proxy', async () => {
+it.each(['before headers', 'during body'])('never retries a start whose backend response is lost through the actual proxy: %s', async (failureStage) => {
   const writes: unknown[] = [];
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
     if (url === '/api/lab/runs') return createRun(request('runs', JSON.parse(init.body as string)));
     if (url.endsWith('preflight')) return json(preflight);
     writes.push(JSON.parse(init.body as string));
+    if (failureStage === 'during body') return interruptedJson(202);
     throw new TypeError('private lost start response');
   });
   const body = { request_id: backend.handle.request_id, scenario_ids: ['fixture'] };
