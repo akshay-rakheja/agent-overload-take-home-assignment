@@ -3,13 +3,18 @@ from __future__ import annotations
 import json
 import re
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 import httpx
 
 from ..config import ModelCallConfig, ModelRole, get_settings
 from ..services.evaluation_lab.models import TraceEventKind
+from ..services.evaluation_lab.routing_evidence import safe_provider_routing
 from ..services.evaluation_lab.trace import emit_trace
-from ..services.evaluation_lab.usage import emit_usage_evidence
+from ..services.evaluation_lab.usage import (
+    emit_unavailable_usage_evidence,
+    emit_usage_evidence,
+)
 
 OpenRouterBaseURL = "https://openrouter.ai/api/v1"
 
@@ -139,11 +144,13 @@ def _emit_request_evidence(
     model: str,
     messages: List[Dict[str, str]],
     tools: Optional[List[Dict[str, Any]]],
+    call_id: str,
 ) -> None:
     emit_trace(
         TraceEventKind.MODEL_CALL,
         {
             "stage": "request",
+            "call_id": call_id,
             "role": role.value if role is not None else None,
             "model": model,
             "provider": _provider_from_model(model),
@@ -167,6 +174,8 @@ def _emit_response_evidence(
     response: dict[str, Any],
     http_response: httpx.Response,
     retry_count: int,
+    call_id: str,
+    attempt: int,
 ) -> None:
     response_model = response.get("model")
     provider = response.get("provider")
@@ -203,6 +212,8 @@ def _emit_response_evidence(
         TraceEventKind.MODEL_CALL,
         {
             "stage": "response",
+            "call_id": call_id,
+            "attempt": attempt,
             "role": role.value if role is not None else None,
             "model": response_model if isinstance(response_model, str) else requested_model,
             "requested_model": requested_model,
@@ -227,15 +238,12 @@ def _emit_response_evidence(
             "provider_failover": (
                 provider_failover if isinstance(provider_failover, bool) else None
             ),
-            "provider_routing": (
-                provider_routing
-                if isinstance(provider_routing, (list, dict, str))
-                else None
-            ),
+            "provider_routing": safe_provider_routing(provider_routing),
             "failover": (
                 provider_failover if isinstance(provider_failover, bool) else None
             ),
             "timeout": False,
+            "status_code": http_response.status_code,
             "rate_limit": _rate_limit_evidence(http_response),
             "malformed_tool_calls": _malformed_tool_call_count(response),
         },
@@ -250,11 +258,15 @@ def _emit_error_evidence(
     error: BaseException,
     retry_count: int,
     response: httpx.Response | None = None,
+    call_id: str,
+    attempt: int,
 ) -> None:
     emit_trace(
         TraceEventKind.MODEL_CALL,
         {
             "stage": "error",
+            "call_id": call_id,
+            "attempt": attempt,
             "role": role.value if role is not None else None,
             "model": model,
             "provider": _provider_from_model(model),
@@ -278,20 +290,39 @@ def _emit_error_evidence(
     )
 
 
-def _emit_usage_best_effort(response: object, *, role: ModelRole | None) -> None:
+def _emit_usage_best_effort(
+    response: object,
+    *,
+    role: ModelRole | None,
+    call_id: str,
+    attempt: int,
+    observation_status: str,
+) -> None:
+    role_name = role.value if role is not None else "unassigned"
     try:
         emit_usage_evidence(
             response,
-            role=role.value if role is not None else "unassigned",
+            role=role_name,
+            call_id=call_id,
+            attempt=attempt,
+            observation_status=observation_status,
         )
     except Exception as exc:
         emit_trace(
             TraceEventKind.OBSERVABILITY_WARNING,
             {
                 "boundary": "model_usage",
-                "role": role.value if role is not None else "unassigned",
+                "role": role_name,
+                "call_id": call_id,
+                "attempt": attempt,
                 "error_type": type(exc).__name__,
             },
+        )
+        emit_unavailable_usage_evidence(
+            role=role_name,
+            call_id=call_id,
+            attempt=attempt,
+            observation_status="observer_degraded",
         )
 
 
@@ -327,12 +358,14 @@ async def request_chat_completion(
     url = f"{base_url.rstrip('/')}/chat/completions"
     timeout_seconds = config.timeout_seconds if config is not None else 60.0
     max_retries = config.max_retries if config is not None else 0
+    call_id = uuid4().hex
     _emit_request_evidence(
         role=role,
         config=config,
         model=resolved_model,
         messages=messages,
         tools=tools,
+        call_id=call_id,
     )
 
     async with httpx.AsyncClient() as client:
@@ -345,15 +378,24 @@ async def request_chat_completion(
                     timeout=timeout_seconds,
                 )
             except httpx.HTTPError as exc:
-                if attempt < max_retries:
-                    continue
+                _emit_usage_best_effort(
+                    None,
+                    role=role,
+                    call_id=call_id,
+                    attempt=attempt,
+                    observation_status="transport_error",
+                )
                 _emit_error_evidence(
                     role=role,
                     model=resolved_model,
                     config=config,
                     error=exc,
                     retry_count=attempt,
+                    call_id=call_id,
+                    attempt=attempt,
                 )
+                if attempt < max_retries:
+                    continue
                 raise OpenRouterError(f"OpenRouter request failed: {exc}") from exc
             try:
                 response.raise_for_status()
@@ -363,7 +405,31 @@ async def request_chat_completion(
                 except Exception:
                     error_payload = None
                 if error_payload is not None:
-                    _emit_usage_best_effort(error_payload, role=role)
+                    _emit_usage_best_effort(
+                        error_payload,
+                        role=role,
+                        call_id=call_id,
+                        attempt=attempt,
+                        observation_status="http_error",
+                    )
+                else:
+                    _emit_usage_best_effort(
+                        None,
+                        role=role,
+                        call_id=call_id,
+                        attempt=attempt,
+                        observation_status="malformed_error_response",
+                    )
+                _emit_error_evidence(
+                    role=role,
+                    model=resolved_model,
+                    config=config,
+                    error=exc,
+                    retry_count=attempt,
+                    response=response,
+                    call_id=call_id,
+                    attempt=attempt,
+                )
                 if attempt < max_retries and response.status_code in {
                     408,
                     409,
@@ -374,14 +440,6 @@ async def request_chat_completion(
                     504,
                 }:
                     continue
-                _emit_error_evidence(
-                    role=role,
-                    model=resolved_model,
-                    config=config,
-                    error=exc,
-                    retry_count=attempt,
-                    response=response,
-                )
                 _handle_response_error(exc)
             raw_response = response.json()
             if not isinstance(raw_response, dict):
@@ -393,6 +451,15 @@ async def request_chat_completion(
                     error=error,
                     retry_count=attempt,
                     response=response,
+                    call_id=call_id,
+                    attempt=attempt,
+                )
+                _emit_usage_best_effort(
+                    raw_response,
+                    role=role,
+                    call_id=call_id,
+                    attempt=attempt,
+                    observation_status="malformed_success_response",
                 )
                 raise error
             _emit_response_evidence(
@@ -402,8 +469,16 @@ async def request_chat_completion(
                 response=raw_response,
                 http_response=response,
                 retry_count=attempt,
+                call_id=call_id,
+                attempt=attempt,
             )
-            _emit_usage_best_effort(raw_response, role=role)
+            _emit_usage_best_effort(
+                raw_response,
+                role=role,
+                call_id=call_id,
+                attempt=attempt,
+                observation_status="success",
+            )
             return raw_response
 
     raise OpenRouterError("OpenRouter request failed: unknown error")

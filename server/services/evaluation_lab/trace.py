@@ -648,6 +648,36 @@ def _aggregate_observations(
     return _available(sum(item.value for item in observations if item.value is not None))
 
 
+def _known_subtotal(
+    observations: Sequence[ObservedValue[Any]], *, fact: str
+) -> ObservedValue[Any]:
+    available = [
+        item.value
+        for item in observations
+        if item.availability is Availability.AVAILABLE and item.value is not None
+    ]
+    if observations and len(available) < len(observations) and available:
+        return _available(sum(available))
+    return ObservedValue(
+        availability=Availability.UNAVAILABLE,
+        reason=f"{fact} has no partial known subtotal",
+    )
+
+
+def _attempt_key(payload: Mapping[str, JsonValue]) -> tuple[str, int] | None:
+    call_id = payload.get("call_id")
+    attempt = payload.get("attempt")
+    if (
+        isinstance(call_id, str)
+        and call_id
+        and isinstance(attempt, int)
+        and not isinstance(attempt, bool)
+        and attempt >= 0
+    ):
+        return call_id, attempt
+    return None
+
+
 def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
     """Map only emitted event facts into the shared result schema."""
 
@@ -657,8 +687,14 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
     gmail_evidence: list[JsonValue] = []
     timings: list[JsonValue] = []
     errors: list[JsonValue] = []
-    usage_observations: dict[str, list[ObservedValue[Any]]] = {}
-    cost_observations: list[ObservedValue[Any]] = []
+    usage_by_attempt: dict[
+        str, dict[tuple[str, int], ObservedValue[Any]]
+    ] = {}
+    legacy_usage: dict[str, list[ObservedValue[Any]]] = {}
+    cost_by_attempt: dict[tuple[str, int], ObservedValue[Any]] = {}
+    legacy_usage_cost: list[ObservedValue[Any]] = []
+    legacy_cost_events: list[ObservedValue[Any]] = []
+    expected_attempts: set[tuple[str, int]] = set()
 
     for event in validated_events:
         payload = redact_value(event.payload)
@@ -704,31 +740,52 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
             values["context_metrics"] = _available(payload)
         elif event.kind is TraceEventKind.PHASE_TIMING:
             timings.append(payload)
+        elif event.kind is TraceEventKind.MODEL_CALL:
+            if payload.get("stage") in {"response", "error"}:
+                if (key := _attempt_key(payload)) is not None:
+                    expected_attempts.add(key)
         elif event.kind is TraceEventKind.USAGE:
+            attempt_key = _attempt_key(payload)
             for key in ("input_tokens", "output_tokens", "cached_tokens", "total_tokens"):
                 if key in payload:
                     observed = payload[key]
-                    usage_observations.setdefault(key, []).append(
-                        _observed_value(observed, int)
-                    )
+                    normalized = _observed_value(observed, int)
+                    if attempt_key is None:
+                        legacy_usage.setdefault(key, []).append(normalized)
+                    else:
+                        usage_by_attempt.setdefault(key, {})[attempt_key] = normalized
             for source, target in (
                 ("prompt_tokens", "input_tokens"),
                 ("completion_tokens", "output_tokens"),
             ):
                 observed = payload.get(source)
                 if isinstance(observed, dict) and "availability" in observed:
-                    usage_observations.setdefault(target, []).append(
-                        _observed_value(observed, int)
-                    )
-        elif event.kind is TraceEventKind.COST:
-            for key in ("amount", "currency"):
-                if key in payload:
-                    observed = payload[key]
-                    if key == "amount":
-                        cost_observations.append(_observed_value(observed, float))
+                    normalized = _observed_value(observed, int)
+                    if attempt_key is None:
+                        legacy_usage.setdefault(target, []).append(normalized)
+                    else:
+                        usage_by_attempt.setdefault(target, {})[attempt_key] = normalized
             provider_cost = payload.get("provider_cost_usd")
             if isinstance(provider_cost, dict) and "availability" in provider_cost:
-                cost_observations.append(_observed_value(provider_cost, float))
+                normalized_cost = _observed_value(provider_cost, float)
+                if attempt_key is None:
+                    legacy_usage_cost.append(normalized_cost)
+                else:
+                    cost_by_attempt[attempt_key] = normalized_cost
+        elif event.kind is TraceEventKind.COST:
+            attempt_key = _attempt_key(payload)
+            observed = payload.get("amount")
+            provider_cost = payload.get("provider_cost_usd")
+            normalized_cost: ObservedValue[Any] | None = None
+            if observed is not None:
+                normalized_cost = _observed_value(observed, float)
+            elif isinstance(provider_cost, dict) and "availability" in provider_cost:
+                normalized_cost = _observed_value(provider_cost, float)
+            if normalized_cost is not None:
+                if attempt_key is None:
+                    legacy_cost_events.append(normalized_cost)
+                else:
+                    cost_by_attempt.setdefault(attempt_key, normalized_cost)
         elif event.kind in {TraceEventKind.ERROR, TraceEventKind.OBSERVABILITY_WARNING}:
             errors.append(payload)
 
@@ -739,22 +796,47 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
     if errors:
         values["errors"] = _available(errors)
 
-    usage = UsagePlaceholder(
-        **{
-            key: _aggregate_observations(
-                usage_observations.get(key, ()), fact=key
-            ).model_dump()
-            for key in ("input_tokens", "output_tokens", "cached_tokens", "total_tokens")
-        }
+    missing_attempt = ObservedValue(
+        availability=Availability.UNAVAILABLE,
+        reason="model attempt usage evidence was not emitted",
     )
+    for attempt_key in expected_attempts:
+        for fact in ("input_tokens", "output_tokens", "cached_tokens", "total_tokens"):
+            usage_by_attempt.setdefault(fact, {}).setdefault(attempt_key, missing_attempt)
+        cost_by_attempt.setdefault(attempt_key, missing_attempt)
+
+    usage_values: dict[str, Any] = {}
+    subtotal_names = {
+        "input_tokens": "known_input_tokens_subtotal",
+        "output_tokens": "known_output_tokens_subtotal",
+        "cached_tokens": "known_cached_tokens_subtotal",
+        "total_tokens": "known_total_tokens_subtotal",
+    }
+    for fact in ("input_tokens", "output_tokens", "cached_tokens", "total_tokens"):
+        observations = [
+            *usage_by_attempt.get(fact, {}).values(),
+            *legacy_usage.get(fact, ()),
+        ]
+        usage_values[fact] = _aggregate_observations(
+            observations, fact=fact
+        ).model_dump()
+        usage_values[subtotal_names[fact]] = _known_subtotal(
+            observations, fact=fact
+        ).model_dump()
+    usage = UsagePlaceholder(**usage_values)
+    legacy_cost = legacy_usage_cost or legacy_cost_events
+    cost_observations = [*cost_by_attempt.values(), *legacy_cost]
     aggregate_cost = _aggregate_observations(
         cost_observations, fact="provider cost"
     )
     cost = CostPlaceholder(
         amount=aggregate_cost.model_dump(),
+        known_amount_subtotal=_known_subtotal(
+            cost_observations, fact="provider cost"
+        ).model_dump(),
         currency=(
             _available("USD").model_dump()
-            if cost_observations
+            if aggregate_cost.availability is Availability.AVAILABLE
             else ObservedValue(
                 availability=Availability.UNAVAILABLE,
                 reason="provider cost currency was not emitted",

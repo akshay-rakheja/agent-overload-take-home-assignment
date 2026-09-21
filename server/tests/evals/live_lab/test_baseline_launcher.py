@@ -129,6 +129,94 @@ def test_baseline_public_append_redacts_adversarial_metadata_but_private_raw_is_
 
 
 @pytest.mark.parametrize(
+    ("routing", "expected"),
+    [
+        (
+            {
+                "attempts": [
+                    {
+                        "provider": "azure-east",
+                        "status": "rate_limited",
+                        "status_code": 429,
+                        "error_code": "RATE_LIMITED",
+                        "error": "PRIVATE_MAILBOX_TEXT",
+                        "prompt": "PRIVATE_PROMPT_TEXT",
+                        "completion": "PRIVATE_OUTPUT_TEXT",
+                    }
+                ],
+                "retry_count": 1,
+                "failover": True,
+            },
+            {
+                "attempts": [
+                    {
+                        "provider": "azure-east",
+                        "status": "rate_limited",
+                        "status_code": 429,
+                        "error_code": "RATE_LIMITED",
+                    }
+                ],
+                "retry_count": 1,
+                "failover": True,
+            },
+        ),
+        (
+            [
+                {
+                    "provider_id": "openai-primary",
+                    "status": "success",
+                    "status_code": 200,
+                    "completion": "PRIVATE_OUTPUT_TEXT",
+                },
+                "PRIVATE_MAILBOX_TEXT",
+            ],
+            {
+                "attempts": [
+                    {
+                        "provider_id": "openai-primary",
+                        "status": "success",
+                        "status_code": 200,
+                    }
+                ]
+            },
+        ),
+        ("PRIVATE_MAILBOX_TEXT", None),
+    ],
+)
+def test_baseline_provider_routing_exports_only_typed_safe_facts_and_keeps_private_raw(
+    tmp_path: Path, routing, expected
+) -> None:
+    sink = ObservationSink(tmp_path / "events.jsonl", tmp_path / "private")
+    raw = {"choices": [], "provider_metadata": {"routing": routing}}
+
+    async def response(**_kwargs):
+        return raw
+
+    wrapped = wrap_async_call(
+        "interaction_model",
+        response,
+        sink,
+        model_config=_build_model_configs("openai/gpt-4.1-mini")["interaction"],
+    )
+    returned = asyncio.run(wrapped(messages=[]))
+
+    event = sink.read_events()[-1]["model_call"]
+    private = (tmp_path / "private" / f"{event['response_sha256']}.json").read_text(
+        encoding="utf-8"
+    )
+    public = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+    assert returned is raw
+    assert event["provider_routing"] == expected
+    for marker in (
+        "PRIVATE_MAILBOX_TEXT",
+        "PRIVATE_PROMPT_TEXT",
+        "PRIVATE_OUTPUT_TEXT",
+    ):
+        assert marker not in public
+    assert json.loads(private) == raw
+
+
+@pytest.mark.parametrize(
     "outcome",
     [RuntimeError("transport failed"), {"choices": []}],
 )
@@ -170,7 +258,12 @@ def test_baseline_transport_preserves_nested_provider_metadata_headers_and_timeo
                     "context_length": 8192,
                     "retry_count": 3,
                     "failover": True,
-                    "routing": ["Azure", "OpenAI"],
+                    "routing": {
+                        "attempts": [
+                            {"provider_id": "Azure"},
+                            {"provider_id": "OpenAI"},
+                        ]
+                    },
                 },
                 "choices": [],
             },
@@ -212,7 +305,12 @@ def test_baseline_transport_preserves_nested_provider_metadata_headers_and_timeo
     assert evidence["actual_provider"] == "Azure"
     assert evidence["provider_retry_count"] == 3
     assert evidence["provider_failover"] is True
-    assert evidence["provider_routing"] == ["Azure", "OpenAI"]
+    assert evidence["provider_routing"] == {
+        "attempts": [
+            {"provider_id": "Azure"},
+            {"provider_id": "OpenAI"},
+        ]
+    }
     assert evidence["seed_acknowledged"] is True
     assert evidence["context_limit"] == 8192
     assert evidence["rate_limit"] == {
@@ -270,6 +368,97 @@ def test_baseline_transport_reports_application_retries_separately(
     assert evidence["application_retry_count"] == 1
     assert evidence["provider_retry_count"] is None
     assert evidence["provider_failover"] is None
+
+
+@pytest.mark.parametrize("terminal", ["success", "charged_error", "timeout"])
+def test_baseline_transport_preserves_every_retry_attempt_without_double_counting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, terminal: str
+) -> None:
+    request = httpx.Request("POST", "https://fixture.invalid/chat/completions")
+
+    def charged_response(status: int, cost: float) -> httpx.Response:
+        return httpx.Response(
+            status,
+            request=request,
+            headers={"retry-after": "2"} if status == 429 else {},
+            json={
+                "error": {"code": status} if status >= 400 else None,
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 2,
+                    "completion_tokens": 3,
+                    "total_tokens": 5,
+                    "cost": cost,
+                },
+            },
+        )
+
+    outcomes = [charged_response(429, 0.01)]
+    if terminal == "success":
+        outcomes.append(charged_response(200, 0.02))
+    elif terminal == "charged_error":
+        outcomes.append(charged_response(400, 0.02))
+    else:
+        outcomes.append(httpx.ReadTimeout("fixture"))
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    configs = _build_model_configs("openai/gpt-4.1-mini")
+    configs["interaction"]["max_retries"] = 1
+    monkeypatch.setattr(baseline_launcher, "_BASELINE_MODEL_CONFIGS", configs)
+    sink = ObservationSink(tmp_path / "events.jsonl", tmp_path / "private")
+    wrapped = wrap_async_call(
+        "interaction_model",
+        baseline_launcher._transport("https://fixture.invalid", "interaction_model"),
+        sink,
+        model_config=configs["interaction"],
+    )
+
+    if terminal == "success":
+        asyncio.run(wrapped(messages=[], api_key="fixture"))
+    else:
+        with pytest.raises(Exception):
+            asyncio.run(wrapped(messages=[], api_key="fixture"))
+
+    events = [event for event in sink.read_events() if event["kind"] == "model_call"]
+    calls = [event["model_call"] for event in events]
+    expected_statuses = {
+        "success": [429, 200],
+        "charged_error": [429, 400],
+        "timeout": [429, None],
+    }
+    expected_costs = {
+        "success": [0.01, 0.02],
+        "charged_error": [0.01, 0.02],
+        "timeout": [0.01, None],
+    }
+    assert len(calls) == 2
+    assert [call["attempt"] for call in calls] == [0, 1]
+    assert [call["status_code"] for call in calls] == expected_statuses[terminal]
+    assert [call["usage"]["provider_cost_usd"]["value"] for call in calls] == expected_costs[
+        terminal
+    ]
+    assert calls[0]["rate_limit"] == {"retry_after_seconds": "2"}
+    assert calls[0]["error_type"] == "HTTPStatusError"
+    assert calls[1]["timeout"] is (terminal == "timeout")
+    first_private = json.loads(
+        (tmp_path / "private" / f"{calls[0]['response_sha256']}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert first_private["usage"]["cost"] == 0.01
 
 
 def test_baseline_error_response_retains_reported_usage_for_reconciliation(

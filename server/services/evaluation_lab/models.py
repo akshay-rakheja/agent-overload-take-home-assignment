@@ -162,6 +162,26 @@ class UsagePlaceholder(_FrozenModel):
             availability=Availability.UNAVAILABLE, reason="not emitted"
         )
     )
+    known_input_tokens_subtotal: ObservedValue[int] = Field(
+        default_factory=lambda: ObservedValue(
+            availability=Availability.UNAVAILABLE, reason="complete subtotal not applicable"
+        )
+    )
+    known_output_tokens_subtotal: ObservedValue[int] = Field(
+        default_factory=lambda: ObservedValue(
+            availability=Availability.UNAVAILABLE, reason="complete subtotal not applicable"
+        )
+    )
+    known_cached_tokens_subtotal: ObservedValue[int] = Field(
+        default_factory=lambda: ObservedValue(
+            availability=Availability.UNAVAILABLE, reason="complete subtotal not applicable"
+        )
+    )
+    known_total_tokens_subtotal: ObservedValue[int] = Field(
+        default_factory=lambda: ObservedValue(
+            availability=Availability.UNAVAILABLE, reason="complete subtotal not applicable"
+        )
+    )
 
 
 class CostPlaceholder(_FrozenModel):
@@ -173,6 +193,11 @@ class CostPlaceholder(_FrozenModel):
     currency: ObservedValue[str] = Field(
         default_factory=lambda: ObservedValue(
             availability=Availability.UNAVAILABLE, reason="not emitted"
+        )
+    )
+    known_amount_subtotal: ObservedValue[float] = Field(
+        default_factory=lambda: ObservedValue(
+            availability=Availability.UNAVAILABLE, reason="complete subtotal not applicable"
         )
     )
 

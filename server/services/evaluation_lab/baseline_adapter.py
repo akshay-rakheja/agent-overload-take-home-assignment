@@ -81,6 +81,20 @@ def _aggregate_observed(values: list[ObservedValue[Any]], fact: str) -> Observed
     )
 
 
+def _known_subtotal(values: list[ObservedValue[Any]], fact: str) -> ObservedValue[Any]:
+    available = [
+        value.value
+        for value in values
+        if value.availability is Availability.AVAILABLE and value.value is not None
+    ]
+    if values and len(available) < len(values) and available:
+        return ObservedValue(
+            availability=Availability.AVAILABLE,
+            value=sum(available),
+        )
+    return _unavailable(f"baseline {fact} has no partial known subtotal")
+
+
 def _aggregate_usage(observation: BaselineObservation) -> tuple[UsagePlaceholder, CostPlaceholder]:
     records = [
         UsageRecord.model_validate_json(
@@ -88,24 +102,31 @@ def _aggregate_usage(observation: BaselineObservation) -> tuple[UsagePlaceholder
         )
         for call in observation.raw_model_calls
     ]
-    usage = UsagePlaceholder(
-        input_tokens=_aggregate_observed(
-            [record.prompt_tokens for record in records], "prompt tokens"
-        ).model_dump(),
-        output_tokens=_aggregate_observed(
-            [record.completion_tokens for record in records], "completion tokens"
-        ).model_dump(),
-        cached_tokens=_aggregate_observed(
-            [record.cached_tokens for record in records], "cached tokens"
-        ).model_dump(),
-        total_tokens=_aggregate_observed(
-            [record.total_tokens for record in records], "total tokens"
-        ).model_dump(),
-    )
+    usage_fields = {
+        "input_tokens": ([record.prompt_tokens for record in records], "prompt tokens"),
+        "output_tokens": (
+            [record.completion_tokens for record in records],
+            "completion tokens",
+        ),
+        "cached_tokens": ([record.cached_tokens for record in records], "cached tokens"),
+        "total_tokens": ([record.total_tokens for record in records], "total tokens"),
+    }
+    subtotal_names = {
+        "input_tokens": "known_input_tokens_subtotal",
+        "output_tokens": "known_output_tokens_subtotal",
+        "cached_tokens": "known_cached_tokens_subtotal",
+        "total_tokens": "known_total_tokens_subtotal",
+    }
+    usage_values: dict[str, Any] = {}
+    for field, (values, fact) in usage_fields.items():
+        usage_values[field] = _aggregate_observed(values, fact).model_dump()
+        usage_values[subtotal_names[field]] = _known_subtotal(values, fact).model_dump()
+    usage = UsagePlaceholder(**usage_values)
     costs = [record.provider_cost_usd for record in records]
     aggregate_cost = _aggregate_observed(costs, "provider cost")
     cost = CostPlaceholder(
         amount=aggregate_cost.model_dump(),
+        known_amount_subtotal=_known_subtotal(costs, "provider cost").model_dump(),
         currency=(
             ObservedValue(
                 availability=Availability.AVAILABLE,

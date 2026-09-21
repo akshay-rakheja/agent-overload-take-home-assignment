@@ -230,6 +230,49 @@ def test_baseline_adapter_carries_direct_named_phases_and_aggregates_all_call_us
     assert [item["phase"] for item in phases] == ["gmail_tool", "total_run"]
 
 
+def test_baseline_adapter_labels_known_cost_subtotal_when_one_attempt_is_unavailable() -> None:
+    available = lambda value: {
+        "availability": "available",
+        "value": value,
+        "reason": None,
+    }
+    unavailable = {
+        "availability": "unavailable",
+        "value": None,
+        "reason": "provider cost was not emitted",
+    }
+    usage = {
+        "prompt_tokens": available(2),
+        "completion_tokens": available(3),
+        "cached_tokens": unavailable,
+        "total_tokens": available(5),
+        "provider_cost_usd": available(0.01),
+        "estimated_cost_usd": unavailable,
+    }
+    first = RawModelCall(
+        component="interaction",
+        attempt=0,
+        model="openai/gpt-4.1-mini",
+        elapsed_ms=1,
+        request_sha256="1" * 64,
+        usage=usage,
+    )
+    second = first.model_copy(
+        update={
+            "attempt": 1,
+            "request_sha256": "2" * 64,
+            "usage": {**usage, "provider_cost_usd": unavailable},
+        }
+    )
+    result = adapt_baseline(
+        _observation().model_copy(update={"raw_model_calls": (first, second)})
+    )
+
+    assert result.cost.amount.availability is Availability.UNAVAILABLE
+    assert result.cost.amount.value is None
+    assert result.cost.known_amount_subtotal.value == 0.01
+
+
 def test_create_maps_selected_and_created_names_as_inferred_without_stable_id() -> None:
     observation = _observation(action="create_new", name="Historical Carol")
     observation = observation.model_copy(

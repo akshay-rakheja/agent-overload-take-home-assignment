@@ -21,8 +21,8 @@ class ModelConfigurationEvidence(BaseModel):
     max_tokens: int = Field(gt=0)
     seed_requested: int | None = None
     seed_acknowledged: bool | None = None
-    timeout_seconds: float = Field(gt=0)
-    max_retries: int = Field(default=0, ge=0)
+    timeout_seconds: float = Field(gt=0, allow_inf_nan=False)
+    max_retries: int = Field(default=0, ge=0, le=10)
 
     @field_validator("model_id")
     @classmethod

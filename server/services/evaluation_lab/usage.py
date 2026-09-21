@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from enum import Enum
 from time import monotonic_ns
 from typing import Any, Callable
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -212,24 +213,70 @@ def normalize_usage(
     )
 
 
-def emit_usage_evidence(response: object, *, role: str) -> UsageRecord:
+def _emit_usage_record(
+    record: UsageRecord,
+    *,
+    role: str,
+    call_id: str | None,
+    attempt: int,
+    observation_status: str,
+) -> None:
+    evidence_id = call_id or uuid4().hex
+    common = {
+        "role": role,
+        "call_id": evidence_id,
+        "attempt": attempt,
+        "observation_status": observation_status,
+    }
+    emit_trace(
+        TraceEventKind.USAGE,
+        {**common, **record.model_dump(mode="json")},
+    )
+    emit_trace(
+        TraceEventKind.COST,
+        {
+            **common,
+            "provider_cost_usd": record.provider_cost_usd.model_dump(mode="json"),
+            "estimated_cost_usd": record.estimated_cost_usd.model_dump(mode="json"),
+        },
+    )
+
+
+def emit_unavailable_usage_evidence(
+    *, role: str, call_id: str, attempt: int, observation_status: str
+) -> UsageRecord:
+    """Record one attempted call whose usage observer could not supply facts."""
+
+    record = normalize_usage(None)
+    _emit_usage_record(
+        record,
+        role=role,
+        call_id=call_id,
+        attempt=attempt,
+        observation_status=observation_status,
+    )
+    return record
+
+
+def emit_usage_evidence(
+    response: object,
+    *,
+    role: str,
+    call_id: str | None = None,
+    attempt: int = 0,
+    observation_status: str = "observed",
+) -> UsageRecord:
     """Emit normalized model evidence plus non-fatal consistency warnings."""
 
     warnings: list[str] = []
     record = normalize_usage(response, warnings=warnings)
-    emit_trace(
-        TraceEventKind.USAGE,
-        {"role": role, **record.model_dump(mode="json")},
+    _emit_usage_record(
+        record,
+        role=role,
+        call_id=call_id,
+        attempt=attempt,
+        observation_status=observation_status,
     )
-    if record.provider_cost_usd.availability is Availability.AVAILABLE:
-        emit_trace(
-            TraceEventKind.COST,
-            {
-                "role": role,
-                "provider_cost_usd": record.provider_cost_usd.model_dump(mode="json"),
-                "estimated_cost_usd": record.estimated_cost_usd.model_dump(mode="json"),
-            },
-        )
     for warning in warnings:
         emit_trace(
             TraceEventKind.OBSERVABILITY_WARNING,
@@ -270,6 +317,7 @@ __all__ = [
     "PhaseName",
     "UsageRecord",
     "emit_usage_evidence",
+    "emit_unavailable_usage_evidence",
     "measure_phase",
     "monotonic_phase",
     "normalize_usage",

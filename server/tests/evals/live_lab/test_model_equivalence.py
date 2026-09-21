@@ -107,6 +107,11 @@ def test_missing_or_duplicate_role_rejects_the_pair() -> None:
         {"temperature": -0.1},
         {"top_p": 0.0},
         {"top_p": 1.1},
+        {"timeout_seconds": float("inf")},
+        {"timeout_seconds": float("nan")},
+        {"timeout_seconds": 0.0},
+        {"max_retries": -1},
+        {"max_retries": 11},
     ],
 )
 def test_invalid_or_unavailable_equivalence_facts_are_rejected(changes) -> None:

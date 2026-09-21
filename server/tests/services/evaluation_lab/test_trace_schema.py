@@ -277,3 +277,49 @@ def test_consolidation_does_not_invent_currency_when_provider_cost_is_unavailabl
 
     assert result.cost.amount.availability is Availability.UNAVAILABLE
     assert result.cost.currency.availability is Availability.UNAVAILABLE
+
+
+def test_legacy_untagged_usage_and_cost_pair_is_not_double_counted() -> None:
+    from server.services.evaluation_lab.models import TraceContext
+    from server.services.evaluation_lab.trace import trace_scope
+
+    class Sink:
+        def __init__(self) -> None:
+            self.events = []
+
+        def emit(self, event) -> None:
+            self.events.append(event)
+
+    sink = Sink()
+    with trace_scope(
+        TraceContext(
+            run_id=RUN_ID,
+            turn_id=TURN_ID,
+            system="enhanced",
+            revision="fixture",
+            mode="offline",
+        ),
+        sink,
+    ):
+        emit_usage_evidence(
+            {
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                    "cost": 0.01,
+                }
+            },
+            role="interaction",
+        )
+
+    legacy = []
+    for event in sink.events:
+        payload = event.model_dump(mode="json")["payload"]
+        payload.pop("call_id", None)
+        payload.pop("attempt", None)
+        legacy.append(event.model_copy(update={"payload": payload}))
+
+    result = consolidate_trace(legacy)
+
+    assert result.cost.amount.value == 0.01

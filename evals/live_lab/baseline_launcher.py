@@ -23,6 +23,7 @@ import httpx
 from server.services.evaluation_lab.usage import normalize_usage
 from server.services.evaluation_lab.trace import TraceTiming
 from server.services.evaluation_lab.redaction import redact_value
+from server.services.evaluation_lab.routing_evidence import safe_provider_routing
 
 from .revisions import (
     APPROVED_OVERLAY_PATHS,
@@ -43,9 +44,14 @@ _BASELINE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {}
 _BASELINE_TIMINGS: ContextVar[tuple[TraceTiming, ...]] = ContextVar(
     "baseline_observation_timings", default=()
 )
-_BASELINE_TRANSPORT_EVIDENCE: ContextVar[dict[str, Any] | None] = ContextVar(
-    "baseline_transport_evidence", default=None
+_BASELINE_TRANSPORT_EVIDENCE: ContextVar[tuple[dict[str, Any], ...]] = ContextVar(
+    "baseline_transport_evidence", default=()
 )
+
+
+def _record_transport_attempt(evidence: Mapping[str, Any]) -> None:
+    current = _BASELINE_TRANSPORT_EVIDENCE.get()
+    _BASELINE_TRANSPORT_EVIDENCE.set((*current, dict(evidence)))
 
 
 @contextmanager
@@ -613,11 +619,7 @@ def _model_evidence(
         "provider_failover": (
             provider_failover if isinstance(provider_failover, bool) else None
         ),
-        "provider_routing": (
-            provider_routing
-            if isinstance(provider_routing, (list, dict, str))
-            else None
-        ),
+        "provider_routing": safe_provider_routing(provider_routing),
         "failover": provider_failover if isinstance(provider_failover, bool) else None,
         "timeout": bool(transport.get("timeout", False)),
         "timeout_seconds": float(policy.get("timeout_seconds", 60.0)),
@@ -651,7 +653,7 @@ def wrap_async_call(
             request_digest = ""
         model_component = _COMPONENTS.get(component)
         caught: BaseException | None = None
-        transport_token = _BASELINE_TRANSPORT_EVIDENCE.set(None)
+        transport_token = _BASELINE_TRANSPORT_EVIDENCE.set(())
         try:
             with _baseline_timing() as timing:
                 try:
@@ -665,15 +667,65 @@ def wrap_async_call(
                 else:
                     timing.finish()
                     elapsed = timing.elapsed_ns / 1_000_000
-            transport_evidence = _BASELINE_TRANSPORT_EVIDENCE.get()
+            transport_attempts = _BASELINE_TRANSPORT_EVIDENCE.get()
         finally:
             _BASELINE_TRANSPORT_EVIDENCE.reset(transport_token)
+
+        def observe_transport_attempts(error_digest: str | None = None) -> None:
+            for transport_evidence in transport_attempts:
+                response_payload = transport_evidence.get("response_payload")
+                response_digest = (
+                    sink.store_private(response_payload)
+                    if response_payload is not None
+                    else None
+                )
+                choices = (
+                    response_payload.get("choices")
+                    if isinstance(response_payload, dict)
+                    else None
+                )
+                evidence = _model_evidence(
+                    model_component,
+                    kwargs,
+                    result=response_payload,
+                    elapsed_ms=elapsed,
+                    request_digest=request_digest,
+                    config=model_config,
+                    transport_evidence=transport_evidence,
+                )
+                evidence.update(
+                    {
+                        "attempt": int(transport_evidence.get("attempt", 0)),
+                        "error_type": (
+                            type(caught).__name__
+                            if caught is not None
+                            and transport_evidence is transport_attempts[-1]
+                            else transport_evidence.get("error_type")
+                        ),
+                        "transport_error_type": transport_evidence.get("error_type"),
+                        "response_sha256": response_digest,
+                        "response_choice_count": (
+                            len(choices) if isinstance(choices, list) else 0
+                        ),
+                        "response_tool_call_count": _response_tool_call_count(
+                            response_payload
+                        ),
+                        "timeout": bool(transport_evidence.get("timeout", False)),
+                    }
+                )
+                event = {"kind": "model_call", "model_call": evidence}
+                if error_digest is not None and transport_evidence is transport_attempts[-1]:
+                    event["error_sha256"] = error_digest
+                sink.append(event)
+
         if caught is not None:
             def observe_error() -> None:
                 error_digest = sink.store_private(
                     {"error_type": type(caught).__name__, "message": str(caught)}
                 )
-                if model_component:
+                if model_component and transport_attempts:
+                    observe_transport_attempts(error_digest)
+                elif model_component:
                     evidence = _model_evidence(
                         model_component,
                         kwargs,
@@ -681,14 +733,13 @@ def wrap_async_call(
                         elapsed_ms=elapsed,
                         request_digest=request_digest,
                         config=model_config,
-                        transport_evidence=transport_evidence,
+                        transport_evidence=None,
                     )
                     evidence.update(
                         {
                             "error_type": type(caught).__name__,
                             "timeout": bool(
-                                (transport_evidence or {}).get("timeout")
-                                or isinstance(caught, (TimeoutError, httpx.TimeoutException))
+                                isinstance(caught, (TimeoutError, httpx.TimeoutException))
                             ),
                         }
                     )
@@ -713,8 +764,10 @@ def wrap_async_call(
             raise caught
 
         def observe_success() -> None:
-            response_digest = sink.store_private(result)
-            if model_component:
+            if model_component and transport_attempts:
+                observe_transport_attempts()
+            elif model_component:
+                response_digest = sink.store_private(result)
                 choices = result.get("choices") if isinstance(result, dict) else None
                 evidence = _model_evidence(
                     model_component,
@@ -723,7 +776,7 @@ def wrap_async_call(
                     elapsed_ms=elapsed,
                     request_digest=request_digest,
                     config=model_config,
-                    transport_evidence=transport_evidence,
+                    transport_evidence=None,
                 )
                 evidence.update(
                     {
@@ -739,6 +792,7 @@ def wrap_async_call(
                     }
                 )
             else:
+                response_digest = sink.store_private(result)
                 sink.append(
                     {
                         "kind": component,
@@ -815,7 +869,7 @@ def _transport(fake_base_url: str, component: str):
     config = _BASELINE_MODEL_CONFIGS[role]
 
     async def request_chat_completion(**kwargs: Any) -> Any:
-        _BASELINE_TRANSPORT_EVIDENCE.set(None)
+        _BASELINE_TRANSPORT_EVIDENCE.set(())
         url = f"{fake_base_url.rstrip('/')}/chat/completions"
         payload = _build_baseline_payload(kwargs, config)
         timeout_seconds = float(config["timeout_seconds"])
@@ -830,11 +884,14 @@ def _transport(fake_base_url: str, component: str):
                         timeout=timeout_seconds,
                     )
                 except httpx.HTTPError as exc:
-                    _BASELINE_TRANSPORT_EVIDENCE.set(
+                    _record_transport_attempt(
                         {
                             "application_retry_count": attempt,
+                            "attempt": attempt,
+                            "error_type": type(exc).__name__,
                             "timeout": isinstance(exc, httpx.TimeoutException),
                             "rate_limit": {},
+                            "response_payload": None,
                             "status_code": None,
                         }
                     )
@@ -850,9 +907,11 @@ def _transport(fake_base_url: str, component: str):
                         response_payload = response.json()
                     except Exception:
                         response_payload = None
-                    _BASELINE_TRANSPORT_EVIDENCE.set(
+                    _record_transport_attempt(
                         {
                             "application_retry_count": attempt,
+                            "attempt": attempt,
+                            "error_type": "HTTPStatusError",
                             "timeout": False,
                             "rate_limit": _rate_limit_evidence(response.headers),
                             "response_payload": response_payload,
@@ -870,19 +929,47 @@ def _transport(fake_base_url: str, component: str):
                     }:
                         continue
                     client_module._handle_response_error(exc)
-                _BASELINE_TRANSPORT_EVIDENCE.set(
-                    {
-                        "application_retry_count": attempt,
-                        "timeout": False,
-                        "rate_limit": _rate_limit_evidence(response.headers),
-                        "status_code": response.status_code,
-                    }
-                )
-                result = response.json()
+                try:
+                    result = response.json()
+                except Exception as exc:
+                    _record_transport_attempt(
+                        {
+                            "application_retry_count": attempt,
+                            "attempt": attempt,
+                            "error_type": type(exc).__name__,
+                            "timeout": False,
+                            "rate_limit": _rate_limit_evidence(response.headers),
+                            "response_payload": None,
+                            "status_code": response.status_code,
+                        }
+                    )
+                    raise
                 if not isinstance(result, dict):
+                    _record_transport_attempt(
+                        {
+                            "application_retry_count": attempt,
+                            "attempt": attempt,
+                            "error_type": "OpenRouterError",
+                            "timeout": False,
+                            "rate_limit": _rate_limit_evidence(response.headers),
+                            "response_payload": result,
+                            "status_code": response.status_code,
+                        }
+                    )
                     raise client_module.OpenRouterError(
                         "OpenRouter response must be a JSON object"
                     )
+                _record_transport_attempt(
+                    {
+                        "application_retry_count": attempt,
+                        "attempt": attempt,
+                        "error_type": None,
+                        "timeout": False,
+                        "rate_limit": _rate_limit_evidence(response.headers),
+                        "response_payload": result,
+                        "status_code": response.status_code,
+                    }
+                )
                 return result
         raise client_module.OpenRouterError("OpenRouter request failed: unknown error")
 
