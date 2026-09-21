@@ -358,6 +358,7 @@ async def _history(client: httpx.AsyncClient, base_url: str) -> list[dict[str, A
 
 
 _TURN_LOCKS: dict[tuple[int, str], asyncio.Lock] = {}
+_FAILED_TAINTS: set[tuple[str, str]] = set()
 
 
 def _process_nonce(run_dir: Path) -> str:
@@ -368,6 +369,8 @@ def _process_nonce(run_dir: Path) -> str:
 
 
 def _taint_matches(run_dir: Path, process_nonce: str) -> bool:
+    if (str(run_dir), process_nonce) in _FAILED_TAINTS:
+        return True
     try:
         payload = json.loads((run_dir / "tainted.json").read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -377,22 +380,38 @@ def _taint_matches(run_dir: Path, process_nonce: str) -> bool:
     return not isinstance(payload, dict) or payload.get("process_nonce") == process_nonce
 
 
-def _mark_tainted(run_dir: Path, process_nonce: str, run_id: str, reason: str) -> None:
-    payload = {
-        "process_nonce": process_nonce,
-        "reason": reason,
-        "run_id": run_id,
-    }
-    target = run_dir / "tainted.json"
-    temporary = target.with_name(f".{target.name}.{secrets.token_hex(8)}")
+def _mark_tainted(run_dir: Path, process_nonce: str, run_id: str, reason: str) -> bool:
+    _FAILED_TAINTS.add((str(run_dir), process_nonce))
     try:
-        temporary.write_text(
-            json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
+        payload = {
+            "process_nonce": process_nonce,
+            "reason": reason,
+            "run_id": run_id,
+        }
+        target = run_dir / "tainted.json"
+        temporary = target.with_name(f".{target.name}.{secrets.token_hex(8)}")
+        try:
+            temporary.write_text(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary, target)
+            return True
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+    except Exception:
+        return False
+
+
+def _taint_persistence_error() -> ObservedError:
+    return ObservedError(
+        phase="ownership",
+        code="taint_persistence_error",
+        message="durable process taint could not be written; observer remains fail-closed",
+    )
 
 
 def _claim_turn(run_dir: Path, process_nonce: str, run_id: str) -> str:
@@ -428,48 +447,25 @@ async def run_baseline_turn(request: BaselineTurnRequest) -> BaselineObservation
     data_dir = Path(request.data_dir)
     event_path = Path(request.event_path)
     run_dir = event_path.parent
-    try:
-        before = snapshot_baseline_state(data_dir)
-    except Exception as exc:
-        return _failed_observation(
-            request,
-            code="state_read_error",
-            phase="snapshot_before",
-            message=f"unable to read baseline state: {type(exc).__name__}",
-        )
-    try:
-        process_nonce = _process_nonce(run_dir)
-    except Exception as exc:
-        return _failed_observation(
-            request,
-            code="process_context_error",
-            phase="ownership",
-            message=f"unable to verify baseline process context: {type(exc).__name__}",
-            before=before,
-        )
-
     loop = asyncio.get_running_loop()
     lock_key = (id(loop), str(event_path.resolve()))
     turn_lock = _TURN_LOCKS.setdefault(lock_key, asyncio.Lock())
     async with turn_lock:
+        try:
+            process_nonce = _process_nonce(run_dir)
+        except Exception as exc:
+            return _failed_observation(
+                request,
+                code="process_context_error",
+                phase="ownership",
+                message=f"unable to verify baseline process context: {type(exc).__name__}",
+            )
         if _taint_matches(run_dir, process_nonce):
             return _failed_observation(
                 request,
                 code="tainted_process",
                 phase="ownership",
                 message="baseline process requires a fresh verified launch after an inconclusive turn",
-                before=before,
-            )
-        _, initial_event_errors = _read_events(event_path)
-        if initial_event_errors:
-            _mark_tainted(run_dir, process_nonce, request.run_id, "preexisting event corruption")
-            return _failed_observation(
-                request,
-                code="event_corruption",
-                phase="events",
-                message="preexisting observation evidence is corrupt",
-                before=before,
-                errors=initial_event_errors[:-1],
             )
         try:
             owner_token = _claim_turn(run_dir, process_nonce, request.run_id)
@@ -479,7 +475,6 @@ async def run_baseline_turn(request: BaselineTurnRequest) -> BaselineObservation
                 code="concurrent_turn",
                 phase="ownership",
                 message="another measured turn owns this baseline process",
-                before=before,
             )
         except Exception as exc:
             return _failed_observation(
@@ -487,7 +482,43 @@ async def run_baseline_turn(request: BaselineTurnRequest) -> BaselineObservation
                 code="turn_claim_error",
                 phase="ownership",
                 message=f"unable to claim measured turn: {type(exc).__name__}",
-                before=before,
+            )
+
+        _, initial_event_errors = _read_events(event_path)
+        if initial_event_errors:
+            taint_errors: tuple[ObservedError, ...] = ()
+            if not _mark_tainted(
+                run_dir,
+                process_nonce,
+                request.run_id,
+                "preexisting event corruption",
+            ):
+                taint_errors = (_taint_persistence_error(),)
+            return _failed_observation(
+                request,
+                code="event_corruption",
+                phase="events",
+                message="preexisting observation evidence is corrupt",
+                errors=(*initial_event_errors[:-1], *taint_errors),
+            )
+
+        try:
+            before = snapshot_baseline_state(data_dir)
+        except Exception as exc:
+            taint_errors = ()
+            if not _mark_tainted(
+                run_dir,
+                process_nonce,
+                request.run_id,
+                "snapshot_before",
+            ):
+                taint_errors = (_taint_persistence_error(),)
+            return _failed_observation(
+                request,
+                code="state_read_error",
+                phase="snapshot_before",
+                message=f"unable to read baseline state: {type(exc).__name__}",
+                errors=taint_errors,
             )
 
         errors: list[ObservedError] = []
@@ -579,6 +610,16 @@ async def run_baseline_turn(request: BaselineTurnRequest) -> BaselineObservation
             model_calls, model_errors = _model_calls(events)
             errors.extend(call_errors)
             errors.extend(model_errors)
+            for event in events:
+                if event.get("kind") == "observation_failure":
+                    errors.append(
+                        ObservedError(
+                            phase="observation",
+                            code="observation_failure",
+                            message="baseline observation instrumentation failed",
+                            partial=True,
+                        )
+                    )
             for model_call in model_calls:
                 if model_call.error_type:
                     errors.append(
@@ -609,6 +650,57 @@ async def run_baseline_turn(request: BaselineTurnRequest) -> BaselineObservation
                         phase="events",
                         code="missing_evidence",
                         message="submitted baseline turn has no owned prompt evidence",
+                    )
+                )
+            interaction_model_calls = [
+                model_call
+                for model_call in model_calls
+                if model_call.component == "interaction"
+            ]
+            completed_interaction = any(
+                bool(model_call.response_sha256)
+                and bool(model_call.response_choice_count)
+                and model_call.error_type is None
+                for model_call in interaction_model_calls
+            )
+            failed_interaction = any(
+                model_call.error_type is not None for model_call in interaction_model_calls
+            )
+            if submitted and not completed_interaction and not failed_interaction:
+                errors.append(
+                    ObservedError(
+                        phase="events",
+                        code="missing_evidence",
+                        message=(
+                            "submitted baseline turn has no completed owned interaction "
+                            "model response evidence"
+                        ),
+                    )
+                )
+            completed_model_calls = [
+                model_call
+                for model_call in interaction_model_calls
+                if bool(model_call.response_sha256)
+                and bool(model_call.response_choice_count)
+                and model_call.error_type is None
+            ]
+            observed_response_tool_calls = [
+                model_call.response_tool_call_count
+                for model_call in completed_model_calls
+            ]
+            if (
+                submitted
+                and completed_interaction
+                and (
+                    any(count is None for count in observed_response_tool_calls)
+                    or sum(count or 0 for count in observed_response_tool_calls) != len(calls)
+                )
+            ):
+                errors.append(
+                    ObservedError(
+                        phase="events",
+                        code="missing_evidence",
+                        message="interaction tool-call lifecycle evidence is incomplete",
                     )
                 )
 
@@ -648,23 +740,29 @@ async def run_baseline_turn(request: BaselineTurnRequest) -> BaselineObservation
                 errors=tuple(errors),
             )
             if errors or inference.action == "unobservable":
-                _mark_tainted(
+                if not _mark_tainted(
                     run_dir,
                     process_nonce,
                     request.run_id,
                     errors[0].code if errors else "unobservable",
-                )
+                ):
+                    observation = observation.model_copy(
+                        update={"errors": (*observation.errors, _taint_persistence_error())}
+                    )
             else:
                 _release_turn(run_dir, owner_token)
             return observation
         except Exception as exc:
-            _mark_tainted(run_dir, process_nonce, request.run_id, "observer_error")
+            taint_errors = ()
+            if not _mark_tainted(run_dir, process_nonce, request.run_id, "observer_error"):
+                taint_errors = (_taint_persistence_error(),)
             return _failed_observation(
                 request,
                 code="observer_error",
                 phase="observer",
                 message=f"baseline observer failed safely: {type(exc).__name__}",
                 before=before,
+                errors=taint_errors,
             )
 
 

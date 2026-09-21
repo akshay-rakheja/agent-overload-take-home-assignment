@@ -268,6 +268,22 @@ def _tool_names(tools: Any) -> list[str]:
     return names
 
 
+def _response_tool_call_count(response: Any) -> int | None:
+    if not isinstance(response, dict) or not isinstance(response.get("choices"), list):
+        return None
+    count = 0
+    for choice in response["choices"]:
+        if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):
+            return None
+        tool_calls = choice["message"].get("tool_calls")
+        if tool_calls is None:
+            continue
+        if not isinstance(tool_calls, list):
+            return None
+        count += len(tool_calls)
+    return count
+
+
 def wrap_async_call(component: str, original: Callable[..., Any], sink: ObservationSink):
     @functools.wraps(original)
     async def wrapped(*args: Any, **kwargs: Any) -> Any:
@@ -336,6 +352,7 @@ def wrap_async_call(component: str, original: Callable[..., Any], sink: Observat
                             "message_count": len(kwargs.get("messages") or []),
                             "tool_names": _tool_names(kwargs.get("tools")),
                             "response_choice_count": len(choices) if isinstance(choices, list) else 0,
+                            "response_tool_call_count": _response_tool_call_count(result),
                         },
                     }
                 )

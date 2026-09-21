@@ -27,6 +27,7 @@ class RawModelCall(_FrozenModel):
     message_count: int = Field(default=0, ge=0)
     tool_names: tuple[str, ...] = ()
     response_choice_count: int | None = Field(default=None, ge=0)
+    response_tool_call_count: int | None = Field(default=None, ge=0)
     error_type: str | None = None
 
 
