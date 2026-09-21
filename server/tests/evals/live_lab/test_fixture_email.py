@@ -158,3 +158,22 @@ def test_pre_send_manifest_rejects_symlink_escape(tmp_path: Path) -> None:
             allowed_root=allowed_root,
         )
     assert not (outside / "facts.json").exists()
+
+
+def test_pre_send_manifest_rejects_symlink_in_allowed_root_ancestors(
+    tmp_path: Path,
+) -> None:
+    messages = render_fixture_messages("manifest_7Yp4kD2x")
+    outside = tmp_path / "outside"
+    allowed_root = outside / ".lab"
+    allowed_root.mkdir(parents=True)
+    alias = tmp_path / "alias"
+    alias.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        write_pre_send_manifest(
+            alias / ".lab" / "facts.json",
+            messages,
+            allowed_root=alias / ".lab",
+        )
+    assert not (allowed_root / "facts.json").exists()

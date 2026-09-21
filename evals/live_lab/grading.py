@@ -14,7 +14,10 @@ from server.services.evaluation_lab.models import Availability, ObservedValue, S
 
 from .contracts import ExpectedAction
 from .fixture_email import fixture_fact_ids, fixture_response_facts
-from .scenarios import ScenarioDefinition
+from .scenarios import (
+    ScenarioDefinition,
+    ScenarioIdentityContract,
+)
 
 
 class GradeStatus(str, Enum):
@@ -70,6 +73,22 @@ class ScenarioScorecard(_FrozenModel):
             layer.status in {GradeStatus.PASS, GradeStatus.NOT_APPLICABLE}
             for layer in self.layers.values()
         )
+
+
+class ScenarioSequenceScorecard(_FrozenModel):
+    schema_version: Literal[1] = 1
+    scenario_id: str
+    system: Literal["baseline", "enhanced"]
+    turns: tuple[ScenarioScorecard, ...]
+    identity_continuity: LayerGrade
+
+    @computed_field
+    @property
+    def passed(self) -> bool:
+        return all(turn.passed for turn in self.turns) and self.identity_continuity.status in {
+            GradeStatus.PASS,
+            GradeStatus.NOT_APPLICABLE,
+        }
 
 
 def _missing(layer: LayerGrade.__annotations__["layer"], *facts: str) -> LayerGrade:
@@ -281,6 +300,10 @@ def _matching_gmail_evidence(
 
 
 def _grade_gmail_safety(scenario: ScenarioDefinition, result: SystemRunResult) -> LayerGrade:
+    if not scenario.gmail_required:
+        return _not_applicable(
+            "gmail_safety", "this turn predeclares no Gmail operation"
+        )
     evidence, matches = _matching_gmail_evidence(scenario, result)
     if evidence is None:
         if result.system == "baseline":
@@ -371,33 +394,108 @@ def _invented_fact_ids(text: str, expected: set[str]) -> set[str]:
     return invented
 
 
-_FACTISH_PATTERNS = (
-    re.compile(r"\bCAD\s+\d+(?:\.\d{2})?\b", re.IGNORECASE),
-    re.compile(r"\b(?:Pixel)\s+\d+\b", re.IGNORECASE),
-    re.compile(r"\b20\d\d-\d\d-\d\d(?:\s+\d\d:\d\d\s+UTC)?\b", re.IGNORECASE),
-    re.compile(r"\b[A-Z]{2,}(?:-[A-Z]+)?-\d{2,5}\b"),
-    re.compile(r"\b\d+\s+(?:likes?|comments?)\b", re.IGNORECASE),
-    re.compile(r"\b(?:Lisbon|Paris|London|Toronto|Berlin|Madrid|Rome)\b", re.IGNORECASE),
+_NONFACTUAL_RESPONSE_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "anchor",
+        "archive",
+        "are",
+        "at",
+        "bulletin",
+        "checksum",
+        "clarify",
+        "code",
+        "comments",
+        "dated",
+        "device",
+        "digest",
+        "due",
+        "email",
+        "engagement",
+        "feature",
+        "fixture",
+        "for",
+        "found",
+        "from",
+        "handle",
+        "in",
+        "invoice",
+        "instagram",
+        "is",
+        "likes",
+        "location",
+        "more",
+        "need",
+        "notice",
+        "of",
+        "on",
+        "or",
+        "order",
+        "phrase",
+        "prefix",
+        "purchase",
+        "receipt",
+        "received",
+        "recorded",
+        "reference",
+        "release",
+        "releases",
+        "report",
+        "reported",
+        "reports",
+        "result",
+        "results",
+        "security",
+        "session",
+        "should",
+        "sign-in",
+        "the",
+        "this",
+        "to",
+        "total",
+        "update",
+        "use",
+        "verification",
+        "video",
+        "was",
+        "were",
+        "which",
+        "with",
+        "workflow",
+    }
+)
+_CLOSED_NO_RESULT_FORMS = frozenset(
+    {
+        "no matching email",
+        "no matching email was found",
+        "no matching fixture email",
+        "no matching fixture email was found",
+        "no matching fixture emails were found",
+        "no result",
+        "no results found",
+    }
 )
 
 
-def _response_contradictions(text: str, expected: set[str]) -> list[str]:
-    expected_values = tuple(
-        _normalized(value)
-        for fact_id in sorted(expected)
+def _expected_response_assertions(scenario: ScenarioDefinition) -> tuple[str, ...]:
+    declared = getattr(scenario, "response_assertions", None)
+    if declared is not None:
+        return tuple(declared)
+    return tuple(
+        value
+        for fact_id in scenario.gmail.fact_ids
         for value in fixture_response_facts(fact_id)
     )
-    normalized = _normalized(text)
-    contradictions: list[str] = []
-    for value in expected_values:
-        if re.search(rf"\b(?:not|never)\s+{re.escape(value)}\b", normalized):
-            contradictions.append(f"expected fact was explicitly negated: {value}")
-    for pattern in _FACTISH_PATTERNS:
-        for match in pattern.findall(text):
-            observed = _normalized(match)
-            if not any(observed in expected_value for expected_value in expected_values):
-                contradictions.append(f"unsupported fact-like value: {match}")
-    return sorted(set(contradictions))
+
+
+def _unsupported_response_tokens(text: str, assertions: tuple[str, ...]) -> tuple[str, ...]:
+    remainder = _normalized(text)
+    for assertion in sorted(assertions, key=len, reverse=True):
+        remainder = re.sub(re.escape(_normalized(assertion)), " ", remainder)
+    tokens = re.findall(r"[a-z0-9]+(?:[-.][a-z0-9]+)*", remainder)
+    return tuple(sorted({token for token in tokens if token not in _NONFACTUAL_RESPONSE_WORDS}))
 
 
 def _no_result_conflicts(matches: list[Mapping[str, Any]]) -> list[str]:
@@ -418,12 +516,26 @@ def _no_result_conflicts(matches: list[Mapping[str, Any]]) -> list[str]:
     return sorted(set(conflicts))
 
 
-def _grade_response(scenario: ScenarioDefinition, result: SystemRunResult) -> LayerGrade:
+def _grade_response(
+    scenario: ScenarioDefinition,
+    result: SystemRunResult,
+    *,
+    response_evidence_fact_ids: set[str] | None = None,
+) -> LayerGrade:
     response = _value(result.final_response)
     if not isinstance(response, str) or not response.strip():
         return _missing("response", "final response text")
     evidence, matches = _matching_gmail_evidence(scenario, result)
     expected = set(scenario.gmail.fact_ids)
+    assertions = _expected_response_assertions(scenario)
+    if (
+        not scenario.gmail_required
+        and not assertions
+        and not scenario.expected.require_clarification
+    ):
+        return _not_applicable(
+            "response", "this turn predeclares no factual response assertion"
+        )
     invented = _invented_fact_ids(response, expected)
     negatives: list[str] = []
     positives: list[str] = []
@@ -437,43 +549,48 @@ def _grade_response(scenario: ScenarioDefinition, result: SystemRunResult) -> La
             positives.append("explicit clarification requested")
         else:
             negatives.append("ambiguity response did not explicitly request clarification")
-    elif evidence is None:
+    elif scenario.gmail_required and evidence is None:
         return _missing("response", "captured read-only Gmail evidence")
     elif scenario.gmail.expect_no_result:
         conflicts = _no_result_conflicts(matches)
-        absence = bool(
-            re.search(
-                r"\b(no matching|no result|not found|could not find|couldn't find|did not find|none found)\b",
-                _normalized(response),
-            )
-        )
+        closed_response = re.sub(r"[^a-z0-9 ]+", " ", _normalized(response))
+        closed_response = " ".join(closed_response.split())
+        absence = closed_response in _CLOSED_NO_RESULT_FORMS
         negatives.extend(conflicts)
         if not absence:
             negatives.append("no-result response did not state explicit absence")
         if not conflicts and absence:
             positives.append("exact query returned empty evidence and response stated absence")
     else:
-        completed_matches = [item for item in matches if item.get("stage") == "completed"]
-        captured = _captured_fact_ids(completed_matches)
+        if scenario.gmail_required:
+            completed_matches = [
+                item for item in matches if item.get("stage") == "completed"
+            ]
+            captured = _captured_fact_ids(completed_matches)
+        elif response_evidence_fact_ids is None:
+            return _missing("response", "declared earlier-turn fact evidence")
+        else:
+            captured = set(response_evidence_fact_ids)
         missing_capture = expected - captured
         if missing_capture:
             negatives.append(f"facts were not captured by read-only evidence: {sorted(missing_capture)}")
-        missing_text = {
-            fact_id
-            for fact_id in expected
-            if not all(
-                _normalized(token) in _normalized(response)
-                for token in fixture_response_facts(fact_id)
-            )
-        }
-        if missing_text:
-            negatives.append(f"response omitted expected normalized facts: {sorted(missing_text)}")
-        if not missing_capture and not missing_text:
+        missing_assertions = [
+            value for value in assertions if _normalized(value) not in _normalized(response)
+        ]
+        if missing_assertions:
+            negatives.append("response omitted one or more declared field-value assertions")
+        if not missing_capture and not missing_assertions:
             positives.append("captured facts matched normalized response text")
 
     if invented:
         negatives.append(f"response contained invented fixture facts: {sorted(invented)}")
-    negatives.extend(_response_contradictions(response, expected))
+    if not scenario.gmail.expect_no_result:
+        unsupported = _unsupported_response_tokens(response, assertions)
+        if unsupported:
+            negatives.append(
+                "response used prose outside the deterministic assertion grammar: "
+                f"{list(unsupported)}"
+            )
     return LayerGrade(
         layer="response",
         status=GradeStatus.FAIL if negatives else GradeStatus.PASS,
@@ -652,6 +769,8 @@ def _candidate_rank(scenario: ScenarioDefinition, result: SystemRunResult) -> Ob
 def grade_scenario(
     scenario: ScenarioDefinition,
     result: SystemRunResult,
+    *,
+    response_evidence_fact_ids: set[str] | None = None,
 ) -> ScenarioScorecard:
     """Grade emitted evidence with fixed rules and no model-based judge."""
 
@@ -659,10 +778,199 @@ def grade_scenario(
         scenario_id=scenario.scenario_id,
         system=result.system,
         routing=_grade_routing(scenario, result),
-        response=_grade_response(scenario, result),
+        response=_grade_response(
+            scenario,
+            result,
+            response_evidence_fact_ids=response_evidence_fact_ids,
+        ),
         gmail_safety=_grade_gmail_safety(scenario, result),
         identity=_grade_identity(scenario, result),
         duplicate=_grade_duplicate(scenario, result),
         context=_grade_context(scenario, result),
         candidate_rank=_candidate_rank(scenario, result),
+    )
+
+
+def _result_directory_counts(result: SystemRunResult) -> tuple[int, int] | None:
+    delta = _mapping(result.identity_delta)
+    if delta is not None and (counts := _directory_counts(delta)) is not None:
+        return counts
+    dispatch = _mapping(result.accepted_dispatch)
+    if dispatch is not None:
+        return _directory_counts(dispatch)
+    return None
+
+
+def _fact_ids_for_turn(
+    scenario: ScenarioDefinition,
+    turn_index: int,
+    results: tuple[SystemRunResult, ...],
+) -> set[str] | None:
+    expectation = scenario.turn_expectations[turn_index]
+    if expectation.evidence_from_turn is None:
+        return None
+    source_index = expectation.evidence_from_turn
+    source = scenario.turn_expectations[source_index]
+    assert source.gmail is not None
+    source_scenario = scenario.model_copy(
+        update={"gmail": source.gmail, "gmail_required": True}
+    )
+    _evidence, matches = _matching_gmail_evidence(
+        source_scenario, results[source_index]
+    )
+    completed = [item for item in matches if item.get("stage") == "completed"]
+    return _captured_fact_ids(completed)
+
+
+def _sequence_identity_grade(
+    scenario: ScenarioDefinition,
+    results: tuple[SystemRunResult, ...],
+) -> LayerGrade:
+    expectations = scenario.turn_expectations
+    if all(item.action is ExpectedAction.ABSTAIN for item in expectations):
+        return _not_applicable(
+            "identity", "all scenario turns predeclare abstention"
+        )
+    negatives: list[str] = []
+    missing: list[str] = []
+    counts = [_result_directory_counts(result) for result in results]
+    if counts[0] is None or counts[-1] is None:
+        missing.append("scenario initial and final directory counts")
+    else:
+        expected_growth = sum(
+            item.action is ExpectedAction.CREATE_NEW for item in expectations
+        )
+        actual_growth = counts[-1][1] - counts[0][0]
+        if actual_growth != expected_growth:
+            negatives.append(
+                f"scenario directory grew by {actual_growth}; expected {expected_growth}"
+            )
+
+    created_by_logical: dict[str, str] = {}
+    actual_created_ids: list[str] = []
+    for index, (expectation, result) in enumerate(zip(expectations, results)):
+        created = _mapping(result.created_identity)
+        selected = _mapping(result.selected_identity)
+        if created is not None:
+            identifier = created.get("agent_id") or created.get("name")
+            if isinstance(identifier, str):
+                actual_created_ids.append(identifier)
+                if expectation.action is ExpectedAction.CREATE_NEW:
+                    created_by_logical[expectation.logical_identity or ""] = identifier
+            if expectation.action is not ExpectedAction.CREATE_NEW:
+                negatives.append(f"turn {index + 1} created an undeclared identity")
+        elif expectation.action is ExpectedAction.CREATE_NEW:
+            missing.append(f"turn {index + 1} created identity")
+
+        if (
+            expectation.action is ExpectedAction.REUSE
+            and expectation.logical_identity in created_by_logical
+        ):
+            observed = None if selected is None else selected.get("agent_id") or selected.get("name")
+            if observed != created_by_logical[expectation.logical_identity or ""]:
+                negatives.append(
+                    f"turn {index + 1} did not reuse the scenario-created stable identity"
+                )
+
+    expected_creations = sum(
+        item.action is ExpectedAction.CREATE_NEW for item in expectations
+    )
+    if len(set(actual_created_ids)) != expected_creations:
+        negatives.append(
+            "scenario created-ID cardinality contradicted predeclared create turns"
+        )
+    if negatives:
+        return LayerGrade(
+            layer="identity",
+            status=GradeStatus.FAIL,
+            negative_evidence=tuple(negatives),
+            missing_evidence=tuple(missing),
+        )
+    if missing:
+        return LayerGrade(
+            layer="identity",
+            status=GradeStatus.MISSING,
+            missing_evidence=tuple(missing),
+        )
+    return LayerGrade(
+        layer="identity",
+        status=GradeStatus.PASS,
+        positive_evidence=(
+            "separate turns preserved final directory growth and stable identity continuity",
+        ),
+    )
+
+
+def grade_scenario_sequence(
+    scenario: ScenarioDefinition,
+    results: tuple[SystemRunResult, ...],
+) -> ScenarioSequenceScorecard:
+    """Grade predeclared turns separately, then grade cross-turn identity continuity."""
+
+    if len(results) != len(scenario.turn_expectations):
+        raise ValueError("scenario result count must match predeclared turn expectations")
+    if not results:
+        raise ValueError("scenario sequence requires at least one turn result")
+    if len({result.run_id for result in results}) != 1:
+        raise ValueError("scenario turn results must belong to one run")
+    if len({result.turn_id for result in results}) != len(results):
+        raise ValueError("scenario turn results must retain distinct turn IDs")
+    if len({result.system for result in results}) != 1:
+        raise ValueError("scenario turn results must belong to one system")
+
+    dynamic_ids: dict[str, str] = {}
+    turn_cards: list[ScenarioScorecard] = []
+    for index, (expectation, result) in enumerate(
+        zip(scenario.turn_expectations, results)
+    ):
+        contract = scenario.identity_contract
+        if expectation.action is ExpectedAction.ABSTAIN:
+            contract = None
+        elif (
+            contract is not None
+            and expectation.action is ExpectedAction.REUSE
+            and not contract.preexisting
+        ):
+            dynamic_id = dynamic_ids.get(expectation.logical_identity or "")
+            if dynamic_id is not None:
+                contract = ScenarioIdentityContract(
+                    logical_identity=contract.logical_identity,
+                    name=contract.name,
+                    purpose=contract.purpose,
+                    preexisting=True,
+                    agent_id=dynamic_id,
+                )
+        turn_gmail = expectation.gmail
+        if turn_gmail is None and expectation.evidence_from_turn is not None:
+            source = scenario.turn_expectations[expectation.evidence_from_turn]
+            turn_gmail = source.gmail
+        turn_scenario = scenario.model_copy(
+            update={
+                "expected": expectation.outcome,
+                "identity_contract": contract,
+                "gmail": turn_gmail or scenario.gmail,
+                "gmail_required": expectation.gmail is not None,
+                "response_assertions": expectation.response_assertions,
+            }
+        )
+        turn_cards.append(
+            grade_scenario(
+                turn_scenario,
+                result,
+                response_evidence_fact_ids=_fact_ids_for_turn(
+                    scenario, index, results
+                ),
+            )
+        )
+        if expectation.action is ExpectedAction.CREATE_NEW:
+            created = _mapping(result.created_identity)
+            stable_id = None if created is None else created.get("agent_id")
+            if isinstance(stable_id, str):
+                dynamic_ids[expectation.logical_identity or ""] = stable_id
+
+    return ScenarioSequenceScorecard(
+        scenario_id=scenario.scenario_id,
+        system=results[0].system,
+        turns=tuple(turn_cards),
+        identity_continuity=_sequence_identity_grade(scenario, results),
     )

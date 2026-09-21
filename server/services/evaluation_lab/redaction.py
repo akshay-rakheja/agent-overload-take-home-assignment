@@ -15,7 +15,9 @@ REDACTED_EMAIL = "[REDACTED_EMAIL]"
 _EMAIL = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 _BEARER = re.compile(r"(?i)\bbearer\s+[A-Z0-9._~+/=-]+")
 _SECRET = re.compile(
-    r"(?i)(?:\bsk-[A-Z0-9_-]{8,}|\b(?:api[_ -]?key|access[_ -]?token|client[_ -]?secret)\b\s*[:=]\s*\S+)"
+    r"(?i)(?:\bsk-[A-Z0-9_-]{8,}|"
+    r"\b(?:api[_ -]?key|access[_ -]?token|client[_ -]?secret|password|token|secret|key)"
+    r"\b\s*[:=]\s*\S+)"
 )
 
 _SECRET_KEYS = frozenset(
@@ -120,6 +122,12 @@ def _redact_string(value: str) -> str:
     return _EMAIL.sub(REDACTED_EMAIL, value)
 
 
+def contains_secret_material(value: str) -> bool:
+    """Return whether free text contains a recognized bearer or secret form."""
+
+    return bool(_BEARER.search(value) or _SECRET.search(value))
+
+
 def _redact_headers(value: object) -> object:
     if isinstance(value, Mapping):
         return {str(key): REDACTED for key in sorted(value, key=lambda item: str(item))}
@@ -168,4 +176,9 @@ def redact_value(
     return REDACTED
 
 
-__all__ = ["REDACTED", "REDACTED_EMAIL", "redact_value"]
+__all__ = [
+    "REDACTED",
+    "REDACTED_EMAIL",
+    "contains_secret_material",
+    "redact_value",
+]

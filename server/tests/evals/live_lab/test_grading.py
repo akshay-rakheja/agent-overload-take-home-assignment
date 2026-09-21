@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 from uuid import uuid4
 
+import pytest
+
 from evals.live_lab.fixture_email import fixture_response_facts
 from evals.live_lab.grading import GradeStatus, grade_scenario
 from evals.live_lab.scenarios import load_controlled_scenarios
@@ -308,6 +310,60 @@ def test_response_rejects_contradictory_expected_fields_and_unknown_facts() -> N
         ),
     )
     assert grade_scenario(no_result, empty).response.status is GradeStatus.FAIL
+
+
+@pytest.mark.parametrize(
+    "unsupported_assertion",
+    [
+        "Correction: location was Vancouver.",
+        "Correction: device was iPhone 17.",
+        "Correction: verification phrase was orange-cloud.",
+        "The location was not actually Lisbon.",
+    ],
+)
+def test_response_contract_never_passes_unrecognized_factual_assertions(
+    unsupported_assertion: str,
+) -> None:
+    scenario, result = _result("exact-instagram-security")
+    canonical = " ".join(fixture_response_facts("SEC-7419"))
+
+    card = grade_scenario(
+        scenario,
+        _replace(result, final_response=_available(f"{canonical}. {unsupported_assertion}")),
+    )
+
+    assert card.response.status is not GradeStatus.PASS
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        "No matching email. The login was from Vancouver on iPhone 17.",
+        "No matching email. The invoice was USD 900.99.",
+        "No matching email. The receipt code is xyz-2222.",
+    ],
+)
+def test_no_result_uses_a_closed_absence_response_form(response: str) -> None:
+    scenario, result = _result("honest-no-result")
+    result = _replace(
+        result,
+        gmail_evidence=_available(
+            [
+                {
+                    "operation_name": scenario.gmail.operation,
+                    "stage": "completed",
+                    "query_sha256": _query_sha256(scenario.gmail.query),
+                    "result_count": 0,
+                    "fact_ids": [],
+                    "has_more": False,
+                    "sdk_executed": True,
+                }
+            ]
+        ),
+        final_response=_available(response),
+    )
+
+    assert grade_scenario(scenario, result).response.status is not GradeStatus.PASS
 
 
 def test_routing_rejects_rejected_wrong_or_unauthorized_dispatch() -> None:

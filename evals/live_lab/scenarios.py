@@ -15,9 +15,10 @@ from typing import Literal, Mapping, Sequence
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from server.services.evaluation_lab.repetitions import ScheduledPair, build_repetition_schedule
+from server.services.evaluation_lab.redaction import contains_secret_material
 
 from .contracts import ExpectedAction
-from .fixture_email import fixture_fact_ids
+from .fixture_email import fixture_fact_ids, fixture_response_facts
 from .fixtures import fixture_agent_contract
 
 
@@ -64,7 +65,9 @@ def _validate_safe_tree(value: object) -> None:
         for item in value:
             _validate_safe_tree(item)
         return
-    if isinstance(value, str) and _BANNED.search(value):
+    if isinstance(value, str) and (
+        _BANNED.search(value) or contains_secret_material(value)
+    ):
         raise ValueError("controlled scenario contains banned address, secret, or auth URL pattern")
 
 
@@ -153,6 +156,54 @@ class ScenarioOutcome(_FrozenModel):
         return self
 
 
+class ScenarioTurnExpectation(_FrozenModel):
+    action: ExpectedAction
+    logical_identity: str | None = None
+    require_clarification: bool = False
+    gmail: GmailExpectation | None = None
+    response_assertions: tuple[str, ...] = ()
+    evidence_from_turn: int | None = Field(default=None, ge=0)
+
+    @field_validator("response_assertions")
+    @classmethod
+    def _bounded_assertions(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(item.strip() for item in value)
+        if any(not item or len(item) > 200 for item in normalized):
+            raise ValueError("response assertions must be bounded nonempty values")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("response assertions must be unique")
+        return normalized
+
+    @model_validator(mode="after")
+    def _turn_contract(self) -> "ScenarioTurnExpectation":
+        if self.action in {ExpectedAction.REUSE, ExpectedAction.CREATE_NEW}:
+            if self.logical_identity is None:
+                raise ValueError("reuse/create turn requires a logical identity")
+        elif self.logical_identity is not None:
+            raise ValueError("abstain turn forbids a logical identity")
+        if self.action is not ExpectedAction.ABSTAIN and self.require_clarification:
+            raise ValueError("only abstain turns may require clarification")
+        if self.gmail is not None and self.evidence_from_turn is not None:
+            raise ValueError("turn evidence must be current Gmail or an earlier turn, not both")
+        if (
+            self.response_assertions
+            and self.gmail is None
+            and self.evidence_from_turn is None
+        ):
+            raise ValueError("factual response assertions require declared evidence")
+        if self.gmail is not None and self.gmail.expect_no_result and self.response_assertions:
+            raise ValueError("no-result turns cannot declare factual response assertions")
+        return self
+
+    @property
+    def outcome(self) -> ScenarioOutcome:
+        return ScenarioOutcome(
+            action=self.action,
+            logical_identity=self.logical_identity,
+            require_clarification=self.require_clarification,
+        )
+
+
 class ScenarioIdentityContract(_FrozenModel):
     logical_identity: str
     name: str
@@ -173,6 +224,7 @@ class ScenarioDefinition(_FrozenModel):
     family: str
     title: str
     turns: tuple[ScenarioTurn, ...]
+    turn_expectations: tuple[ScenarioTurnExpectation, ...]
     expected: ScenarioOutcome
     identity_contract: ScenarioIdentityContract | None = None
     gmail: GmailExpectation
@@ -180,6 +232,8 @@ class ScenarioDefinition(_FrozenModel):
     repetitions: int = Field(ge=3)
     optional: bool = False
     budget_guarded: bool = False
+    gmail_required: bool = True
+    response_assertions: tuple[str, ...] | None = None
 
     @field_validator("scenario_id", "family", "title")
     @classmethod
@@ -193,6 +247,8 @@ class ScenarioDefinition(_FrozenModel):
     def _coherent(self) -> "ScenarioDefinition":
         if not self.turns:
             raise ValueError("scenario turns must be nonempty")
+        if len(self.turn_expectations) != len(self.turns):
+            raise ValueError("every scenario turn requires exactly one predeclared expectation")
         if self.expected.action is ExpectedAction.ABSTAIN:
             if self.identity_contract is not None:
                 raise ValueError("abstain scenario cannot carry an identity contract")
@@ -237,6 +293,7 @@ class _RawScenario(_FrozenModel):
     family: str
     title: str
     turns: tuple[ScenarioTurn, ...]
+    turn_expectations: tuple[ScenarioTurnExpectation, ...]
     expected: ScenarioOutcome
     gmail: GmailExpectation
     reset_profile: str
@@ -337,6 +394,41 @@ def load_controlled_scenarios(path: Path | None = None) -> tuple[ScenarioDefinit
                 purpose=novel.purpose,
                 preexisting=False,
             )
+        prior_created: set[str] = set()
+        for turn_index, turn in enumerate(raw.turn_expectations):
+            turn_identity = turn.logical_identity or ""
+            if turn.action is ExpectedAction.REUSE:
+                if turn_identity not in fixture_contracts and turn_identity not in prior_created:
+                    raise ValueError(
+                        "reuse turn identity must exist in reset or an earlier create turn"
+                    )
+            elif turn.action is ExpectedAction.CREATE_NEW:
+                if turn_identity not in novel_contracts or turn_identity in fixture_contracts:
+                    raise ValueError("create turn identity must use a declared novel contract")
+                prior_created.add(turn_identity)
+            if turn.evidence_from_turn is not None:
+                if turn.evidence_from_turn >= turn_index:
+                    raise ValueError("turn evidence must reference an earlier turn")
+                source = raw.turn_expectations[turn.evidence_from_turn]
+                if source.gmail is None:
+                    raise ValueError("referenced evidence turn must declare Gmail evidence")
+                allowed_assertions = {
+                    value
+                    for fact_id in source.gmail.fact_ids
+                    for value in fixture_response_facts(fact_id)
+                }
+            elif turn.gmail is not None:
+                allowed_assertions = {
+                    value
+                    for fact_id in turn.gmail.fact_ids
+                    for value in fixture_response_facts(fact_id)
+                }
+            else:
+                allowed_assertions = set()
+            if not set(turn.response_assertions).issubset(allowed_assertions):
+                raise ValueError(
+                    "turn response assertions must come from its declared fixture evidence"
+                )
         try:
             scenarios.append(
                 ScenarioDefinition(

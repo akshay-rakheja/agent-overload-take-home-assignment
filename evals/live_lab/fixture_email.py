@@ -7,7 +7,6 @@ import json
 import os
 import re
 import secrets
-import stat
 from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, Mapping
@@ -242,6 +241,27 @@ def build_fact_manifest(messages: tuple[FixtureMessage, ...]) -> FixtureFactMani
     return FixtureFactManifest(run_id=run_id, facts=facts, manifest_sha256=digest)
 
 
+def _open_directory_without_symlinks(path: Path, flags: int) -> int:
+    anchor = Path(path.anchor)
+    descriptor = os.open(anchor, flags)
+    try:
+        for component in path.parts[1:]:
+            try:
+                child = os.open(component, flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                raise
+            except OSError as exc:
+                raise ValueError(
+                    "explicit ignored .lab root ancestors must not contain a symlink"
+                ) from exc
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
 def write_pre_send_manifest(
     destination: Path,
     messages: tuple[FixtureMessage, ...],
@@ -264,12 +284,6 @@ def write_pre_send_manifest(
         raise ValueError("pre-send manifest must be inside the ignored .lab root") from exc
     if not relative.parts or relative.name in {"", ".", ".."}:
         raise ValueError("pre-send manifest destination must name a file")
-    try:
-        root_stat = root_absolute.lstat()
-    except FileNotFoundError as exc:
-        raise ValueError("explicit ignored .lab root must already exist") from exc
-    if root_absolute.is_symlink() or not stat.S_ISDIR(root_stat.st_mode):
-        raise ValueError("explicit ignored .lab root must not be a symlink")
     manifest = build_fact_manifest(messages)
     payload = json.dumps(
         manifest.model_dump(mode="json"),
@@ -278,7 +292,12 @@ def write_pre_send_manifest(
     ) + "\n"
     _validate_safe(payload, label="fact manifest")
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    root_descriptor = os.open(root_absolute, directory_flags)
+    try:
+        root_descriptor = _open_directory_without_symlinks(
+            root_absolute, directory_flags
+        )
+    except FileNotFoundError as exc:
+        raise ValueError("explicit ignored .lab root must already exist") from exc
     directory_descriptor = root_descriptor
     temporary_name = f".{relative.name}.{secrets.token_hex(8)}.tmp"
     try:

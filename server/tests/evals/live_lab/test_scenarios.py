@@ -67,6 +67,38 @@ def test_predeclaration_is_stable_and_expands_minimum_repetitions() -> None:
     assert len({item.pair_id for item in first}) == len(first)
 
 
+def test_every_turn_has_an_explicit_action_identity_and_response_evidence_contract() -> None:
+    scenarios = load_controlled_scenarios()
+
+    assert all(
+        len(scenario.turn_expectations) == len(scenario.turns)
+        for scenario in scenarios
+    )
+    duplicate = next(
+        item for item in scenarios if item.scenario_id == "duplicate-clipweaver-prevention"
+    )
+    assert [item.action.value for item in duplicate.turn_expectations] == [
+        "create_new",
+        "reuse",
+    ]
+    assert [item.logical_identity for item in duplicate.turn_expectations] == [
+        "new:clipweaver-auditor",
+        "new:clipweaver-auditor",
+    ]
+    assert duplicate.turn_expectations[0].gmail is None
+    assert duplicate.turn_expectations[1].gmail == duplicate.gmail
+
+    pronoun = next(
+        item for item in scenarios if item.scenario_id == "pronoun-receipt-follow-up"
+    )
+    assert [item.action.value for item in pronoun.turn_expectations] == [
+        "reuse",
+        "reuse",
+    ]
+    assert pronoun.turn_expectations[1].evidence_from_turn == 0
+    assert pronoun.turn_expectations[1].response_assertions == ("CAD 47.80",)
+
+
 @pytest.mark.parametrize(
     ("mutate", "match"),
     [
@@ -105,6 +137,10 @@ def test_loader_fails_closed_on_invalid_predeclarations(tmp_path, mutate, match:
         ("\\u0068ttps:\\/\\/example.com", "banned"),
         ("CLIENT\\u005fSeCrEt = value", "banned"),
         ("Bearer\\u0020opaque-token", "banned"),
+        ("sk-fabricatedreview123456789", "banned"),
+        ("password=review-secret-value", "banned"),
+        ("token: fabricated-token-value", "banned"),
+        ("key = fabricated-key-value", "banned"),
     ],
 )
 def test_loader_rejects_banned_content_after_json_decoding(
@@ -141,6 +177,22 @@ def test_direct_scenario_construction_rejects_nested_banned_content() -> None:
             reset_profile=RESET_PROFILES["standard-100"],
             repetitions=3,
         )
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "sk-fabricatedreview123456789",
+        "password=review-secret-value",
+        "token: fabricated-token-value",
+        "key = fabricated-key-value",
+    ],
+)
+def test_direct_turn_construction_rejects_recognizable_secret_material(
+    secret: str,
+) -> None:
+    with pytest.raises(ValidationError, match="banned|secret"):
+        ScenarioTurn(text=secret)
 
 
 @pytest.mark.parametrize(
