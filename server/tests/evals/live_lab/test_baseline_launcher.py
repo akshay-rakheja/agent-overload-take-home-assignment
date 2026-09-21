@@ -354,6 +354,7 @@ def test_baseline_transport_reports_application_retries_separately(
     configs = _build_model_configs("openai/gpt-4.1-mini")
     configs["interaction"]["max_retries"] = 1
     monkeypatch.setattr(baseline_launcher, "_BASELINE_MODEL_CONFIGS", configs)
+
     sink = ObservationSink(tmp_path / "events.jsonl", tmp_path / "private")
     wrapped = wrap_async_call(
         "interaction_model",
@@ -401,6 +402,8 @@ def test_baseline_transport_preserves_every_retry_attempt_without_double_countin
     else:
         outcomes.append(httpx.ReadTimeout("fixture"))
 
+    clock = {"now": 100, "steps": [7, 11]}
+
     class FakeClient:
         async def __aenter__(self):
             return self
@@ -410,15 +413,23 @@ def test_baseline_transport_preserves_every_retry_attempt_without_double_countin
 
         async def post(self, *_args, **_kwargs):
             outcome = outcomes.pop(0)
+            clock["now"] += clock["steps"].pop(0)
             if isinstance(outcome, BaseException):
                 raise outcome
             return outcome
 
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(baseline_launcher.time, "perf_counter_ns", lambda: clock["now"])
     configs = _build_model_configs("openai/gpt-4.1-mini")
     configs["interaction"]["max_retries"] = 1
     monkeypatch.setattr(baseline_launcher, "_BASELINE_MODEL_CONFIGS", configs)
-    sink = ObservationSink(tmp_path / "events.jsonl", tmp_path / "private")
+
+    class SlowObservationSink(ObservationSink):
+        def append(self, event):
+            clock["now"] += 1_000_000
+            return super().append(event)
+
+    sink = SlowObservationSink(tmp_path / "events.jsonl", tmp_path / "private")
     wrapped = wrap_async_call(
         "interaction_model",
         baseline_launcher._transport("https://fixture.invalid", "interaction_model"),
@@ -446,6 +457,8 @@ def test_baseline_transport_preserves_every_retry_attempt_without_double_countin
     }
     assert len(calls) == 2
     assert [call["attempt"] for call in calls] == [0, 1]
+    assert calls[0]["call_id"] == calls[1]["call_id"]
+    assert [call["elapsed_ms"] for call in calls] == [0.000007, 0.000011]
     assert [call["status_code"] for call in calls] == expected_statuses[terminal]
     assert [call["usage"]["provider_cost_usd"]["value"] for call in calls] == expected_costs[
         terminal

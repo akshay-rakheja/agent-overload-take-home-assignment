@@ -741,7 +741,12 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
         elif event.kind is TraceEventKind.PHASE_TIMING:
             timings.append(payload)
         elif event.kind is TraceEventKind.MODEL_CALL:
-            if payload.get("stage") in {"response", "error"}:
+            if payload.get("stage") in {
+                "request",
+                "attempt_start",
+                "response",
+                "error",
+            }:
                 if (key := _attempt_key(payload)) is not None:
                     expected_attempts.add(key)
         elif event.kind is TraceEventKind.USAGE:

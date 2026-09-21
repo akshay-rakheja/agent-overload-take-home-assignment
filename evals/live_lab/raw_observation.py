@@ -20,6 +20,7 @@ class ObservedToolCall(_FrozenModel):
 
 class RawModelCall(_FrozenModel):
     component: Literal["interaction", "execution", "email_search", "summarizer", "classifier"]
+    call_id: str | None = None
     attempt: int = Field(default=0, ge=0)
     model: str | None = None
     elapsed_ms: float = Field(ge=0)

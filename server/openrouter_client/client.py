@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any, Dict, List, Optional
@@ -151,6 +152,7 @@ def _emit_request_evidence(
         {
             "stage": "request",
             "call_id": call_id,
+            "attempt": 0,
             "role": role.value if role is not None else None,
             "model": model,
             "provider": _provider_from_model(model),
@@ -162,6 +164,24 @@ def _emit_request_evidence(
             "requested_seed": config.seed if config is not None else None,
             "timeout_seconds": config.timeout_seconds if config is not None else 60.0,
             "max_retries": config.max_retries if config is not None else 0,
+        },
+    )
+
+
+def _emit_retry_attempt_start(*, call_id: str, attempt: int) -> None:
+    """Mark a retry as expected before starting transport work.
+
+    The initial attempt is represented by the request event itself.  Later
+    attempts need their own start marker so an in-flight or cancelled retry
+    cannot make a partial aggregate appear complete.
+    """
+
+    emit_trace(
+        TraceEventKind.MODEL_CALL,
+        {
+            "stage": "attempt_start",
+            "call_id": call_id,
+            "attempt": attempt,
         },
     )
 
@@ -370,6 +390,8 @@ async def request_chat_completion(
 
     async with httpx.AsyncClient() as client:
         for attempt in range(max_retries + 1):
+            if attempt:
+                _emit_retry_attempt_start(call_id=call_id, attempt=attempt)
             try:
                 response = await client.post(
                     url,
@@ -377,6 +399,24 @@ async def request_chat_completion(
                     json=payload,
                     timeout=timeout_seconds,
                 )
+            except asyncio.CancelledError as exc:
+                _emit_usage_best_effort(
+                    None,
+                    role=role,
+                    call_id=call_id,
+                    attempt=attempt,
+                    observation_status="cancelled",
+                )
+                _emit_error_evidence(
+                    role=role,
+                    model=resolved_model,
+                    config=config,
+                    error=exc,
+                    retry_count=attempt,
+                    call_id=call_id,
+                    attempt=attempt,
+                )
+                raise
             except httpx.HTTPError as exc:
                 _emit_usage_best_effort(
                     None,
@@ -441,7 +481,46 @@ async def request_chat_completion(
                 }:
                     continue
                 _handle_response_error(exc)
-            raw_response = response.json()
+            try:
+                raw_response = response.json()
+            except asyncio.CancelledError as exc:
+                _emit_usage_best_effort(
+                    None,
+                    role=role,
+                    call_id=call_id,
+                    attempt=attempt,
+                    observation_status="cancelled",
+                )
+                _emit_error_evidence(
+                    role=role,
+                    model=resolved_model,
+                    config=config,
+                    error=exc,
+                    retry_count=attempt,
+                    response=response,
+                    call_id=call_id,
+                    attempt=attempt,
+                )
+                raise
+            except Exception as exc:
+                _emit_usage_best_effort(
+                    None,
+                    role=role,
+                    call_id=call_id,
+                    attempt=attempt,
+                    observation_status="malformed_success_response",
+                )
+                _emit_error_evidence(
+                    role=role,
+                    model=resolved_model,
+                    config=config,
+                    error=exc,
+                    retry_count=attempt,
+                    response=response,
+                    call_id=call_id,
+                    attempt=attempt,
+                )
+                raise
             if not isinstance(raw_response, dict):
                 error = OpenRouterError("OpenRouter response must be a JSON object")
                 _emit_error_evidence(

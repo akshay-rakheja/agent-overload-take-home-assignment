@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
+from uuid import uuid4
 
 import httpx
 
@@ -644,6 +645,7 @@ def wrap_async_call(
 ):
     @functools.wraps(original)
     async def wrapped(*args: Any, **kwargs: Any) -> Any:
+        logical_call_id = uuid4().hex
         request_digest = _best_effort_observe(
             sink,
             f"{component}:request",
@@ -688,13 +690,14 @@ def wrap_async_call(
                     model_component,
                     kwargs,
                     result=response_payload,
-                    elapsed_ms=elapsed,
+                    elapsed_ms=float(transport_evidence["elapsed_ms"]),
                     request_digest=request_digest,
                     config=model_config,
                     transport_evidence=transport_evidence,
                 )
                 evidence.update(
                     {
+                        "call_id": logical_call_id,
                         "attempt": int(transport_evidence.get("attempt", 0)),
                         "error_type": (
                             type(caught).__name__
@@ -737,6 +740,7 @@ def wrap_async_call(
                     )
                     evidence.update(
                         {
+                            "call_id": logical_call_id,
                             "error_type": type(caught).__name__,
                             "timeout": bool(
                                 isinstance(caught, (TimeoutError, httpx.TimeoutException))
@@ -780,6 +784,7 @@ def wrap_async_call(
                 )
                 evidence.update(
                     {
+                        "call_id": logical_call_id,
                         "response_sha256": response_digest,
                         "response_choice_count": len(choices) if isinstance(choices, list) else 0,
                         "response_tool_call_count": _response_tool_call_count(result),
@@ -876,6 +881,7 @@ def _transport(fake_base_url: str, component: str):
         max_retries = int(config["max_retries"])
         async with httpx.AsyncClient() as client:
             for attempt in range(max_retries + 1):
+                attempt_timing = TraceTiming(time.perf_counter_ns)
                 try:
                     response = await client.post(
                         url,
@@ -884,11 +890,13 @@ def _transport(fake_base_url: str, component: str):
                         timeout=timeout_seconds,
                     )
                 except httpx.HTTPError as exc:
+                    attempt_timing.finish()
                     _record_transport_attempt(
                         {
                             "application_retry_count": attempt,
                             "attempt": attempt,
                             "error_type": type(exc).__name__,
+                            "elapsed_ms": attempt_timing.elapsed_ns / 1_000_000,
                             "timeout": isinstance(exc, httpx.TimeoutException),
                             "rate_limit": {},
                             "response_payload": None,
@@ -907,11 +915,13 @@ def _transport(fake_base_url: str, component: str):
                         response_payload = response.json()
                     except Exception:
                         response_payload = None
+                    attempt_timing.finish()
                     _record_transport_attempt(
                         {
                             "application_retry_count": attempt,
                             "attempt": attempt,
                             "error_type": "HTTPStatusError",
+                            "elapsed_ms": attempt_timing.elapsed_ns / 1_000_000,
                             "timeout": False,
                             "rate_limit": _rate_limit_evidence(response.headers),
                             "response_payload": response_payload,
@@ -932,11 +942,13 @@ def _transport(fake_base_url: str, component: str):
                 try:
                     result = response.json()
                 except Exception as exc:
+                    attempt_timing.finish()
                     _record_transport_attempt(
                         {
                             "application_retry_count": attempt,
                             "attempt": attempt,
                             "error_type": type(exc).__name__,
+                            "elapsed_ms": attempt_timing.elapsed_ns / 1_000_000,
                             "timeout": False,
                             "rate_limit": _rate_limit_evidence(response.headers),
                             "response_payload": None,
@@ -945,11 +957,13 @@ def _transport(fake_base_url: str, component: str):
                     )
                     raise
                 if not isinstance(result, dict):
+                    attempt_timing.finish()
                     _record_transport_attempt(
                         {
                             "application_retry_count": attempt,
                             "attempt": attempt,
                             "error_type": "OpenRouterError",
+                            "elapsed_ms": attempt_timing.elapsed_ns / 1_000_000,
                             "timeout": False,
                             "rate_limit": _rate_limit_evidence(response.headers),
                             "response_payload": result,
@@ -959,11 +973,13 @@ def _transport(fake_base_url: str, component: str):
                     raise client_module.OpenRouterError(
                         "OpenRouter response must be a JSON object"
                     )
+                attempt_timing.finish()
                 _record_transport_attempt(
                     {
                         "application_retry_count": attempt,
                         "attempt": attempt,
                         "error_type": None,
+                        "elapsed_ms": attempt_timing.elapsed_ns / 1_000_000,
                         "timeout": False,
                         "rate_limit": _rate_limit_evidence(response.headers),
                         "response_payload": result,

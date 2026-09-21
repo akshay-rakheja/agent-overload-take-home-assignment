@@ -904,6 +904,197 @@ def test_usage_observer_degradation_is_an_explicit_incomplete_attempt(
     assert len(usage_events) == 2
 
 
+@pytest.mark.parametrize("failure_kind", ["malformed_success", "cancellation"])
+def test_success_parse_failure_and_cancellation_are_exact_terminal_unavailable_attempts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure_kind: str
+) -> None:
+    first = _response(
+        {
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 2,
+                "completion_tokens": 3,
+                "total_tokens": 5,
+                "cost": 0.01,
+            },
+        }
+    )
+    if failure_kind == "malformed_success":
+        original_error: BaseException = json.JSONDecodeError("fixture", "not-json", 0)
+
+        class InvalidJsonResponse(httpx.Response):
+            def json(self, **_kwargs):
+                raise original_error
+
+        failure: object = InvalidJsonResponse(
+            200,
+            request=httpx.Request("POST", "https://router.test/chat/completions"),
+            content=b"not-json",
+        )
+    else:
+        original_error = asyncio.CancelledError("fixture")
+        failure = original_error
+    outcomes = [first, failure]
+
+    class FailureAfterSuccess:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+    monkeypatch.setattr(httpx, "AsyncClient", FailureAfterSuccess)
+    root = tmp_path / ".lab" / "traces"
+    store = JsonlTraceStore(root)
+    context = TraceContext(
+        run_id=uuid4(),
+        turn_id=uuid4(),
+        system="enhanced",
+        revision="fixture",
+        mode="offline",
+    )
+
+    with trace_scope(context, store):
+        asyncio.run(
+            request_chat_completion(
+                config=ModelCallConfig(model_id="openai/gpt-4.1-mini"),
+                role=ModelRole.INTERACTION,
+                messages=[],
+                api_key="fixture-key",
+                base_url="https://router.test",
+            )
+        )
+        with pytest.raises(BaseException) as caught:
+            asyncio.run(
+                request_chat_completion(
+                    config=ModelCallConfig(model_id="openai/gpt-4.1-mini"),
+                    role=ModelRole.EXECUTION,
+                    messages=[],
+                    api_key="fixture-key",
+                    base_url="https://router.test",
+                )
+            )
+
+    assert caught.value is original_error
+    stored = store.read(context.run_id)
+    usage_events = [event for event in stored if event.kind is TraceEventKind.USAGE]
+    terminal_calls = [
+        event
+        for event in stored
+        if event.kind is TraceEventKind.MODEL_CALL
+        and event.payload.get("stage") in {"response", "error"}
+    ]
+    assert len(usage_events) == 2
+    assert len(terminal_calls) == 2
+    assert usage_events[1].payload["prompt_tokens"]["value"] is None
+    expected_status = {
+        "malformed_success": "malformed_success_response",
+        "cancellation": "cancelled",
+    }[failure_kind]
+    assert usage_events[1].payload["observation_status"] == expected_status
+
+    settings = Settings(
+        lab_enabled=True,
+        lab_composio_user_id="fixture-user",
+        server_host="127.0.0.1",
+        lab_trace_root=root,
+    )
+    app = FastAPI()
+    from server.routes import api_router
+
+    app.include_router(api_router)
+    app.dependency_overrides[get_settings] = lambda: settings
+    response = TestClient(app, client=("127.0.0.1", 40_000)).get(
+        f"/api/v1/lab/runs/{context.run_id}/trace"
+    )
+    result = response.json()["result"]
+    assert response.status_code == 200
+    assert result["usage"]["input_tokens"]["availability"] == "unavailable"
+    assert result["usage"]["known_input_tokens_subtotal"]["value"] == 2
+    assert result["cost"]["amount"]["availability"] == "unavailable"
+    assert result["cost"]["known_amount_subtotal"]["value"] == 0.01
+
+
+def test_started_active_request_fails_closed_without_double_counting_completed_attempt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def scenario() -> None:
+        started = asyncio.Event()
+        never = asyncio.Event()
+        responses: list[object] = [
+            _response(
+                {
+                    "choices": [],
+                    "usage": {
+                        "prompt_tokens": 2,
+                        "completion_tokens": 3,
+                        "total_tokens": 5,
+                        "cost": 0.01,
+                    },
+                }
+            ),
+            "block",
+        ]
+
+        class BlockingSecondRequest:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def post(self, *_args, **_kwargs):
+                outcome = responses.pop(0)
+                if outcome == "block":
+                    started.set()
+                    await never.wait()
+                return outcome
+
+        monkeypatch.setattr(httpx, "AsyncClient", BlockingSecondRequest)
+        store = JsonlTraceStore(tmp_path / ".lab" / "traces")
+        context = TraceContext(
+            run_id=uuid4(),
+            turn_id=uuid4(),
+            system="enhanced",
+            revision="fixture",
+            mode="offline",
+        )
+        with trace_scope(context, store):
+            await request_chat_completion(
+                config=ModelCallConfig(model_id="openai/gpt-4.1-mini"),
+                role=ModelRole.INTERACTION,
+                messages=[],
+                api_key="fixture-key",
+                base_url="https://router.test",
+            )
+            active = asyncio.create_task(
+                request_chat_completion(
+                    config=ModelCallConfig(model_id="openai/gpt-4.1-mini"),
+                    role=ModelRole.EXECUTION,
+                    messages=[],
+                    api_key="fixture-key",
+                    base_url="https://router.test",
+                )
+            )
+            await started.wait()
+            result = consolidate_trace(store.read(context.run_id))
+            assert result.usage.input_tokens.availability.value == "unavailable"
+            assert result.usage.known_input_tokens_subtotal.value == 2
+            assert result.cost.amount.availability.value == "unavailable"
+            assert result.cost.known_amount_subtotal.value == 0.01
+            active.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await active
+
+    asyncio.run(scenario())
+
+
 def test_real_client_usage_round_trips_jsonl_consolidation_and_trace_api(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
