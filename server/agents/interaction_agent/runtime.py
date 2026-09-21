@@ -10,7 +10,7 @@ from .tools import DispatchContext, ToolResult, get_tool_schemas, handle_tool_ca
 from ...config import get_settings
 from ...services.conversation import get_conversation_log, get_working_memory_log
 from ...services.evaluation_lab.models import TraceEventKind
-from ...services.evaluation_lab.trace import emit_trace
+from ...services.evaluation_lab.trace import emit_trace, trace_timing
 from ...services.execution import AgentDirectory, RoutingAction, get_agent_directory
 from ...openrouter_client import request_chat_completion
 from ...logging_config import logger
@@ -303,47 +303,47 @@ class InteractionAgentRuntime:
                 "tool_schema_count": len(self.tool_schemas),
             },
         )
-        started = monotonic_ns()
-        logger.debug(
-            "Interaction agent calling LLM",
-            extra={"model": self.model, "tools": len(self.tool_schemas)},
-        )
-        try:
-            response = await request_chat_completion(
-                model=self.model,
-                messages=messages,
-                system=system_prompt,
-                api_key=self.api_key,
-                tools=self.tool_schemas,
+        with trace_timing(monotonic_ns) as timing:
+            logger.debug(
+                "Interaction agent calling LLM",
+                extra={"model": self.model, "tools": len(self.tool_schemas)},
             )
-        except Exception as exc:
-            finished = monotonic_ns()
+            try:
+                response = await request_chat_completion(
+                    model=self.model,
+                    messages=messages,
+                    system=system_prompt,
+                    api_key=self.api_key,
+                    tools=self.tool_schemas,
+                )
+            except Exception as exc:
+                finished = timing.finish()
+                emit_trace(
+                    TraceEventKind.MODEL_CALL,
+                    {
+                        "runtime": "interaction",
+                        "stage": "failed",
+                        "model": self.model,
+                        "started_monotonic_ns": timing.started_monotonic_ns,
+                        "finished_monotonic_ns": finished,
+                        "elapsed_ns": timing.elapsed_ns,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                raise
+            finished = timing.finish()
             emit_trace(
                 TraceEventKind.MODEL_CALL,
                 {
                     "runtime": "interaction",
-                    "stage": "failed",
+                    "stage": "completed",
                     "model": self.model,
-                    "started_monotonic_ns": started,
+                    "started_monotonic_ns": timing.started_monotonic_ns,
                     "finished_monotonic_ns": finished,
-                    "elapsed_ns": max(0, finished - started),
-                    "error_type": type(exc).__name__,
+                    "elapsed_ns": timing.elapsed_ns,
                 },
             )
-            raise
-        finished = monotonic_ns()
-        emit_trace(
-            TraceEventKind.MODEL_CALL,
-            {
-                "runtime": "interaction",
-                "stage": "completed",
-                "model": self.model,
-                "started_monotonic_ns": started,
-                "finished_monotonic_ns": finished,
-                "elapsed_ns": max(0, finished - started),
-            },
-        )
-        return response
+            return response
 
     # Extract the assistant's message from the OpenRouter API response structure
     def _extract_assistant_message(self, response: Dict[str, Any]) -> Dict[str, Any]:
@@ -437,88 +437,88 @@ class InteractionAgentRuntime:
                 "stage": "started",
             },
         )
-        started = monotonic_ns()
-        try:
-            self._log_tool_invocation(tool_call, stage="start")
-            result = handle_tool_call(
-                tool_call.name,
-                tool_call.arguments,
-                dispatch_context=self.dispatch_context,
+        with trace_timing(monotonic_ns) as timing:
+            try:
+                self._log_tool_invocation(tool_call, stage="start")
+                result = handle_tool_call(
+                    tool_call.name,
+                    tool_call.arguments,
+                    dispatch_context=self.dispatch_context,
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                finished = timing.finish()
+                emit_trace(
+                    TraceEventKind.TOOL_CALL,
+                    {
+                        "runtime": "interaction",
+                        "tool_name": tool_call.name,
+                        "stage": "failed",
+                        "success": False,
+                        "started_monotonic_ns": timing.started_monotonic_ns,
+                        "finished_monotonic_ns": finished,
+                        "elapsed_ns": timing.elapsed_ns,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                logger.error(
+                    "Tool execution crashed",
+                    extra={"tool": tool_call.name, "error": str(exc)},
+                )
+                self._log_tool_invocation(
+                    tool_call,
+                    stage="error",
+                    detail={"error": str(exc)},
+                )
+                return ToolResult(success=False, payload={"error": str(exc)})
+
+            if not isinstance(result, ToolResult):
+                logger.warning(
+                    "Tool did not return ToolResult; coercing",
+                    extra={"tool": tool_call.name},
+                )
+                wrapped = ToolResult(success=True, payload=result)
+                finished = timing.finish()
+                emit_trace(
+                    TraceEventKind.TOOL_CALL,
+                    {
+                        "runtime": "interaction",
+                        "tool_name": tool_call.name,
+                        "stage": "completed",
+                        "success": wrapped.success,
+                        "result": wrapped.payload,
+                        "started_monotonic_ns": timing.started_monotonic_ns,
+                        "finished_monotonic_ns": finished,
+                        "elapsed_ns": timing.elapsed_ns,
+                    },
+                )
+                self._log_tool_invocation(tool_call, stage="done", result=wrapped)
+                return wrapped
+
+            status = "success" if result.success else "error"
+            logger.debug(
+                "Tool executed",
+                extra={
+                    "tool": tool_call.name,
+                    "status": status,
+                },
             )
-        except Exception as exc:  # pragma: no cover - defensive
-            finished = monotonic_ns()
+            self._log_tool_invocation(tool_call, stage="done", result=result)
+            finished = timing.finish()
+            trace_stage = "completed" if result.success else "rejected"
             emit_trace(
                 TraceEventKind.TOOL_CALL,
                 {
                     "runtime": "interaction",
                     "tool_name": tool_call.name,
-                    "stage": "failed",
-                    "success": False,
-                    "started_monotonic_ns": started,
+                    "stage": trace_stage,
+                    "success": result.success,
+                    "result": result.payload,
+                    "started_monotonic_ns": timing.started_monotonic_ns,
                     "finished_monotonic_ns": finished,
-                    "elapsed_ns": max(0, finished - started),
-                    "error_type": type(exc).__name__,
+                    "elapsed_ns": timing.elapsed_ns,
                 },
             )
-            logger.error(
-                "Tool execution crashed",
-                extra={"tool": tool_call.name, "error": str(exc)},
-            )
-            self._log_tool_invocation(
-                tool_call,
-                stage="error",
-                detail={"error": str(exc)},
-            )
-            return ToolResult(success=False, payload={"error": str(exc)})
-
-        if not isinstance(result, ToolResult):
-            logger.warning(
-                "Tool did not return ToolResult; coercing",
-                extra={"tool": tool_call.name},
-            )
-            wrapped = ToolResult(success=True, payload=result)
-            finished = monotonic_ns()
-            emit_trace(
-                TraceEventKind.TOOL_CALL,
-                {
-                    "runtime": "interaction",
-                    "tool_name": tool_call.name,
-                    "stage": "completed",
-                    "success": wrapped.success,
-                    "result": wrapped.payload,
-                    "started_monotonic_ns": started,
-                    "finished_monotonic_ns": finished,
-                    "elapsed_ns": max(0, finished - started),
-                },
-            )
-            self._log_tool_invocation(tool_call, stage="done", result=wrapped)
-            return wrapped
-
-        status = "success" if result.success else "error"
-        logger.debug(
-            "Tool executed",
-            extra={
-                "tool": tool_call.name,
-                "status": status,
-            },
-        )
-        self._log_tool_invocation(tool_call, stage="done", result=result)
-        finished = monotonic_ns()
-        trace_stage = "completed" if result.success else "rejected"
-        emit_trace(
-            TraceEventKind.TOOL_CALL,
-            {
-                "runtime": "interaction",
-                "tool_name": tool_call.name,
-                "stage": trace_stage,
-                "success": result.success,
-                "result": result.payload,
-                "started_monotonic_ns": started,
-                "finished_monotonic_ns": finished,
-                "elapsed_ns": max(0, finished - started),
-            },
-        )
-        return result
+            return result
 
     # Format tool execution results into JSON for LLM consumption
     def _format_tool_result(self, tool_call: _ToolCall, result: ToolResult) -> str:

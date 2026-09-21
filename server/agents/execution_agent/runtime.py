@@ -11,7 +11,7 @@ from .tools import get_tool_schemas, get_tool_registry
 from ...config import get_settings
 from ...services.evaluation_lab import LabToolPolicy, lab_tool_rejection
 from ...services.evaluation_lab.models import TraceEventKind
-from ...services.evaluation_lab.trace import emit_trace
+from ...services.evaluation_lab.trace import emit_trace, trace_timing
 from ...openrouter_client import request_chat_completion
 from ...logging_config import logger
 
@@ -220,44 +220,44 @@ class ExecutionAgentRuntime:
                 "tool_schema_count": len(tools_to_send) if tools_to_send else 0,
             },
         )
-        started = monotonic_ns()
-        logger.info(f"[{self.agent.name}] Calling LLM with model: {self.model}, tools: {len(tools_to_send) if tools_to_send else 0}")
-        try:
-            response = await request_chat_completion(
-                model=self.model,
-                messages=messages,
-                system=system_prompt,
-                api_key=self.api_key,
-                tools=tools_to_send
-            )
-        except Exception as exc:
-            finished = monotonic_ns()
+        with trace_timing(monotonic_ns) as timing:
+            logger.info(f"[{self.agent.name}] Calling LLM with model: {self.model}, tools: {len(tools_to_send) if tools_to_send else 0}")
+            try:
+                response = await request_chat_completion(
+                    model=self.model,
+                    messages=messages,
+                    system=system_prompt,
+                    api_key=self.api_key,
+                    tools=tools_to_send
+                )
+            except Exception as exc:
+                finished = timing.finish()
+                emit_trace(
+                    TraceEventKind.MODEL_CALL,
+                    {
+                        "runtime": "execution",
+                        "stage": "failed",
+                        "model": self.model,
+                        "started_monotonic_ns": timing.started_monotonic_ns,
+                        "finished_monotonic_ns": finished,
+                        "elapsed_ns": timing.elapsed_ns,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                raise
+            finished = timing.finish()
             emit_trace(
                 TraceEventKind.MODEL_CALL,
                 {
                     "runtime": "execution",
-                    "stage": "failed",
+                    "stage": "completed",
                     "model": self.model,
-                    "started_monotonic_ns": started,
+                    "started_monotonic_ns": timing.started_monotonic_ns,
                     "finished_monotonic_ns": finished,
-                    "elapsed_ns": max(0, finished - started),
-                    "error_type": type(exc).__name__,
+                    "elapsed_ns": timing.elapsed_ns,
                 },
             )
-            raise
-        finished = monotonic_ns()
-        emit_trace(
-            TraceEventKind.MODEL_CALL,
-            {
-                "runtime": "execution",
-                "stage": "completed",
-                "model": self.model,
-                "started_monotonic_ns": started,
-                "finished_monotonic_ns": finished,
-                "elapsed_ns": max(0, finished - started),
-            },
-        )
-        return response
+            return response
 
     # Parse and validate tool calls from LLM response into structured format
     def _extract_tool_calls(self, raw_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -329,12 +329,42 @@ class ExecutionAgentRuntime:
                 "stage": "started",
             },
         )
-        started = monotonic_ns()
-        if getattr(self, "lab_enabled", False):
-            decision = LabToolPolicy().decide_model_tool(tool_name)
-            if not decision.allowed:
-                result = lab_tool_rejection(tool_name, decision)
-                finished = monotonic_ns()
+        with trace_timing(monotonic_ns) as timing:
+            if getattr(self, "lab_enabled", False):
+                decision = LabToolPolicy().decide_model_tool(tool_name)
+                if not decision.allowed:
+                    result = lab_tool_rejection(tool_name, decision)
+                    finished = timing.finish()
+                    emit_trace(
+                        TraceEventKind.TOOL_CALL,
+                        {
+                            "runtime": "execution",
+                            "tool_name": tool_name,
+                            "stage": "rejected",
+                            "success": False,
+                            "result": _trace_tool_result(tool_name, result),
+                            "started_monotonic_ns": timing.started_monotonic_ns,
+                            "finished_monotonic_ns": finished,
+                            "elapsed_ns": timing.elapsed_ns,
+                        },
+                    )
+                    emit_trace(
+                        TraceEventKind.GMAIL_EVIDENCE,
+                        {
+                            "boundary": "execution_runtime",
+                            "operation_name": tool_name,
+                            "stage": "rejected",
+                            "allowed": False,
+                            "policy_code": decision.code,
+                            "callable_executed": False,
+                        },
+                    )
+                    return False, result
+
+            tool_func = self.tool_registry.get(tool_name)
+            if not tool_func:
+                result = {"error": f"Unknown tool: {tool_name}"}
+                finished = timing.finish()
                 emit_trace(
                     TraceEventKind.TOOL_CALL,
                     {
@@ -343,77 +373,47 @@ class ExecutionAgentRuntime:
                         "stage": "rejected",
                         "success": False,
                         "result": _trace_tool_result(tool_name, result),
-                        "started_monotonic_ns": started,
+                        "started_monotonic_ns": timing.started_monotonic_ns,
                         "finished_monotonic_ns": finished,
-                        "elapsed_ns": max(0, finished - started),
-                    },
-                )
-                emit_trace(
-                    TraceEventKind.GMAIL_EVIDENCE,
-                    {
-                        "boundary": "execution_runtime",
-                        "operation_name": tool_name,
-                        "stage": "rejected",
-                        "allowed": False,
-                        "policy_code": decision.code,
-                        "callable_executed": False,
+                        "elapsed_ns": timing.elapsed_ns,
                     },
                 )
                 return False, result
 
-        tool_func = self.tool_registry.get(tool_name)
-        if not tool_func:
-            result = {"error": f"Unknown tool: {tool_name}"}
-            finished = monotonic_ns()
-            emit_trace(
-                TraceEventKind.TOOL_CALL,
-                {
-                    "runtime": "execution",
-                    "tool_name": tool_name,
-                    "stage": "rejected",
-                    "success": False,
-                    "result": _trace_tool_result(tool_name, result),
-                    "started_monotonic_ns": started,
-                    "finished_monotonic_ns": finished,
-                    "elapsed_ns": max(0, finished - started),
-                },
-            )
-            return False, result
-
-        try:
-            result = tool_func(**arguments)
-            if inspect.isawaitable(result):
-                result = await result
-            finished = monotonic_ns()
-            emit_trace(
-                TraceEventKind.TOOL_CALL,
-                {
-                    "runtime": "execution",
-                    "tool_name": tool_name,
-                    "stage": "completed",
-                    "success": True,
-                    "result": _trace_tool_result(tool_name, result),
-                    "started_monotonic_ns": started,
-                    "finished_monotonic_ns": finished,
-                    "elapsed_ns": max(0, finished - started),
-                },
-            )
-            return True, result
-        except Exception as e:
-            result = {"error": str(e)}
-            finished = monotonic_ns()
-            emit_trace(
-                TraceEventKind.TOOL_CALL,
-                {
-                    "runtime": "execution",
-                    "tool_name": tool_name,
-                    "stage": "failed",
-                    "success": False,
-                    "result": _trace_tool_result(tool_name, result),
-                    "started_monotonic_ns": started,
-                    "finished_monotonic_ns": finished,
-                    "elapsed_ns": max(0, finished - started),
-                    "error_type": type(e).__name__,
-                },
-            )
-            return False, result
+            try:
+                result = tool_func(**arguments)
+                if inspect.isawaitable(result):
+                    result = await result
+                finished = timing.finish()
+                emit_trace(
+                    TraceEventKind.TOOL_CALL,
+                    {
+                        "runtime": "execution",
+                        "tool_name": tool_name,
+                        "stage": "completed",
+                        "success": True,
+                        "result": _trace_tool_result(tool_name, result),
+                        "started_monotonic_ns": timing.started_monotonic_ns,
+                        "finished_monotonic_ns": finished,
+                        "elapsed_ns": timing.elapsed_ns,
+                    },
+                )
+                return True, result
+            except Exception as e:
+                result = {"error": str(e)}
+                finished = timing.finish()
+                emit_trace(
+                    TraceEventKind.TOOL_CALL,
+                    {
+                        "runtime": "execution",
+                        "tool_name": tool_name,
+                        "stage": "failed",
+                        "success": False,
+                        "result": _trace_tool_result(tool_name, result),
+                        "started_monotonic_ns": timing.started_monotonic_ns,
+                        "finished_monotonic_ns": finished,
+                        "elapsed_ns": timing.elapsed_ns,
+                        "error_type": type(e).__name__,
+                    },
+                )
+                return False, result

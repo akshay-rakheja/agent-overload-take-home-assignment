@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict
+from functools import partial
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -12,11 +13,13 @@ import pytest
 from server.agents.execution_agent import runtime as execution_runtime
 from server.agents.execution_agent.agent import ExecutionAgent
 from server.agents.execution_agent.runtime import ExecutionAgentRuntime
+from server.config import Settings
 from server.services.evaluation_lab.models import TraceContext, TraceEventKind
 from server.services.evaluation_lab.trace import trace_scope
 from server.services.execution.context_policy import ExecutionContextPolicy
 from server.services.execution.directory import AgentDirectory
 from server.services.execution.log_store import ExecutionAgentLogStore
+from server.services.gmail import client as gmail_client
 
 
 class CollectingSink:
@@ -194,6 +197,69 @@ def test_execution_model_and_tool_timings_exclude_synchronous_sink_latency(
     ][0]
     assert model_completed.payload["elapsed_ns"] == 10
     assert tool_completed.payload["elapsed_ns"] == 7
+
+
+@pytest.mark.parametrize("sink_raises", [False, True])
+def test_execution_tool_timing_excludes_nested_gmail_trace_sink_latency(
+    monkeypatch,
+    sink_raises,
+) -> None:
+    clock = {"now": 0}
+
+    class ClockAdvancingSink(CollectingSink):
+        def emit(self, event) -> None:
+            clock["now"] += 1_000_000_000
+            super().emit(event)
+            if sink_raises:
+                raise RuntimeError("trace unavailable")
+
+    class FakeComposio:
+        def __init__(self) -> None:
+            self.client = SimpleNamespace(
+                tools=SimpleNamespace(execute=self.execute)
+            )
+
+        def execute(self, tool_name, *, user_id, arguments):
+            del tool_name, user_id, arguments
+            clock["now"] += 13
+            return {"items": []}
+
+    monkeypatch.setattr(execution_runtime, "monotonic_ns", lambda: clock["now"])
+    monkeypatch.setattr(gmail_client, "_CLIENT", FakeComposio())
+    monkeypatch.setattr(
+        gmail_client,
+        "get_settings",
+        lambda: Settings(
+            lab_enabled=True,
+            lab_composio_user_id="opaque-lab-user",
+        ),
+    )
+    runtime = _runtime()
+    runtime.tool_registry = {
+        "gmail_get_contacts": partial(
+            gmail_client.execute_gmail_tool,
+            "GMAIL_GET_CONTACTS",
+            "opaque-lab-user",
+        )
+    }
+    sink = ClockAdvancingSink()
+
+    with trace_scope(_trace_context(), sink):
+        success, result = asyncio.run(
+            runtime._execute_tool("gmail_get_contacts", {})
+        )
+
+    assert success is True
+    assert result == {"items": []}
+    assert [
+        (event.kind.value, event.payload["stage"])
+        for event in sink.events
+    ] == [
+        ("tool_call", "started"),
+        ("gmail_evidence", "completed"),
+        ("tool_call", "completed"),
+    ]
+    assert sink.events[-1].payload["elapsed_ns"] == 13
 
 
 @pytest.mark.parametrize(

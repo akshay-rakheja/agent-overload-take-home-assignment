@@ -405,6 +405,58 @@ def test_interaction_model_and_tool_timings_exclude_synchronous_sink_latency(
     assert tool_completed.payload["elapsed_ns"] == 7
 
 
+@pytest.mark.parametrize("sink_raises", [False, True])
+def test_interaction_tool_timing_excludes_nested_send_draft_trace_sink_latency(
+    monkeypatch,
+    sink_raises,
+) -> None:
+    clock = {"now": 0}
+
+    class ClockAdvancingSink(CollectingSink):
+        def emit(self, event) -> None:
+            clock["now"] += 1_000_000_000
+            super().emit(event)
+            if sink_raises:
+                raise RuntimeError("trace unavailable")
+
+    monkeypatch.setattr(interaction_runtime, "monotonic_ns", lambda: clock["now"])
+    monkeypatch.setattr(
+        interaction_tools,
+        "get_settings",
+        lambda: Settings(
+            lab_enabled=True,
+            lab_composio_user_id="opaque-lab-user",
+        ),
+    )
+    runtime = InteractionAgentRuntime.__new__(InteractionAgentRuntime)
+    runtime.dispatch_context = DispatchContext()
+    sink = ClockAdvancingSink()
+
+    with trace_scope(_trace_context(), sink):
+        result = runtime._execute_tool(
+            _ToolCall(
+                identifier="call-1",
+                name="send_draft",
+                arguments={
+                    "to": "private@example.invalid",
+                    "subject": "Private",
+                    "body": "private body",
+                },
+            )
+        )
+
+    assert result.success is False
+    assert [
+        (event.kind.value, event.payload["stage"])
+        for event in sink.events
+    ] == [
+        ("tool_call", "started"),
+        ("gmail_evidence", "rejected"),
+        ("tool_call", "rejected"),
+    ]
+    assert sink.events[-1].payload["elapsed_ns"] == 0
+
+
 def test_lab_send_draft_emits_rejection_at_policy_boundary_without_recording(
     monkeypatch,
 ) -> None:

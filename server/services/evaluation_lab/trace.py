@@ -9,7 +9,7 @@ import logging
 import os
 import stat
 import threading
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -56,8 +56,78 @@ class _ScopeState:
         self.sink = sink
 
 
+class TraceTiming:
+    """Monotonic phase timing with active trace-observation work removed."""
+
+    __slots__ = (
+        "_active",
+        "_clock",
+        "_finished_monotonic_ns",
+        "_lock",
+        "_trace_overhead_ns",
+        "started_monotonic_ns",
+    )
+
+    def __init__(self, clock: Callable[[], int]) -> None:
+        self._active = True
+        self._clock = clock
+        self._finished_monotonic_ns: int | None = None
+        self._lock = threading.RLock()
+        self._trace_overhead_ns = 0
+        self.started_monotonic_ns = clock()
+
+    def _observation_started(self) -> int | None:
+        with self._lock:
+            if not self._active:
+                return None
+        try:
+            value = self._clock()
+        except Exception:
+            return None
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    def _observation_finished(self, started: int) -> None:
+        try:
+            finished = self._clock()
+        except Exception:
+            return
+        if not isinstance(finished, int) or isinstance(finished, bool):
+            return
+        overhead = max(0, finished - started)
+        with self._lock:
+            if self._active:
+                self._trace_overhead_ns += overhead
+
+    def finish(self) -> int:
+        """Freeze the phase endpoint before its terminal trace event is emitted."""
+
+        with self._lock:
+            if self._finished_monotonic_ns is None:
+                self._finished_monotonic_ns = self._clock()
+                self._active = False
+            return self._finished_monotonic_ns
+
+    @property
+    def finished_monotonic_ns(self) -> int:
+        return self.finish()
+
+    @property
+    def elapsed_ns(self) -> int:
+        finished = self.finish()
+        with self._lock:
+            gross = max(0, finished - self.started_monotonic_ns)
+            trace_overhead = min(gross, max(0, self._trace_overhead_ns))
+        return gross - trace_overhead
+
+
 _TRACE_SCOPE: ContextVar[_ScopeState | None] = ContextVar(
     "evaluation_lab_trace_scope", default=None
+)
+_TRACE_TIMINGS: ContextVar[tuple[TraceTiming, ...]] = ContextVar(
+    "evaluation_lab_trace_timings", default=()
+)
+_TRACE_EMIT_DEPTH: ContextVar[int] = ContextVar(
+    "evaluation_lab_trace_emit_depth", default=0
 )
 _ACTIVE_TURNS: dict[tuple[UUID, UUID, str], int] = {}
 _ACTIVE_TURNS_LOCK = threading.RLock()
@@ -107,6 +177,19 @@ def trace_scope(context: TraceContext, sink: TraceSink) -> Iterator[None]:
         _TRACE_SCOPE.reset(scope_token)
 
 
+@contextmanager
+def trace_timing(clock: Callable[[], int]) -> Iterator[TraceTiming]:
+    """Measure a phase while accounting for nested synchronous trace work."""
+
+    timing = TraceTiming(clock)
+    timing_token = _TRACE_TIMINGS.set((*_TRACE_TIMINGS.get(), timing))
+    try:
+        yield timing
+    finally:
+        timing.finish()
+        _TRACE_TIMINGS.reset(timing_token)
+
+
 def make_trace_event(
     context: TraceContext,
     sequence: int,
@@ -137,6 +220,17 @@ def emit_trace(kind: TraceEventKind, payload: Mapping[str, object]) -> None:
     state = _TRACE_SCOPE.get()
     if state is None:
         return
+    depth = _TRACE_EMIT_DEPTH.get()
+    depth_token = _TRACE_EMIT_DEPTH.set(depth + 1)
+    observations = (
+        tuple(
+            (timing, started)
+            for timing in _TRACE_TIMINGS.get()
+            if (started := timing._observation_started()) is not None
+        )
+        if depth == 0
+        else ()
+    )
     try:
         with state.lock:
             if not state.active:
@@ -147,6 +241,10 @@ def emit_trace(kind: TraceEventKind, payload: Mapping[str, object]) -> None:
             )
     except Exception:
         logger.warning(_DEGRADED_WARNING)
+    finally:
+        for timing, started in observations:
+            timing._observation_finished(started)
+        _TRACE_EMIT_DEPTH.reset(depth_token)
 
 
 def trace_active() -> bool:
