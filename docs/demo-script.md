@@ -79,3 +79,10 @@ embedding retrieval, no new summary generator, and no live Gmail/model eval.
 Mention the longer-term task/entity ledger as a deeper architectural direction
 and Jev as an optional second-stage router over the already bounded candidate
 set.
+
+## Optional Extension: Live Evaluation Lab UI
+
+For interviews with an interactive browser or live paired comparison:
+1. Follow [`docs/interview-runbook.md`](interview-runbook.md).
+2. Start the lab via `python -m evals.live_lab.cli start`.
+3. Open `http://127.0.0.1:3000/lab` to show real-time side-by-side execution, candidate filtering, context bounding, and layer scorecards.

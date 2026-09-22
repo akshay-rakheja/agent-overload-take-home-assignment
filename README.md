@@ -135,53 +135,46 @@ Open `http://127.0.0.1:3000` and connect Gmail from Settings. Optional routing
 and context budgets are listed in `.env.example`; the default offline path does
 not require a `.env` file.
 
-## Local Evaluation Lab UI
+## Local Evaluation Lab
 
-The separate interview route is **http://127.0.0.1:3000/lab**. Both `npm run dev
---prefix web` and `npm run start --prefix web` bind only to `127.0.0.1:3000`.
-The original chat remains at `/`. The test tooling requires Node 22.12+ or a
-supported newer LTS release (verified with Node 24.19.0).
+The local interview interface is available at **http://127.0.0.1:3000/lab**. It provides an interactive side-by-side evidence browser comparing the historical baseline (port 8001) and enhanced system (port 8002) in real time across 14 controlled scenario families.
 
-The browser talks only to explicit `/api/lab` handlers. They forward to the fixed
-enhanced origin `http://127.0.0.1:8002/api/v1/lab`, validate strict response
-contracts, reject unknown fields/versions and private data, and never forward
-browser credentials or arbitrary URLs. Run IDs must be UUIDs. Starts require a
-same-origin request and a fresh server `runnable` preflight result. The start body
-is the current Python contract: `request_id` plus `scenario_ids`; repetitions are
-selected by the server. Failed starts are not automatically retried. A lost start
-response locks further submission; interrupted status checks can resume reads
-without starting another scenario. Terminal states stop polling.
+Detailed documentation:
+- [Evaluation Lab Architecture & Contracts](docs/evaluation-lab.md)
+- [Operator & Interview Runbook](docs/interview-runbook.md)
 
-**Integration boundary:** Tasks 07–10 currently supply scenarios and paired-run
-contracts, but do not implement `/lab/preflight`, `/lab/gmail/status`, or
-`/lab/gmail/link`. Their frontend contracts are explicitly prospective. The UI
-fails closed on these missing routes; it does not manufacture readiness or
-perform Gmail/model calls. The backend must supply the server-owned readiness
-decision covering both revisions/backends, fixture equivalence, identical model
-and configuration, Gmail policy, and budget before the UI can start a run.
+### Lifecycle CLI
 
-The prospective version-1 preflight wire shape is defined in
-`web/lib/lab/schema.ts`: `runnable`, `blockers`, `warnings`, `baseline`, `enhanced`,
-`fixture_equivalence`, `gmail_safety`, and `budget`, all required. Each system has
-`reachable`, `revision`, `model`, and `config_fingerprint`; budget values are
-server-provided text. Gmail proxy responses currently accept sanitized status
-and message fields only, with no OAuth URL or credential handling; an actual
-handoff contract remains future integration work. Detailed evidence panels,
-Gmail handoff UI, and full browser/accessibility coverage are Task 12.
+The lab lifecycle is managed via a single Python CLI:
 
 ```bash
-npm test --prefix web
-npm run typecheck --prefix web
-npm run lint --prefix web
-npm run build --prefix web
+# Verify environment mode 0600, symlinks, and port readiness
+python -m evals.live_lab.cli preflight
+
+# Start keep-awake, baseline (8001), enhanced (8002), and Next.js UI (3000)
+python -m evals.live_lab.cli start
+
+# Check process health and port status
+python -m evals.live_lab.cli status
+
+# Terminate all processes gracefully in reverse order
+python -m evals.live_lab.cli stop
+
+# Run offline paired evaluation and verify artifacts
+LAB_DIR="$(mktemp -d)"
+python -m evals.live_lab.cli evaluate --offline --output "$LAB_DIR/run-results"
+python -m evals.live_lab.cli verify --artifacts "$LAB_DIR/run-results"
 ```
 
-`test:watch` provides watch mode; `test:e2e` is configured for Task 12's future
-Playwright suite. Contract tests use `web/tests/fixtures/backend.json`, generated
-offline from the current Python models by
-`.venv/bin/python web/tests/export_lab_fixtures.py`. This exporter prints sanitized
-JSON only and makes no provider or Gmail calls. The preflight fixture is separately
-marked prospective and is not evidence of a working backend preflight endpoint.
+### Web UI and Contract Verification
+
+```bash
+npm test --prefix web              # 128 unit and contract tests
+npm run typecheck --prefix web     # TypeScript compilation
+npm run lint --prefix web          # Next.js ESLint
+npm run build --prefix web         # Production build
+npx playwright test e2e/evaluation-lab.spec.ts --prefix web # 13 E2E and axe a11y tests
+```
 
 ## Known limitations and future work
 

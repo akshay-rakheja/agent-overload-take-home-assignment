@@ -177,3 +177,14 @@ or abstain, but passing every identity to it simply moves overload downstream.
 It is therefore an optional routing adapter after deterministic retrieval, not
 a required dependency. The default path remains reproducible for reviewers who
 have no provider access.
+
+## Evaluation Lab Architecture
+
+To scientifically measure the baseline vs. enhanced comparison under real production-like conditions, the repository includes an isolated paired Evaluation Lab (`server/services/evaluation_lab/` and `evals/live_lab/`):
+
+- **Append-only TraceStore**: Captures structured, immutable, sequentially numbered `TraceEvent` records across both baseline and enhanced execution.
+- **Baseline Non-Interfering Observer**: Observes the historical baseline OpenPoke instance via filesystem journal and prompt XML deltas without modifying baseline agent behavior.
+- **Multi-Layer Grader**: Separately grades routing decisions, factual response assertions, read-only Gmail safety, identity continuity, duplicate prevention, and context bounding.
+- **Unified Lifecycle Supervisor**: Manages isolated loopback processes (ports 8001, 8002, 3000) and macOS keep-awake.
+
+See [`docs/evaluation-lab.md`](evaluation-lab.md) for full architecture and contract specifications.

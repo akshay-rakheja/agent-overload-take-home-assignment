@@ -39,3 +39,29 @@ The exact-name baseline is explicitly a proxy: reproducing current live-model
 routing would require a pinned provider/model and repeated nondeterministic
 runs. The offline harness does not use an LLM judge or claim end-to-end Gmail
 task success.
+
+## Paired Evaluation Lab CLI
+
+The paired Evaluation Lab evaluates baseline OpenPoke (port 8001) and enhanced OpenPoke (port 8002) side-by-side across 14 controlled scenario families:
+
+```bash
+# Verify environment and readiness
+.venv/bin/python -m evals.live_lab.cli preflight
+
+# Start lab services (8001, 8002, 3000)
+.venv/bin/python -m evals.live_lab.cli start
+
+# Check process status
+.venv/bin/python -m evals.live_lab.cli status
+
+# Graceful reverse stop
+.venv/bin/python -m evals.live_lab.cli stop
+
+# Run offline paired evaluation
+.venv/bin/python -m evals.live_lab.cli evaluate --offline --output evals/results/live_lab_offline
+
+# Verify artifact consistency and scan secrets
+.venv/bin/python -m evals.live_lab.cli verify --artifacts evals/results/live_lab_offline
+```
+
+See [Evaluation Lab Guide](../docs/evaluation-lab.md) and [Interview Runbook](../docs/interview-runbook.md).

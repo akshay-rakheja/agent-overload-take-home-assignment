@@ -152,3 +152,14 @@ slightly between runs.
 A live extension must pin model/provider/configuration, repeat cases, report
 variance, and retain deterministic identity labels rather than using an LLM
 judge as the only ground truth.
+
+## The Evaluation Lab: Bridging Offline Evaluation and Live Execution
+
+To address the limitations of static corpus evaluation, the repository provides the paired **Evaluation Lab** (`evals.live_lab` and `http://127.0.0.1:3000/lab`):
+
+- **Paired Execution**: Evaluates baseline OpenPoke (port 8001) and enhanced OpenPoke (port 8002) concurrently against identical inputs.
+- **Controlled Scenarios**: 14 predeclared scenario families with deterministic fixture emails, 3 repetitions per scenario, and explicit model/provider pinning (`openai/gpt-4.1-mini`).
+- **Multi-Layer Grading**: Disentangles routing decisions from Gmail factual accuracy, verifying safety, identity continuity, and context boundaries.
+- **Availability Contract**: Replaces unrecorded or inapplicable metrics with explicit, typed availability states.
+
+See [`docs/evaluation-lab.md`](evaluation-lab.md) for full methodology and metrics.
