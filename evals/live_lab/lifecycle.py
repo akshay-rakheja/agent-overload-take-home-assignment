@@ -242,7 +242,12 @@ def create_default_lifecycle(
 
     ui_proc = ManagedProcess(
         argv=["npm", "run", "start"],
-        env={**dict(os.environ), "PORT": "3000", "HOST": "127.0.0.1"},
+        env={
+            **dict(os.environ),
+            "PORT": "3000",
+            "HOST": "127.0.0.1",
+            "PY_SERVER_URL": os.getenv("PY_SERVER_URL", "http://127.0.0.1:8002"),
+        },
         cwd=web_dir,
         pid_file=runtime_state_dir / "ui.pid",
         stdout_path=logs_dir / "ui.stdout.log",
