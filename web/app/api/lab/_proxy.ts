@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { GmailLinkSchema, GmailStatusSchema, LabPreflightSchema, PairedRunResultSchema, RunHandleSchema, ScenarioListSchema, StartRunRequestSchema } from '@/lib/lab/schema';
 
 const origin = 'http://127.0.0.1:8002';
-const uiOrigin = 'http://127.0.0.1:3000';
+const allowedRequestOrigins = new Set(['http://127.0.0.1:3000', 'http://localhost:3000', 'http://n']);
+const allowedClientOrigins = new Set(['http://127.0.0.1:3000', 'http://localhost:3000']);
 const endpoints: Record<string, z.ZodTypeAny> = {
   'GET /lab/preflight': LabPreflightSchema,
   'GET /lab/scenarios': ScenarioListSchema,
@@ -40,7 +41,9 @@ export async function proxyLab(request: Request, path: string, method = 'GET'): 
   const runId = path.startsWith('/lab/runs/') ? path.slice('/lab/runs/'.length) : null;
   const schema = method === 'GET' && runId && z.string().uuid().safeParse(runId).success ? PairedRunResultSchema : endpoints[`${method} ${path}`];
   if (!schema) return reply({ error: 'Invalid lab path' }, 400);
-  if (new URL(request.url).origin !== uiOrigin || (method === 'POST' && request.headers.get('origin') !== uiOrigin)) {
+  const reqOrigin = new URL(request.url).origin;
+  const clientOrigin = request.headers.get('origin');
+  if (!allowedRequestOrigins.has(reqOrigin) || (method === 'POST' && (!clientOrigin || !allowedClientOrigins.has(clientOrigin)))) {
     return reply({ error: 'Local origin required' }, 403);
   }
   let body: unknown;
@@ -49,7 +52,7 @@ export async function proxyLab(request: Request, path: string, method = 'GET'): 
       const raw = await request.text();
       if (new TextEncoder().encode(raw).length > 16384) return reply({ error: 'Invalid run request' }, 400);
       const validator = path === '/lab/runs' ? StartRunRequestSchema : z.object({}).strict();
-      const parsed = validator.safeParse(JSON.parse(raw));
+      const parsed = validator.safeParse(JSON.parse(raw.trim() || '{}'));
       if (!parsed.success) return reply({ error: 'Invalid run request' }, 400);
       body = parsed.data;
     } catch { return reply({ error: 'Invalid run request' }, 400); }

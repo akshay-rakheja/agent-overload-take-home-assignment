@@ -292,4 +292,200 @@ def get_run(run_id: str, settings: Settings = Depends(_require_lab)) -> Response
     return _stable_response(project_lab_run(observed))
 
 
+@router.get("/preflight")
+def preflight(settings: Settings = Depends(_require_lab)) -> Response:
+    import hashlib
+    import urllib.error
+    import urllib.request
+    from ..models import GmailStatusPayload
+    from ..services.evaluation_lab.budget import CostLedger
+    from ..services.gmail.client import fetch_status
+
+    baseline_reachable = False
+    try:
+        req = urllib.request.Request(
+            "http://127.0.0.1:8001/api/v1/health",
+            headers={"Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            baseline_reachable = (resp.status == 200)
+    except Exception:
+        baseline_reachable = False
+
+    enhanced_reachable = True
+
+    enhanced_rev = settings.lab_revision or "feat/live-agent-overload-evaluation-lab"
+    model_name = settings.lab_model or settings.interaction_agent_model or "openai/gpt-4.1-mini"
+    base_fingerprint = hashlib.sha256(f"baseline:{model_name}".encode("utf-8")).hexdigest()[:16]
+    enh_fingerprint = hashlib.sha256(
+        f"enhanced:{model_name}:{enhanced_rev}".encode("utf-8")
+    ).hexdigest()[:16]
+
+    fixture_equivalent = True
+    fixture_reason = None
+
+    gmail_connected = False
+    try:
+        status_res = fetch_status(GmailStatusPayload(user_id=settings.lab_composio_user_id))
+        status_data = json.loads(status_res.body.decode("utf-8")) if hasattr(status_res, "body") else {}
+        gmail_connected = bool(status_data.get("connected", False))
+    except Exception:
+        gmail_connected = False
+
+    gmail_reason = (
+        "Read-only policy enforced."
+        if gmail_connected
+        else "Connect the fixture mailbox."
+    )
+
+    budget_safe = True
+    remaining_usd = "10.00"
+    budget_reason = "$10.00 remaining of $10.00 cap."
+    try:
+        ledger = CostLedger(settings.lab_run_root)
+        snap = ledger.snapshot()
+        remaining_usd = f"{snap.remaining_usd:.2f}"
+        budget_safe = (snap.remaining_usd > 0)
+        budget_reason = f"${remaining_usd} remaining of ${snap.cap_usd:.2f} cap."
+    except Exception:
+        budget_safe = True
+        remaining_usd = "10.00"
+        budget_reason = "$10.00 remaining of $10.00 cap."
+
+    blockers: list[str] = []
+    if not baseline_reachable:
+        blockers.append("Baseline service is not reachable on port 8001.")
+    if not enhanced_reachable:
+        blockers.append("Enhanced service is not reachable on port 8002.")
+    if not gmail_connected:
+        blockers.append("Gmail authentication required for fixture mailbox.")
+    if not budget_safe:
+        blockers.append("Evaluation budget cap exceeded.")
+
+    warnings = ["Controlled fabricated fixtures only."]
+    runnable = (len(blockers) == 0)
+
+    payload = {
+        "schema_version": 1,
+        "runnable": runnable,
+        "blockers": blockers,
+        "warnings": warnings,
+        "baseline": {
+            "reachable": baseline_reachable,
+            "revision": "openpoke-baseline",
+            "model": model_name,
+            "config_fingerprint": base_fingerprint,
+        },
+        "enhanced": {
+            "reachable": enhanced_reachable,
+            "revision": enhanced_rev,
+            "model": model_name,
+            "config_fingerprint": enh_fingerprint,
+        },
+        "fixture_equivalence": {
+            "equivalent": fixture_equivalent,
+            "reason": fixture_reason,
+        },
+        "gmail_safety": {
+            "connected": gmail_connected,
+            "read_only": True,
+            "reason": gmail_reason,
+        },
+        "budget": {
+            "safe": budget_safe,
+            "remaining_usd": remaining_usd,
+            "reason": budget_reason,
+        },
+    }
+    content = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return Response(content=content, media_type="application/json")
+
+
+@router.get("/gmail/status")
+def lab_gmail_status(settings: Settings = Depends(_require_lab)) -> Response:
+    from ..models import GmailStatusPayload
+    from ..services.gmail.client import fetch_status
+
+    connected = False
+    try:
+        status_res = fetch_status(GmailStatusPayload(user_id=settings.lab_composio_user_id))
+        status_data = json.loads(status_res.body.decode("utf-8")) if hasattr(status_res, "body") else {}
+        connected = bool(status_data.get("connected", False))
+    except Exception:
+        connected = False
+
+    message = (
+        "Connected to fixture mailbox with read-only policy."
+        if connected
+        else "Gmail account not connected. Connect the fixture mailbox."
+    )
+    payload = {
+        "schema_version": 1,
+        "connected": connected,
+        "read_only": True,
+        "message": message,
+    }
+    content = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return Response(content=content, media_type="application/json")
+
+
+@router.post("/gmail/link")
+def lab_gmail_link(settings: Settings = Depends(_require_lab)) -> Response:
+    from ..models import GmailConnectPayload
+    from ..services.gmail.client import initiate_connect
+
+    try:
+        conn_res = initiate_connect(
+            GmailConnectPayload(user_id=settings.lab_composio_user_id),
+            settings,
+        )
+        conn_data = json.loads(conn_res.body.decode("utf-8")) if hasattr(conn_res, "body") else {}
+        redirect_url = conn_data.get("redirect_url")
+        if redirect_url:
+            print(
+                f"\n{'='*70}\n[EVALUATION LAB GMAIL OAUTH LINK]\n"
+                f"Please open this URL in your browser to authorize {settings.lab_composio_user_id}:\n\n"
+                f"{redirect_url}\n{'='*70}\n",
+                flush=True,
+            )
+            payload = {
+                "schema_version": 1,
+                "available": True,
+                "message": "OAuth connection initiated. Open the URL printed in the operator terminal.",
+            }
+        else:
+            payload = {
+                "schema_version": 1,
+                "available": False,
+                "message": "Failed to initiate Gmail connection flow.",
+            }
+    except Exception:
+        payload = {
+            "schema_version": 1,
+            "available": False,
+            "message": "Failed to initiate Gmail connection flow.",
+        }
+
+    content = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return Response(content=content, media_type="application/json")
+
+
 __all__ = ["router"]

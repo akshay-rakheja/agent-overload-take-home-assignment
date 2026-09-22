@@ -60,14 +60,16 @@ it('refuses cross-origin writes, unknown body fields and unsafe preflight withou
   vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => { methods.push(init.method!); return json({ ...preflight, runnable: false, blockers: ['Gmail unsafe'] }); });
   const body = { request_id: backend.handle.request_id, scenario_ids: ['fixture'] };
   expect((await createRun(request('runs', body, 'https://evil.test'))).status).toBe(403);
+  expect((await createRun(new Request('http://evil.test/api/lab/runs', { method: 'POST', headers: { origin: 'http://127.0.0.1:3000', 'content-type': 'application/json' }, body: JSON.stringify(body) }))).status).toBe(403);
   expect((await createRun(request('runs', { ...body, access_token: 'private' }))).status).toBe(400);
   expect((await createRun(request('runs', body))).status).toBe(409);
-  expect(methods).toEqual(['GET']);
+  expect((await createRun(new Request('http://localhost:3000/api/lab/runs', { method: 'POST', headers: { origin: 'http://localhost:3000', 'content-type': 'application/json' }, body: JSON.stringify(body) }))).status).toBe(409);
+  expect(methods).toEqual(['GET', 'GET']);
 });
 
 it('sanitizes missing prospective endpoints, provider errors, and invalid successful payloads', async () => {
   vi.stubGlobal('fetch', async () => json({ detail: 'Bearer private-token' }, 404));
-  for (const response of [await readPreflight(request('preflight')), await readGmail(request('gmail/status')), await linkGmail(request('gmail/link', {}))]) {
+  for (const response of [await readPreflight(request('preflight')), await readGmail(request('gmail/status')), await linkGmail(new Request('http://127.0.0.1:3000/api/lab/gmail/link', { method: 'POST', headers: { origin: 'http://127.0.0.1:3000' } }))]) {
     expect(response.status).toBe(404);
     expect(await response.text()).toBe('{"error":"Lab endpoint unavailable"}');
   }
