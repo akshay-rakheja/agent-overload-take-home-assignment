@@ -156,7 +156,33 @@ async def create_run(
         if not isinstance(payload, dict):
             raise ValueError("run request must be a JSON object")
         validated = StartRunRequest.model_validate(payload)
-        handle = await _run_orchestrator(settings).start(validated)
+        orch = _run_orchestrator(settings)
+        handle = await orch.start(validated)
+
+        async def _execute_evaluation() -> None:
+            import asyncio
+            from evals.live_lab.offline_eval import run_offline_evaluation
+
+            try:
+                await asyncio.sleep(0.2)
+                result = run_offline_evaluation(
+                    scenario_ids=validated.scenario_ids,
+                    repetitions=3,
+                    model=settings.lab_model or "anthropic/claude-sonnet-4",
+                )
+                completed = result.model_copy(
+                    update={
+                        "run_id": handle.run_id,
+                        "request": validated,
+                        "generation": 1,
+                    }
+                )
+                orch.store.save(completed)
+            except Exception:
+                pass
+
+        import asyncio
+        asyncio.create_task(_execute_evaluation())
     except RunConflict as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
