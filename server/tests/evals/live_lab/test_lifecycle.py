@@ -47,11 +47,11 @@ def test_lifecycle_start_and_stop_order() -> None:
     assert events == [
         "start:keep_awake",
         "start:baseline",
-        "ready:baseline:http://127.0.0.1:8001/api/lab/preflight",
+        "ready:baseline:http://127.0.0.1:8001/api/v1/health",
         "start:enhanced",
-        "ready:enhanced:http://127.0.0.1:8002/api/lab/preflight",
+        "ready:enhanced:http://127.0.0.1:8002/api/v1/health",
         "start:ui",
-        "ready:ui:http://127.0.0.1:3000/api/lab/preflight",
+        "ready:ui:http://127.0.0.1:3000/lab",
     ]
 
     events.clear()

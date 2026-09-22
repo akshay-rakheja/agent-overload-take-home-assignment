@@ -199,17 +199,27 @@ class ManagedProcess:
                 raise RuntimeError(
                     f"readiness port already occupied: {self.readiness_host}:{self.readiness_port}"
                 )
-            self._process = subprocess.Popen(
-                list(self.argv),
-                cwd=str(self.cwd),
-                env=self.env,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                shell=False,
-            )
+            self.private_dir.mkdir(parents=True, exist_ok=True)
+            private_stdout = self.private_dir / f"{self.owner_token}-stdout.log"
+            private_stderr = self.private_dir / f"{self.owner_token}-stderr.log"
+            stdout_handle = private_stdout.open("a", encoding="utf-8")
+            stderr_handle = private_stderr.open("a", encoding="utf-8")
+            try:
+                self._process = subprocess.Popen(
+                    list(self.argv),
+                    cwd=str(self.cwd),
+                    env=self.env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=stdout_handle,
+                    stderr=stderr_handle,
+                    text=True,
+                    bufsize=1,
+                    shell=False,
+                    start_new_session=True,
+                )
+            finally:
+                stdout_handle.close()
+                stderr_handle.close()
             self._write_marker(self._process.pid)
         except BaseException:
             if self._process is not None and self._process.poll() is None:
@@ -223,21 +233,6 @@ class ManagedProcess:
             self._remove_marker_if_owned()
             self._release_owner_lock()
             raise
-        assert self._process.stdout is not None and self._process.stderr is not None
-        self._threads = [
-            threading.Thread(
-                target=self._drain,
-                args=(self._process.stdout, self.stdout_path, "stdout"),
-                daemon=True,
-            ),
-            threading.Thread(
-                target=self._drain,
-                args=(self._process.stderr, self.stderr_path, "stderr"),
-                daemon=True,
-            ),
-        ]
-        for thread in self._threads:
-            thread.start()
 
     def wait_ready(self, url: str, *, timeout: float) -> None:
         if self._process is None:
@@ -276,6 +271,28 @@ class ManagedProcess:
             raise RuntimeError("process has not been started")
         return self._process.wait(timeout=timeout)
 
+    def _export_stream_metadata(self) -> None:
+        for stream_name, target in (("stdout", self.stdout_path), ("stderr", self.stderr_path)):
+            private_path = self.private_dir / f"{self.owner_token}-{stream_name}.log"
+            byte_count = 0
+            digest = hashlib.sha256()
+            if private_path.exists():
+                with private_path.open("rb") as handle:
+                    while chunk := handle.read(65536):
+                        digest.update(chunk)
+                        byte_count += len(chunk)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            metadata = {
+                "byte_count": byte_count,
+                "event_type": "stream_closed",
+                "sha256": digest.hexdigest(),
+                "stream": stream_name,
+            }
+            target.write_text(
+                json.dumps(metadata, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+
     def stop(self, *, timeout: float) -> None:
         process = self._process
         if process is None:
@@ -287,11 +304,10 @@ class ManagedProcess:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=max(timeout, 1.0))
-        for thread in self._threads:
-            thread.join(timeout=1.0)
         self._remove_marker_if_owned()
         self._release_owner_lock()
+        self._export_stream_metadata()
         self._process = None
 
 
-__all__ = ["ManagedProcess", "redact_stream"]
+__all__ = ["ManagedProcess", "redact_stream", "_pid_is_live"]
