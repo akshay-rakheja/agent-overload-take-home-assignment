@@ -117,14 +117,15 @@ def _controlled_fixture_evidence(fact_ids: Sequence[str]) -> list[dict[str, obje
     manifest = _ACTIVE_FIXTURE_MANIFEST.get()
     if manifest is None or not fact_ids:
         return []
-    content_by_fact = {
-        message.fact_id: message.body
-        for message in render_fixture_messages(manifest.run_id)
-    }
     return [
-        {"fact_id": fact_id, "fabricated": True, "content": content_by_fact[fact_id]}
+        {
+            "fact_id": fact_id,
+            "fabricated": True,
+            "fixture_run_id": manifest.run_id,
+            "manifest_sha256": manifest.manifest_sha256,
+        }
         for fact_id in fact_ids
-        if fact_id in manifest.facts and fact_id in content_by_fact
+        if fact_id in manifest.facts
     ]
 
 

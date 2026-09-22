@@ -157,6 +157,9 @@ class RunStore:
 
     @staticmethod
     def _serialize(record: "PairedRunResult") -> bytes:
+        for scorecard in record.scorecards:
+            if scorecard.pair_id is None or scorecard.repetition is None:
+                raise ValueError("persisted scorecards must include exact pair_id and repetition")
         safe = redact_value(
             record.model_dump(mode="json", exclude_computed_fields=True)
         )

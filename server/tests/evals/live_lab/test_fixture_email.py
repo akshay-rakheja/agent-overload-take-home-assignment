@@ -112,6 +112,40 @@ def test_sanitized_fact_manifest_has_a_reproducible_self_digest(tmp_path: Path) 
     assert json.loads(destination.read_text(encoding="utf-8"))["manifest_sha256"] == first.manifest_sha256
 
 
+def test_browser_fixture_contract_is_generated_byte_for_byte_from_manifest_templates() -> None:
+    messages = render_fixture_messages("browser_contract_v1")
+    unsigned = {
+        "schema_version": 1,
+        "facts": [
+            {"fact_id": message.fact_id, "content": message.body}
+            for message in sorted(messages, key=lambda item: item.fact_id)
+        ],
+    }
+    canonical_unsigned = json.dumps(
+        unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    expected = {
+        **unsigned,
+        "contract_sha256": hashlib.sha256(canonical_unsigned).hexdigest(),
+    }
+    expected_bytes = (
+        json.dumps(
+            expected, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        + b"\n"
+    )
+    contract_path = (
+        Path(__file__).parents[4]
+        / "web"
+        / "lib"
+        / "lab"
+        / "controlled-fixtures.generated.json"
+    )
+
+    assert contract_path.exists(), "generated browser fixture contract is missing"
+    assert contract_path.read_bytes() == expected_bytes
+
+
 def test_pre_send_manifest_refuses_tracked_destinations(tmp_path: Path) -> None:
     messages = render_fixture_messages("manifest_7Yp4kD2x")
 

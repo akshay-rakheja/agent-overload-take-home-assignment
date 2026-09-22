@@ -11,15 +11,22 @@ describe('Python serialization boundary', () => {
     expect(PairedRunResultSchema.parse(backend.run).scorecards[0].passed).toBe(false);
     expect(SystemRunResultSchema.parse(backend.system_result).selected_identity.availability).toBe('inferred');
   });
-  it('requires every sequence scorecard to identify its exact pair and repetition', () => {
+  it('accepts legacy v1 scorecards without association while preserving exact new associations', () => {
     const run = structuredClone(backend.evidence_run);
     expect(PairedRunResultSchema.safeParse(run).success).toBe(true);
     expect(run.scorecards.map((scorecard) => [scorecard.pair_id, scorecard.repetition])).toEqual([
       [run.pairs[0].scheduled.pair_id, run.pairs[0].scheduled.repetition],
       [run.pairs[0].scheduled.pair_id, run.pairs[0].scheduled.repetition],
     ]);
-    delete (run.scorecards[0] as { pair_id?: string }).pair_id;
-    expect(PairedRunResultSchema.safeParse(run).success).toBe(false);
+    for (const scorecard of run.scorecards) {
+      delete (scorecard as { pair_id?: string }).pair_id;
+      delete (scorecard as { repetition?: number }).repetition;
+    }
+    const legacy = PairedRunResultSchema.safeParse(run);
+    expect(legacy.success).toBe(true);
+    if (legacy.success) {
+      expect(legacy.data.scorecards.every((scorecard) => scorecard.pair_id == null && scorecard.repetition == null)).toBe(true);
+    }
   });
   it('preserves producer field names without accepting the removed UI-only aliases', () => {
     const result = backend.evidence_run.pairs[0].outcomes[1].results[0] as unknown as {
@@ -43,6 +50,18 @@ describe('Python serialization boundary', () => {
       ...structuredClone(result.candidates.value[index % result.candidates.value.length]),
       rank: index + 1,
     }));
+    expect(SystemRunResultSchema.safeParse(result).success).toBe(false);
+  });
+  it('rejects a self-asserted fabricated body that is not in the generated manifest contract', () => {
+    const result = structuredClone(backend.evidence_run.pairs[0].outcomes[1].results[0]) as unknown as {
+      gmail_evidence: { value: Array<Record<string, unknown>> };
+    };
+    result.gmail_evidence.value.at(-1)!.controlled_fixture_evidence = [{
+      fact_id: 'not-in-manifest',
+      fabricated: true,
+      content: 'Private appointment notes from a real mailbox.',
+    }];
+
     expect(SystemRunResultSchema.safeParse(result).success).toBe(false);
   });
   it('requires the backend-authored scenario track enum', () => {

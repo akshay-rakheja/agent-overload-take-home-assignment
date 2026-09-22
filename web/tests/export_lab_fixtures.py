@@ -18,7 +18,11 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from evals.live_lab.fixture_email import build_fact_manifest, render_fixture_messages
+from evals.live_lab.fixture_email import (
+    build_fact_manifest,
+    render_fixture_messages,
+    write_browser_fixture_contract,
+)
 from evals.live_lab.grading import grade_scenario_sequence
 from evals.live_lab.raw_observation import BaselineObservation, RawModelCall, RawPhaseTiming
 from evals.live_lab.scenarios import load_controlled_scenarios
@@ -36,6 +40,7 @@ from server.services.evaluation_lab.orchestrator import (
     RunStatus,
     StartRunRequest,
     RunTransition,
+    project_lab_run,
 )
 from server.services.evaluation_lab.redaction import redact_value
 from server.services.evaluation_lab.repetitions import (
@@ -509,6 +514,8 @@ listed = {
     ],
 }
 
+write_browser_fixture_contract()
+
 print(
     json.dumps(
         redact_value(
@@ -521,7 +528,7 @@ print(
                     status=RunStatus.QUEUED,
                 ).model_dump(mode="json"),
                 "run": partial_result.model_dump(mode="json"),
-                "evidence_run": evidence_result.model_dump(mode="json"),
+                "evidence_run": project_lab_run(evidence_result).model_dump(mode="json"),
             }
         ),
         indent=2,

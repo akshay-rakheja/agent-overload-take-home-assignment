@@ -229,8 +229,8 @@ class PairExecutionRecord(_FrozenModel):
 
 
 class PairedSequenceScorecard(ScenarioSequenceScorecard):
-    pair_id: UUID
-    repetition: int = Field(ge=1)
+    pair_id: UUID | None = None
+    repetition: int | None = Field(default=None, ge=1)
 
 
 class RunTransition(_FrozenModel):
@@ -1255,6 +1255,144 @@ class PairedRunOrchestrator:
                 self.store.release_execution(run_id, owner_id)
 
 
+def project_lab_run(record: PairedRunResult) -> PairedRunResult:
+    """Project a PairedRunResult, verifying and disclosing controlled fixture bodies fail-closed."""
+    from evals.live_lab.fixture_email import (
+        _TEMPLATES,
+        build_fact_manifest,
+        render_fixture_messages,
+    )
+    from evals.live_lab.scenarios import ScenarioTrack, load_controlled_scenarios
+
+    scenarios = {item.scenario_id: item for item in load_controlled_scenarios()}
+    canonical_templates = {template.fact_id: template for template in _TEMPLATES}
+
+    new_pairs = []
+    for pair in record.pairs:
+        scenario = scenarios.get(pair.scheduled.scenario_id)
+        is_controlled = (
+            scenario is not None
+            and getattr(scenario, "track", None) == ScenarioTrack.CONTROLLED
+        )
+
+        new_outcomes = []
+        for outcome in pair.outcomes:
+            new_results = []
+            for result in outcome.results:
+                if (
+                    result.gmail_evidence is None
+                    or not result.gmail_evidence.value
+                ):
+                    new_results.append(result)
+                    continue
+
+                new_events = []
+                modified_events = False
+                for event in result.gmail_evidence.value:
+                    if not isinstance(event, dict) or "controlled_fixture_evidence" not in event:
+                        new_events.append(event)
+                        continue
+
+                    if not is_controlled:
+                        event_copy = dict(event)
+                        event_copy.pop("controlled_fixture_evidence", None)
+                        new_events.append(event_copy)
+                        modified_events = True
+                        continue
+
+                    raw_evidence = event["controlled_fixture_evidence"]
+                    if not isinstance(raw_evidence, (list, tuple)):
+                        event_copy = dict(event)
+                        event_copy.pop("controlled_fixture_evidence", None)
+                        new_events.append(event_copy)
+                        modified_events = True
+                        continue
+
+                    verified_items = []
+                    evidence_valid = True
+                    allowed_keys = {
+                        "fact_id",
+                        "fabricated",
+                        "content",
+                        "fixture_run_id",
+                        "manifest_sha256",
+                    }
+                    for item in raw_evidence:
+                        if not isinstance(item, dict):
+                            evidence_valid = False
+                            break
+                        if not set(item.keys()).issubset(allowed_keys):
+                            evidence_valid = False
+                            break
+                        if item.get("fabricated") is not True:
+                            evidence_valid = False
+                            break
+                        fact_id = item.get("fact_id")
+                        if not isinstance(fact_id, str) or fact_id not in canonical_templates:
+                            evidence_valid = False
+                            break
+
+                        canonical_template = canonical_templates[fact_id]
+                        canonical_body = canonical_template.body
+
+                        fixture_run_id = item.get("fixture_run_id")
+                        manifest_sha256 = item.get("manifest_sha256")
+                        if fixture_run_id is not None or manifest_sha256 is not None:
+                            if not isinstance(fixture_run_id, str) or not isinstance(manifest_sha256, str):
+                                evidence_valid = False
+                                break
+                            try:
+                                expected_manifest = build_fact_manifest(
+                                    render_fixture_messages(fixture_run_id)
+                                )
+                            except Exception:
+                                evidence_valid = False
+                                break
+                            if manifest_sha256 != expected_manifest.manifest_sha256:
+                                evidence_valid = False
+                                break
+                            if fact_id not in expected_manifest.facts:
+                                evidence_valid = False
+                                break
+
+                        if "content" in item:
+                            if item["content"] != canonical_body:
+                                evidence_valid = False
+                                break
+
+                        verified_items.append(
+                            {
+                                "fact_id": fact_id,
+                                "fabricated": True,
+                                "content": canonical_body,
+                            }
+                        )
+
+                    event_copy = dict(event)
+                    if evidence_valid and verified_items:
+                        event_copy["controlled_fixture_evidence"] = verified_items
+                    else:
+                        event_copy.pop("controlled_fixture_evidence", None)
+                    new_events.append(event_copy)
+                    modified_events = True
+
+                if modified_events:
+                    updated_gmail = result.gmail_evidence.model_copy(
+                        update={"value": new_events}
+                    )
+                    new_results.append(
+                        result.model_copy(update={"gmail_evidence": updated_gmail})
+                    )
+                else:
+                    new_results.append(result)
+
+            new_outcomes.append(outcome.model_copy(update={"results": tuple(new_results)}))
+
+        new_pairs.append(pair.model_copy(update={"outcomes": tuple(new_outcomes)}))
+
+    return record.model_copy(update={"pairs": tuple(new_pairs)})
+
+
 __all__ = [
     "BudgetAuthorization",
     "ExecutionMode",
@@ -1273,4 +1411,5 @@ __all__ = [
     "SnapshotContract",
     "StartRunRequest",
     "StateVerification",
+    "project_lab_run",
 ]

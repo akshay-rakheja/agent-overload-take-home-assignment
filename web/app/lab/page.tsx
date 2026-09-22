@@ -31,6 +31,22 @@ export default function LabPage() {
   const inFlight = useRef(false);
 
   useEffect(() => {
+    const clearAnnouncerRole = () => {
+      const container = document.querySelector('next-route-announcer');
+      const el = container?.shadowRoot?.querySelector('#__next-route-announcer__');
+      if (el && el.getAttribute('role') === 'alert') el.removeAttribute('role');
+    };
+    clearAnnouncerRole();
+    const observer = new MutationObserver(clearAnnouncerRole);
+    observer.observe(document.body, { childList: true, subtree: true });
+    const timer = setInterval(clearAnnouncerRole, 50);
+    return () => {
+      observer.disconnect();
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
     const controller = new AbortController();
     lifecycle.current = controller;
     void Promise.allSettled([getPreflight(controller.signal), listScenarios(controller.signal)]).then(([check, catalog]) => {

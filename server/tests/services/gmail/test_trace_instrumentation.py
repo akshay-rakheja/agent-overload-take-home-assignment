@@ -464,7 +464,8 @@ def test_email_search_traces_sanitized_facts_from_exact_processed_result(
             {
                 "fact_id": "SEC-7419",
                 "fabricated": True,
-                "content": fixture_message.body,
+                "fixture_run_id": manifest.run_id,
+                "manifest_sha256": manifest.manifest_sha256,
             },
         ),
     }

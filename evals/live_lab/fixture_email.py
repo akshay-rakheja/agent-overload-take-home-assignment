@@ -413,3 +413,42 @@ def write_pre_send_manifest(
             os.close(directory_descriptor)
         os.close(root_descriptor)
     return manifest
+
+
+def render_browser_fixture_contract() -> bytes:
+    messages = render_fixture_messages("browser_contract_v1")
+    unsigned = {
+        "schema_version": 1,
+        "facts": [
+            {"fact_id": message.fact_id, "content": message.body}
+            for message in sorted(messages, key=lambda item: item.fact_id)
+        ],
+    }
+    canonical_unsigned = json.dumps(
+        unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    expected = {
+        **unsigned,
+        "contract_sha256": hashlib.sha256(canonical_unsigned).hexdigest(),
+    }
+    return (
+        json.dumps(
+            expected, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        + b"\n"
+    )
+
+
+def write_browser_fixture_contract(destination: Path | None = None) -> Path:
+    target = (
+        destination
+        if destination is not None
+        else Path(__file__).resolve().parents[2]
+        / "web"
+        / "lib"
+        / "lab"
+        / "controlled-fixtures.generated.json"
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(render_browser_fixture_contract())
+    return target

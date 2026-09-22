@@ -170,6 +170,22 @@ describe('Evaluation Lab evidence panels', () => {
     expect(screen.getByText('Repetition 3 turn two grade')).toBeVisible();
   });
 
+  it('renders legacy unassociated scorecards as unavailable without guessing by system', () => {
+    const legacy = structuredClone(backend.evidence_run);
+    for (const scorecard of legacy.scorecards) {
+      delete (scorecard as { pair_id?: string }).pair_id;
+      delete (scorecard as { repetition?: number }).repetition;
+    }
+    const parsed = PairedRunResultSchema.parse(legacy);
+
+    render(<ComparisonGrid run={parsed} scenario={scenario} pairIndex={0} />);
+
+    const panels = screen.getAllByText('Layer scorecard').map((heading) => heading.closest('section')!);
+    expect(panels).toHaveLength(2);
+    for (const panel of panels) expect(within(panel).getByText('Unavailable')).toBeVisible();
+    expect(screen.queryByRole('table', { name: /layer scorecard/i })).not.toBeInTheDocument();
+  });
+
   it('does not expose a disclosure control for exploratory evidence', () => {
     render(<GmailEvidencePanel result={enhanced} track="exploratory" />);
     expect(screen.getByText('Exploratory evidence remains collapsed')).toBeInTheDocument();

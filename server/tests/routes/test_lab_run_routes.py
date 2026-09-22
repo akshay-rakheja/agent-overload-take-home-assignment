@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -11,7 +13,8 @@ from fastapi.testclient import TestClient
 
 from server.config import Settings, get_settings
 from server.routes import api_router
-from server.services.evaluation_lab.orchestrator import StartRunRequest
+from server.routes import lab as lab_routes
+from server.services.evaluation_lab.orchestrator import PairedRunResult, StartRunRequest
 
 
 REQUEST_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -183,3 +186,56 @@ def test_start_request_rejects_duplicate_scenario_ids() -> None:
         assert "unique" in str(exc)
     else:
         raise AssertionError("duplicate scenario ids must be rejected")
+
+
+def test_run_read_strips_unverified_and_natural_fixture_body_projections(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repository = Path(__file__).parents[3]
+    fixture = json.loads(
+        (repository / "web" / "tests" / "fixtures" / "backend.json").read_text(
+            encoding="utf-8"
+        )
+    )["evidence_run"]
+    controlled_body = (
+        "Fabricated security notice SEC-7419. A sign-in was recorded at "
+        "2026-09-18 04:12 UTC from Lisbon on Pixel 10. Verification phrase: indigo-orbit."
+    )
+    private_body = "Private appointment notes from a real mailbox."
+    cases = (
+        ("exact-instagram-security", "not-in-manifest", private_body),
+        ("natural-probe", "SEC-7419", controlled_body),
+    )
+
+    for scenario_id, fact_id, content in cases:
+        payload = json.loads(json.dumps(fixture))
+        for scorecard in payload["scorecards"]:
+            scorecard.pop("passed")
+            for turn in scorecard["turns"]:
+                turn.pop("passed")
+        payload["request"]["scenario_ids"] = [scenario_id]
+        payload["pairs"][0]["scheduled"]["scenario_id"] = scenario_id
+        gmail_events = payload["pairs"][0]["outcomes"][1]["results"][0][
+            "gmail_evidence"
+        ]["value"]
+        gmail_events[-1]["controlled_fixture_evidence"] = [
+            {"fact_id": fact_id, "fabricated": True, "content": content}
+        ]
+        observed = PairedRunResult.model_validate_json(json.dumps(payload))
+        monkeypatch.setattr(
+            lab_routes,
+            "_run_orchestrator",
+            lambda _settings, record=observed: SimpleNamespace(
+                status=lambda _run_id: record
+            ),
+        )
+        client = _client(_settings(tmp_path))
+
+        response = client.get(f"/api/v1/lab/runs/{observed.run_id}")
+
+        assert response.status_code == 200
+        assert content.encode() not in response.content
+        returned_events = response.json()["pairs"][0]["outcomes"][1]["results"][0][
+            "gmail_evidence"
+        ]["value"]
+        assert all("controlled_fixture_evidence" not in event for event in returned_events)

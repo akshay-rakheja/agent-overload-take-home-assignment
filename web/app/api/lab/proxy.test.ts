@@ -154,6 +154,24 @@ it('forwards redacted mail fields and safe diagnostic evidence unchanged', async
   expect(forwarded.pairs[0].outcomes[0].results[0].gmail_evidence.value).toEqual(value);
 });
 
+it('rejects a self-asserted fabricated body that does not match the generated manifest contract', async () => {
+  const privateText = 'Private appointment notes from a real mailbox.';
+  const payload = runWithGmailEvidence([{
+    boundary: 'email_search_task',
+    controlled_fixture_evidence: [{
+      fact_id: 'not-in-manifest',
+      fabricated: true,
+      content: privateText,
+    }],
+  }]);
+  vi.stubGlobal('fetch', async () => json(payload));
+
+  const response = await readRun(request(), { params: { runId: backend.handle.run_id } });
+
+  expect(response.status).toBe(502);
+  expect(await response.json()).toEqual({ error: 'Lab response could not be verified', code: 'INVALID_UPSTREAM_RESPONSE' });
+});
+
 it('bounds upstream reads and passes navigation cancellation through', async () => {
   vi.useFakeTimers();
   vi.stubGlobal('fetch', (_url: string, init: RequestInit) => new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new Error('private')))));

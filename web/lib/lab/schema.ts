@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import controlledFixtures from './controlled-fixtures.generated.json';
 
 // These are wire schemas: all serialized fields (including nulls) are required.
 // They mirror Tasks 07–10 Python models, not the older illustrative TS sketch.
@@ -71,6 +72,51 @@ const usage = z.object({
   known_cached_tokens_subtotal: observedValue(integer), known_total_tokens_subtotal: observedValue(integer),
 }).strict();
 
+const allowedControlledFixtureKeys = new Set(['fact_id', 'fabricated', 'content', 'fixture_run_id', 'manifest_sha256']);
+const controlledFactMap = new Map(
+  controlledFixtures.facts.map((fact) => [fact.fact_id, fact.content])
+);
+const gmailEventValue = jsonValue.superRefine((event, ctx) => {
+  if (event === null || typeof event !== 'object' || Array.isArray(event)) return;
+  if (!('controlled_fixture_evidence' in event) || (event as Record<string, unknown>).controlled_fixture_evidence === undefined) return;
+  const raw = (event as Record<string, unknown>).controlled_fixture_evidence;
+  if (!Array.isArray(raw)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'controlled_fixture_evidence must be an array' });
+    return;
+  }
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid fixture evidence item' });
+      return;
+    }
+    const rec = item as Record<string, unknown>;
+    for (const key of Object.keys(rec)) {
+      if (!allowedControlledFixtureKeys.has(key)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Unexpected key: ${key}` });
+        return;
+      }
+    }
+    if (rec.fabricated !== true) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Fabricated flag must be true' });
+      return;
+    }
+    if (typeof rec.fact_id !== 'string') {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'fact_id must be a string' });
+      return;
+    }
+    if (typeof rec.content !== 'string') {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'content must be a string' });
+      return;
+    }
+    const expected = controlledFactMap.get(rec.fact_id);
+    if (expected === undefined || expected !== rec.content) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'controlled_fixture_evidence does not match canonical manifest' });
+      return;
+    }
+  }
+});
+const observedGmailEvidence = observedValue(z.array(gmailEventValue));
+
 export const SystemRunResultSchema = z.object({
   schema_version: z.literal(1), run_id: uuid, turn_id: uuid, system,
   revision: observedValue(text), mode: observedValue(text), roster_count: observedValue(integer),
@@ -78,7 +124,7 @@ export const SystemRunResultSchema = z.object({
   recommendation: observation, authorized_ids: observedValue(z.array(text)),
   attempted_dispatch: observation, accepted_dispatch: observation,
   selected_identity: observation, created_identity: observation, identity_delta: observation,
-  duplicates: observedList, gmail_evidence: observedList, final_response: observedValue(text),
+  duplicates: observedList, gmail_evidence: observedGmailEvidence, final_response: observedValue(text),
   context_metrics: observation, timings: observedList, usage,
   cost: z.object({ amount: observedValue(z.number().finite()), currency: observedValue(text), known_amount_subtotal: observedValue(z.number().finite()) }).strict(),
   errors: observedList, availability_metadata: z.record(AvailabilitySchema),
@@ -116,7 +162,7 @@ const scorecard = z.object({
   candidate_rank: observedValue(integer), passed: z.boolean(),
 }).strict();
 const sequenceScorecard = z.object({
-  schema_version: z.literal(1), pair_id: uuid, repetition: integer.min(1), scenario_id: text, system, turns: z.array(scorecard), identity_continuity: layerGrade, passed: z.boolean(),
+  schema_version: z.literal(1), pair_id: uuid.optional(), repetition: integer.min(1).optional(), scenario_id: text, system, turns: z.array(scorecard), identity_continuity: layerGrade, passed: z.boolean(),
 }).strict();
 export const PairedRunResultSchema = z.object({
   schema_version: z.literal(1), run_id: uuid, request: StartRunRequestSchema,

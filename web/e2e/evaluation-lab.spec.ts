@@ -131,6 +131,8 @@ test('exploratory evidence stays hidden while long-history facts remain visible'
   const scenarios: any = structuredClone(backend.scenarios);
   exploratory.request.scenario_ids = ['optional-thousand-agent-news'];
   exploratory.pairs[0].scheduled.scenario_id = 'optional-thousand-agent-news';
+  const exploratoryGmail = exploratory.pairs[0].outcomes[1].results[0].gmail_evidence.value;
+  for (const event of exploratoryGmail) delete event.controlled_fixture_evidence;
   scenarios.scenarios.find((scenario: any) => scenario.scenario_id === 'optional-thousand-agent-news').track = 'natural';
   await mockLab(page, { run: exploratory, scenarios });
   await page.goto('/lab');
@@ -139,8 +141,27 @@ test('exploratory evidence stays hidden while long-history facts remain visible'
   await expect(page.getByText('Exploratory track')).toBeVisible();
   await expect(page.getByText('Exploratory evidence remains collapsed')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Show fabricated evidence' })).toHaveCount(0);
+  await expect(page.getByText('Private appointment notes from a real mailbox.')).toHaveCount(0);
   for (const value of ['1,229,999 bytes', '10,000 entries', '9,984 omitted', 'Summary used']) await expect(page.getByText(value)).toBeVisible();
   await expect(page.getByText('Unavailable').filter({ visible: true }).first()).toBeVisible();
+});
+
+test('rejects unverified self-asserted fixture content before it can render', async ({ page }) => {
+  const unsafe: any = structuredClone(backend.evidence_run);
+  const gmailEvents = unsafe.pairs[0].outcomes[1].results[0].gmail_evidence.value;
+  gmailEvents.at(-1).controlled_fixture_evidence = [{
+    fact_id: 'not-in-manifest',
+    fabricated: true,
+    content: 'Private appointment notes from a real mailbox.',
+  }];
+  await mockLab(page, { run: unsafe });
+
+  await page.goto('/lab');
+  await page.getByRole('button', { name: 'Run scenario' }).click();
+
+  await expect(page.getByRole('alert')).toContainText('Lab response could not be verified');
+  await expect(page.getByRole('button', { name: 'Show fabricated evidence' })).toHaveCount(0);
+  await expect(page.getByText('Private appointment notes from a real mailbox.')).toHaveCount(0);
 });
 
 test('multi-turn navigation keeps each turn result and exact pair scorecard aligned', async ({ page }) => {

@@ -287,9 +287,9 @@ def get_run(run_id: str, settings: Settings = Depends(_require_lab)) -> Response
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Evaluation Lab run not found",
         ) from exc
-    except ValueError as exc:
-        raise _storage_error(exc) from exc
-    return _stable_response(observed)
+    from ..services.evaluation_lab.orchestrator import project_lab_run
+
+    return _stable_response(project_lab_run(observed))
 
 
 __all__ = ["router"]
