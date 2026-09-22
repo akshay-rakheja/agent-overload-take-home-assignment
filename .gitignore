@@ -47,3 +47,5 @@ server/plans/
 
 # Generated evaluation-lab runtime trees and verification artifacts
 .lab/
+test-results/
+web/test-results/

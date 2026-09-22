@@ -139,7 +139,11 @@ def _aggregate_usage(observation: BaselineObservation) -> tuple[UsagePlaceholder
     return usage, cost
 
 
-def adapt_baseline(observation: BaselineObservation) -> SystemRunResult:
+def adapt_baseline(
+    observation: BaselineObservation,
+    *,
+    turn_id: UUID | None = None,
+) -> SystemRunResult:
     """Adapt direct baseline evidence without projecting enhanced-only concepts."""
 
     try:
@@ -149,7 +153,8 @@ def adapt_baseline(observation: BaselineObservation) -> SystemRunResult:
             NAMESPACE_URL,
             f"openpoke-baseline-run:{observation.run_id}",
         )
-    turn_id = uuid5(NAMESPACE_URL, f"openpoke-baseline-turn:{observation.run_id}")
+    if turn_id is None:
+        turn_id = uuid5(NAMESPACE_URL, f"openpoke-baseline-turn:{observation.run_id}")
     unsupported_ranking = "historical full-roster selection has no ranked candidate set"
     unsupported_identity = "historical baseline has no enhanced stable identity contract"
     unsupported_authorization = "historical baseline has no deterministic authorization set"

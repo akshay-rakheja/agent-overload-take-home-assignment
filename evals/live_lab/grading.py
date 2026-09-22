@@ -47,6 +47,7 @@ class LayerGrade(_FrozenModel):
 
 
 class ScenarioScorecard(_FrozenModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
     schema_version: Literal[1] = 1
     scenario_id: str
     system: Literal["baseline", "enhanced"]
@@ -81,6 +82,7 @@ class ScenarioScorecard(_FrozenModel):
 
 
 class ScenarioSequenceScorecard(_FrozenModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
     schema_version: Literal[1] = 1
     scenario_id: str
     system: Literal["baseline", "enhanced"]

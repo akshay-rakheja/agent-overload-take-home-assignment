@@ -1,4 +1,4 @@
-"""Explicit-path CLI for preparing, hashing, and resetting lab state."""
+"""Explicit-path CLI for preparing, hashing, resetting, and orchestrating lab lifecycle and reports."""
 
 from __future__ import annotations
 
@@ -7,14 +7,28 @@ import json
 from pathlib import Path
 from typing import Sequence
 
+from .consistency import verify_artifacts_consistency
 from .contracts import StateFingerprint, StateSnapshot
+from .environment import (
+    DEFAULT_CANONICAL_ENV_PATH,
+    check_environment,
+)
 from .fixtures import (
     build_fixture_manifest,
     materialize_baseline,
     materialize_enhanced,
     serialize_manifest,
 )
+from .lifecycle import create_default_lifecycle
+from .offline_eval import run_offline_evaluation
+from .report import (
+    render_paired_run_json,
+    render_paired_run_markdown,
+    write_reports,
+)
+from .secret_scan import scan_directory
 from .state import compare_logical_state, create_snapshot, fingerprint_state, restore_snapshot
+from server.services.evaluation_lab.orchestrator import PairedRunResult
 
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -103,6 +117,131 @@ def _reset(args: argparse.Namespace) -> int:
     return 0
 
 
+def _preflight(args: argparse.Namespace) -> int:
+    canonical = Path(args.canonical_env) if getattr(args, "canonical_env", None) else DEFAULT_CANONICAL_ENV_PATH
+    enhanced_dir = _REPOSITORY_ROOT
+    baseline_dir = _REPOSITORY_ROOT.parent / "openpoke-evaluation-baseline"
+    worktrees = [enhanced_dir]
+    if baseline_dir.exists():
+        worktrees.append(baseline_dir)
+
+    rep = check_environment(canonical_env=canonical, worktrees=worktrees)
+    _print_json(rep.model_dump())
+    return 0 if rep.valid else 1
+
+
+def _start(args: argparse.Namespace) -> int:
+    canonical = Path(args.canonical_env) if getattr(args, "canonical_env", None) else DEFAULT_CANONICAL_ENV_PATH
+    enhanced_dir = _REPOSITORY_ROOT
+    baseline_dir = _REPOSITORY_ROOT.parent / "openpoke-evaluation-baseline"
+    worktrees = [enhanced_dir]
+    if baseline_dir.exists():
+        worktrees.append(baseline_dir)
+
+    rep = check_environment(canonical_env=canonical, worktrees=worktrees)
+    if not rep.valid:
+        _print_json({"error": "Preflight failed", "details": rep.model_dump()})
+        return 1
+
+    runtime_dir = Path(args.runtime_dir).resolve() if getattr(args, "runtime_dir", None) else _REPOSITORY_ROOT / ".lab" / "runtime"
+    lifecycle = create_default_lifecycle(base_dir=enhanced_dir, runtime_state_dir=runtime_dir)
+    try:
+        lifecycle.start(readiness_timeout=getattr(args, "timeout", 30.0))
+        _print_json({"status": "started", "processes": lifecycle.status()})
+        return 0
+    except Exception as exc:
+        _print_json({"error": str(exc), "status": "failed"})
+        return 1
+
+
+def _stop(args: argparse.Namespace) -> int:
+    enhanced_dir = _REPOSITORY_ROOT
+    runtime_dir = Path(args.runtime_dir).resolve() if getattr(args, "runtime_dir", None) else _REPOSITORY_ROOT / ".lab" / "runtime"
+    lifecycle = create_default_lifecycle(base_dir=enhanced_dir, runtime_state_dir=runtime_dir)
+    lifecycle.stop(stop_timeout=getattr(args, "timeout", 5.0))
+    _print_json({"status": "stopped", "processes": lifecycle.status()})
+    return 0
+
+
+def _status(args: argparse.Namespace) -> int:
+    enhanced_dir = _REPOSITORY_ROOT
+    runtime_dir = Path(args.runtime_dir).resolve() if getattr(args, "runtime_dir", None) else _REPOSITORY_ROOT / ".lab" / "runtime"
+    lifecycle = create_default_lifecycle(base_dir=enhanced_dir, runtime_state_dir=runtime_dir)
+    _print_json({"processes": lifecycle.status()})
+    return 0
+
+
+def _evaluate(args: argparse.Namespace) -> int:
+    output_dir = Path(args.output).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    scenario_ids = (args.scenario,) if getattr(args, "scenario", None) else None
+    repetitions = getattr(args, "repetitions", 1) or 1
+    seed = getattr(args, "seed", 42) or 42
+    model = getattr(args, "model", "openai/gpt-4.1-mini") or "openai/gpt-4.1-mini"
+
+    run_result = run_offline_evaluation(
+        scenario_ids=scenario_ids,
+        repetitions=repetitions,
+        seed=seed,
+        model=model,
+    )
+
+    (output_dir / "run.json").write_text(render_paired_run_json(run_result), encoding="utf-8")
+    write_reports(run_result, output_dir)
+
+    _print_json(
+        {
+            "output_dir": str(output_dir),
+            "pairs_count": len(run_result.pairs),
+            "run_id": str(run_result.run_id),
+            "status": run_result.status.value,
+        }
+    )
+    return 0
+
+
+def _report(args: argparse.Namespace) -> int:
+    run_file = Path(args.run_file).resolve(strict=True)
+    output_dir = Path(args.output).resolve() if getattr(args, "output", None) else run_file.parent
+    run_result = PairedRunResult.model_validate_json(run_file.read_text(encoding="utf-8"))
+    json_path, md_path = write_reports(run_result, output_dir)
+    _print_json(
+        {
+            "json_report": str(json_path),
+            "markdown_report": str(md_path),
+            "run_id": str(run_result.run_id),
+        }
+    )
+    return 0
+
+
+def _verify(args: argparse.Namespace) -> int:
+    artifacts_dir = Path(args.artifacts).resolve(strict=True)
+    run_file = artifacts_dir / "run.json"
+    if not run_file.exists():
+        run_file = artifacts_dir / "report.json"
+
+    consistency_rep = None
+    if run_file.exists():
+        run_result = PairedRunResult.model_validate_json(run_file.read_text(encoding="utf-8"))
+        artifacts = {p.name: p for p in artifacts_dir.iterdir() if p.is_file()}
+        consistency_rep = verify_artifacts_consistency(run=run_result, artifacts=artifacts)
+
+    secret_failures = scan_directory(artifacts_dir, check_machine_paths=True)
+    passed = (consistency_rep.valid if consistency_rep else True) and len(secret_failures) == 0
+
+    _print_json(
+        {
+            "artifacts_dir": str(artifacts_dir),
+            "consistency": consistency_rep.model_dump() if consistency_rep else None,
+            "secret_scan_failures": len(secret_failures),
+            "valid": passed,
+        }
+    )
+    return 0 if passed else 1
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -122,6 +261,45 @@ def _parser() -> argparse.ArgumentParser:
     reset.add_argument("--data-dir", required=True)
     reset.add_argument("--allowed-root", required=True)
     reset.set_defaults(handler=_reset)
+
+    preflight = commands.add_parser("preflight", help="check environment and process requirements")
+    preflight.add_argument("--canonical-env", required=False)
+    preflight.set_defaults(handler=_preflight)
+
+    start = commands.add_parser("start", help="start keep-awake, baseline, enhanced, and UI processes")
+    start.add_argument("--canonical-env", required=False)
+    start.add_argument("--runtime-dir", required=False)
+    start.add_argument("--timeout", type=float, default=30.0)
+    start.set_defaults(handler=_start)
+
+    stop = commands.add_parser("stop", help="gracefully terminate all lab processes in reverse order")
+    stop.add_argument("--runtime-dir", required=False)
+    stop.add_argument("--timeout", type=float, default=5.0)
+    stop.set_defaults(handler=_stop)
+
+    status_cmd = commands.add_parser("status", help="probe running lab processes and ports")
+    status_cmd.add_argument("--runtime-dir", required=False)
+    status_cmd.set_defaults(handler=_status)
+
+    evaluate = commands.add_parser("evaluate", help="run paired evaluation (offline or live)")
+    evaluate.add_argument("--offline", action="store_true", default=True)
+    evaluate.add_argument("--live", action="store_true", default=False)
+    evaluate.add_argument("--scenario", required=False)
+    evaluate.add_argument("--repetitions", type=int, default=1)
+    evaluate.add_argument("--seed", type=int, default=42)
+    evaluate.add_argument("--model", default="openai/gpt-4.1-mini")
+    evaluate.add_argument("--output", required=True)
+    evaluate.set_defaults(handler=_evaluate)
+
+    report_cmd = commands.add_parser("report", help="render JSON and Markdown reports from a run file")
+    report_cmd.add_argument("--run-file", required=True)
+    report_cmd.add_argument("--output", required=False)
+    report_cmd.set_defaults(handler=_report)
+
+    verify_cmd = commands.add_parser("verify", help="verify cross-artifact consistency and scan for secrets")
+    verify_cmd.add_argument("--artifacts", required=True)
+    verify_cmd.set_defaults(handler=_verify)
+
     return parser
 
 

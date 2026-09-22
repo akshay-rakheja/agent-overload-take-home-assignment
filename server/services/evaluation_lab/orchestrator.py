@@ -229,6 +229,7 @@ class PairExecutionRecord(_FrozenModel):
 
 
 class PairedSequenceScorecard(ScenarioSequenceScorecard):
+    model_config = ConfigDict(extra="ignore", frozen=True)
     pair_id: UUID | None = None
     repetition: int | None = Field(default=None, ge=1)
 
