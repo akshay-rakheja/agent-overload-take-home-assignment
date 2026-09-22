@@ -342,7 +342,7 @@ def preflight(settings: Settings = Depends(_require_lab)) -> Response:
     remaining_usd = "10.00"
     budget_reason = "$10.00 remaining of $10.00 cap."
     try:
-        ledger = CostLedger(settings.lab_run_root)
+        ledger = CostLedger(settings.lab_run_root.parent / "budget")
         snap = ledger.snapshot()
         remaining_usd = f"{snap.remaining_usd:.2f}"
         budget_safe = (snap.remaining_usd > 0)

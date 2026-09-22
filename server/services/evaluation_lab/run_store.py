@@ -234,7 +234,7 @@ class RunStore:
                 return ()
             records: list["PairedRunResult"] = []
             for name in sorted(os.listdir(root_fd)):
-                if name.startswith(".") or not name.endswith(".json"):
+                if name.startswith(".") or not name.endswith(".json") or name == "cost-ledger.json":
                     continue
                 try:
                     run_id = UUID(name[:-5])
