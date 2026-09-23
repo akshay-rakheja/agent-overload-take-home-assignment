@@ -63,8 +63,9 @@ def render_paired_run_markdown(run: PairedRunResult) -> str:
         scen_id = pair.scheduled.scenario_id
         rep = pair.scheduled.repetition
         for outcome in pair.outcomes:
-            sys_name = outcome.system.capitalize()
-            status = outcome.status
+            sys_raw = outcome.system.value if hasattr(outcome.system, "value") else str(outcome.system)
+            sys_name = sys_raw.replace("_", " ").title()
+            status_val = outcome.status.value if hasattr(outcome.status, "value") else str(outcome.status)
             if outcome.results:
                 for res in outcome.results:
                     mode = res.mode.value or res.mode.availability.value
@@ -95,11 +96,11 @@ def render_paired_run_markdown(run: PairedRunResult) -> str:
                     tot_tok_str = f"{tot_tok:,}" if tot_tok is not None else "-"
 
                     lines.append(
-                        f"| `{scen_id}` | {rep} | {sys_name} | `{status}` | `{mode}` | {cand_str} | {exp_str} | {resp_str} | {in_tok_str} | {out_tok_str} | {tot_tok_str} |"
+                        f"| `{scen_id}` | {rep} | {sys_name} | `{status_val}` | `{mode}` | {cand_str} | {exp_str} | {resp_str} | {in_tok_str} | {out_tok_str} | {tot_tok_str} |"
                     )
             else:
                 lines.append(
-                    f"| `{scen_id}` | {rep} | {sys_name} | `{status}` | - | - | - | - | - | - | - |"
+                    f"| `{scen_id}` | {rep} | {sys_name} | `{status_val}` | - | - | - | - | - | - | - |"
                 )
 
     lines.extend([
@@ -110,13 +111,14 @@ def render_paired_run_markdown(run: PairedRunResult) -> str:
 
     if run.scorecards:
         lines.extend([
-            "| Scenario | Repetition | Passed | Reason / Detail |",
-            "|---|---:|---|---|",
+            "| Scenario | Repetition | System | Passed | Reason / Detail |",
+            "|---|---:|---|---|---|",
         ])
         for sc in run.scorecards:
             pass_str = "PASS" if sc.passed else "FAIL"
             detail = f"{len(sc.turns)} turns" if sc.turns else "no turns"
-            lines.append(f"| `{sc.scenario_id}` | {sc.repetition or 1} | **{pass_str}** | {detail} |")
+            sc_sys = sc.system.replace("_", " ").title() if hasattr(sc, "system") and sc.system else ""
+            lines.append(f"| `{sc.scenario_id}` | {sc.repetition or 1} | {sc_sys} | **{pass_str}** | {detail} |")
     else:
         lines.append("_No scorecards recorded for this run._")
 

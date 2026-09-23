@@ -185,6 +185,7 @@ def _evaluate(args: argparse.Namespace) -> int:
         repetitions=repetitions,
         seed=seed,
         model=model,
+        three_way=bool(getattr(args, "three_way", False)),
     )
 
     (output_dir / "run.json").write_text(render_paired_run_json(run_result), encoding="utf-8")
@@ -286,6 +287,7 @@ def _parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--live", action="store_true", default=False)
     evaluate.add_argument("--scenario", required=False)
     evaluate.add_argument("--repetitions", type=int, default=1)
+    evaluate.add_argument("--three-way", action="store_true", default=False, help="run three-way evaluation (Baseline vs Deterministic vs Jev)")
     evaluate.add_argument("--seed", type=int, default=42)
     evaluate.add_argument("--model", default="openai/gpt-4.1-mini")
     evaluate.add_argument("--output", required=True)

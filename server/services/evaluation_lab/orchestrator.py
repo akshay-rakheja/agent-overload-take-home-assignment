@@ -41,6 +41,8 @@ class RunStatus(str, Enum):
     RESETTING = "resetting"
     BASELINE_RUNNING = "baseline_running"
     ENHANCED_RUNNING = "enhanced_running"
+    DETERMINISTIC_RUNNING = "deterministic_running"
+    JEV_RUNNING = "jev_running"
     GRADING = "grading"
     COMPLETE = "complete"
     PARTIAL_FAILURE = "partial_failure"
@@ -251,7 +253,7 @@ class OrchestrationTraceEvent(_FrozenModel):
 
 
 class PairedRunResult(_FrozenModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 2
     run_id: UUID
     request: StartRunRequest
     execution_mode: ExecutionMode = ExecutionMode.MEASURED
@@ -325,6 +327,7 @@ class PairedRunOrchestrator:
         late_completion_grace_seconds: float = 0.1,
         clock: Callable[[], datetime] | None = None,
         recover_on_startup: bool = True,
+        three_way: bool | None = None,
     ) -> None:
         if side_timeout_seconds <= 0 or late_completion_grace_seconds < 0:
             raise ValueError("side timeouts must be positive and late grace non-negative")
@@ -341,6 +344,7 @@ class PairedRunOrchestrator:
         self._side_timeout = side_timeout_seconds
         self._late_grace = late_completion_grace_seconds
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._three_way = bool(three_way)
         self._state_lock = asyncio.Lock()
         self._active_tasks: set[asyncio.Task[Any]] = set()
         self._late_monitors: set[asyncio.Task[Any]] = set()
@@ -364,6 +368,7 @@ class PairedRunOrchestrator:
         execution_mode: ExecutionMode = ExecutionMode.MEASURED,
         snapshot_contracts: Sequence[SnapshotContract] = (),
         now: datetime | None = None,
+        three_way: bool = False,
     ) -> PairedRunResult:
         available = {scenario.scenario_id: scenario for scenario in scenarios}
         selected_ids = request.scenario_ids or tuple(available)
@@ -374,10 +379,12 @@ class PairedRunOrchestrator:
             pair
             for scenario_id in selected_ids
             for pair in build_repetition_schedule(
-                (scenario_id,), available[scenario_id].repetitions
+                (scenario_id,), available[scenario_id].repetitions, three_way=three_way
             )
         )
-        run_id = uuid5(_RUN_NAMESPACE, f"paired-run:v1:{request.request_id}")
+        version_tag = "v2" if three_way else "v1"
+        schema_version = 2 if three_way else 1
+        run_id = uuid5(_RUN_NAMESPACE, f"paired-run:{version_tag}:{request.request_id}")
         occurred_at = now or datetime.now(UTC)
         transition = RunTransition(sequence=1, status=RunStatus.QUEUED, occurred_at=occurred_at)
         event = OrchestrationTraceEvent(
@@ -387,6 +394,7 @@ class PairedRunOrchestrator:
             detail=RunStatus.QUEUED.value,
         )
         return PairedRunResult(
+            schema_version=schema_version,
             run_id=run_id,
             request=request,
             execution_mode=execution_mode,
@@ -464,6 +472,7 @@ class PairedRunOrchestrator:
             execution_mode=self._execution_mode,
             snapshot_contracts=tuple(self._snapshot_contracts.values()),
             now=self._clock(),
+            three_way=self._three_way,
         )
         existing = self.store.get(candidate.run_id)
         if existing is not None:
@@ -865,6 +874,10 @@ class PairedRunOrchestrator:
         owner_id: UUID,
     ) -> PersistedSideOutcome:
         runner = self._runners.get(system)
+        if runner is None and system is MeasuredSystem.ENHANCED_DETERMINISTIC:
+            runner = self._runners.get(MeasuredSystem.ENHANCED)
+        elif runner is None and system is MeasuredSystem.ENHANCED:
+            runner = self._runners.get(MeasuredSystem.ENHANCED_DETERMINISTIC)
         if runner is None:
             return PersistedSideOutcome(
                 system=system,
@@ -1136,11 +1149,14 @@ class PairedRunOrchestrator:
                                 detail=reason,
                             )
 
-                    running = (
-                        RunStatus.BASELINE_RUNNING
-                        if system is MeasuredSystem.BASELINE
-                        else RunStatus.ENHANCED_RUNNING
-                    )
+                    if system is MeasuredSystem.BASELINE:
+                        running = RunStatus.BASELINE_RUNNING
+                    elif system is MeasuredSystem.ENHANCED_JEV:
+                        running = RunStatus.JEV_RUNNING
+                    elif system is MeasuredSystem.ENHANCED_DETERMINISTIC:
+                        running = RunStatus.DETERMINISTIC_RUNNING
+                    else:
+                        running = RunStatus.ENHANCED_RUNNING
                     record = self._transition(record, running)
                     try:
                         outcome = await self._run_side(
@@ -1194,7 +1210,7 @@ class PairedRunOrchestrator:
             scorecards: list[PairedSequenceScorecard] = []
             for pair in record.pairs:
                 scenario = self._scenarios[pair.scheduled.scenario_id]
-                if len(pair.outcomes) != 2:
+                if len(pair.outcomes) < len(pair.scheduled.order.systems):
                     continue
                 for outcome in pair.outcomes:
                     if outcome.status is OutcomeStatus.SUCCESS:
@@ -1242,8 +1258,9 @@ class PairedRunOrchestrator:
                     trace=record.trace + (event,),
                 )
             outcomes = [outcome for pair in record.pairs for outcome in pair.outcomes]
+            expected_total = sum(len(p.scheduled.order.systems) for p in record.pairs)
             complete = (
-                len(outcomes) == len(record.schedule) * 2
+                len(outcomes) == expected_total
                 and all(outcome.status is OutcomeStatus.SUCCESS for outcome in outcomes)
             )
             return self._transition(

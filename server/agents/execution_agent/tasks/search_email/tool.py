@@ -43,6 +43,8 @@ from .system_prompt import get_system_prompt
 
 # Constants
 MAX_LLM_ITERATIONS = 8
+MAX_SEARCH_SNIPPET_CHARS = 1500
+MAX_SELECTED_EMAIL_CHARS = 4000
 ERROR_GMAIL_NOT_CONNECTED = "Gmail not connected. Please connect Gmail in settings first."
 ERROR_OPENROUTER_NOT_CONFIGURED = "OpenRouter API key not configured. Set OPENROUTER_API_KEY."
 ERROR_EMPTY_QUERY = "search_query must not be empty"
@@ -349,6 +351,15 @@ async def _execute_tool_calls(
             if result_model.status == "success":
                 count = result_model.result_count or 0
                 logger.info(f"[SEARCH_RESULT] Query '{search_query}' → {count} emails found")
+                # Guard against context overload in the iterative search LLM:
+                # Truncate clean_text for intermediate evaluation so multi-turn searches over large
+                # HTML emails (newsletters/digests) do not exceed model context limits (e.g. 200k tokens).
+                if "messages" in response_data and isinstance(response_data["messages"], list):
+                    for msg in response_data["messages"]:
+                        if isinstance(msg, dict) and msg.get("clean_text"):
+                            text = msg["clean_text"]
+                            if len(text) > MAX_SEARCH_SNIPPET_CHARS:
+                                msg["clean_text"] = text[:MAX_SEARCH_SNIPPET_CHARS] + " ... [truncated for search]"
             else:
                 logger.warning(f"[SEARCH_RESULT] Query '{search_query}' → FAILED: {result_model.error}")
             
@@ -404,8 +415,12 @@ async def _perform_search(
         )
         return result_model
 
-    # Use LLM-provided max_results or default to 10
-    max_results = arguments.get("max_results", 10)
+    # Bound max_results to avoid excessive email retrieval and context bloat (default: 10, max: 10)
+    raw_max_results = arguments.get("max_results", 10)
+    try:
+        max_results = min(max(int(raw_max_results), 1), 10)
+    except (TypeError, ValueError):
+        max_results = 10
     
     composio_arguments = {
         "query": query,
@@ -508,7 +523,18 @@ def _build_response(
     # Deduplicate and filter valid email IDs efficiently
     valid_ids = [id.strip() for id in selected_ids if id and id.strip()]
     unique_ids = list(dict.fromkeys(valid_ids))
-    selected_emails = [emails[id] for id in unique_ids if id in emails]
+    selected_emails: List[GmailSearchEmail] = []
+    for id in unique_ids:
+        if id in emails:
+            email = emails[id]
+            if email.clean_text and len(email.clean_text) > MAX_SELECTED_EMAIL_CHARS:
+                email = email.model_copy(
+                    update={
+                        "clean_text": email.clean_text[:MAX_SELECTED_EMAIL_CHARS]
+                        + " ... [truncated]"
+                    }
+                )
+            selected_emails.append(email)
     
     # Log any missing email IDs
     missing_ids = [id for id in unique_ids if id not in emails]

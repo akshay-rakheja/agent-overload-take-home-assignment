@@ -169,3 +169,33 @@ def test_runtime_binds_recommended_identity_to_dispatch_context() -> None:
     assert messages[0]["content"]
     assert runtime.dispatch_context.routing_action is RoutingAction.REUSE
     assert runtime.dispatch_context.allowed_agent_ids == frozenset({alice.agent_id})
+
+
+def test_routing_ignores_internal_agent_message_logs_for_domain_shift() -> None:
+    instagram_agent = record(
+        1,
+        name="Email Security Scanner",
+        purpose="Scan emails for security alerts and suspicious login notices",
+        aliases=("Email Security Scanner",),
+    )
+    # Transcript containing internal execution agent callback logs
+    raw_transcript = (
+        "<user_message>Can you check if there are any security alerts or suspicious login notices from Instagram in my emails?</user_message>\n"
+        "<agent_message>[SUCCESS] Email Security Scanner: Found Instagram security alerts</agent_message>\n"
+        "<poke_reply>I found Instagram security alerts.</poke_reply>"
+    )
+
+    domain_shift_prompt = (
+        "Can you check my emails for any notices or warnings from Chainstack about account suspensions or node deletions?"
+    )
+
+    context = build_candidate_context(
+        domain_shift_prompt,
+        raw_transcript,
+        directory=StubDirectory([instagram_agent]),
+    )
+
+    # Internal agent name leak must not grant an exact match bonus (+0.70)
+    assert context.decision.action is RoutingAction.CREATE_NEW
+    assert context.decision.agent_id is None
+

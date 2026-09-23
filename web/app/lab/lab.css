@@ -93,15 +93,20 @@
 .turn-nav button { padding: 6px 10px; color: var(--blue); background: white; }
 .turn-nav button[aria-current='true'] { color: white; background: var(--blue); }
 .comparison-grid { display: grid; grid-template-columns: minmax(0, 1fr) 116px minmax(0, 1fr); grid-template-rows: auto repeat(10, auto); align-items: stretch; gap: 0 14px; }
+.comparison-grid.three-way { grid-template-columns: minmax(0, 1fr) 116px minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto repeat(11, auto); }
 .comparison-side { min-width: 0; display: grid; grid-template-rows: subgrid; grid-row: 1 / span 11; gap: 12px 0; }
+.comparison-grid.three-way .comparison-side { grid-row: 1 / span 12; }
 .comparison-side.baseline { grid-column: 1; }
 .comparison-side.enhanced { grid-column: 3; }
+.comparison-grid.three-way .comparison-side.baseline { grid-column: 1; }
+.comparison-grid.three-way .comparison-side.enhanced_deterministic { grid-column: 3; }
+.comparison-grid.three-way .comparison-side.enhanced_jev { grid-column: 4; }
 .side-heading { min-height: 118px; padding: 20px; color: white; background: var(--muted); border-radius: 10px 10px 2px 2px; }
-.enhanced .side-heading { background: var(--blue); }
-.side-heading > p { font-size: 11px; letter-spacing: .08em; opacity: .78; text-transform: uppercase; }
-.side-heading h2 { margin: 4px 0 10px; font: 500 24px/1.2 Georgia, serif; }
+.enhanced .side-heading, .enhanced_deterministic .side-heading { background: var(--blue); }
+.enhanced_jev .side-heading { background: #5c35a5; }
 .outcome { display: inline-flex; padding: 3px 8px; border: 1px solid rgba(255,255,255,.38); border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: capitalize; }
 .protocol-spine { grid-column: 2; grid-row: 1 / span 11; min-width: 0; padding: 16px 10px; text-align: center; overflow-wrap: anywhere; border-left: 1px solid #c8d4e1; border-right: 1px solid #c8d4e1; background: linear-gradient(90deg, transparent 49%, #8fa8c4 49%, #8fa8c4 51%, transparent 51%); }
+.comparison-grid.three-way .protocol-spine { grid-row: 1 / span 12; }
 .protocol-spine h2 { margin: 12px 0 5px; padding: 4px; font-size: 12px; background: var(--paper); }
 .protocol-spine p { padding: 4px; color: var(--muted); background: var(--paper); font-size: 11px; }
 .protocol-spine ol { display: grid; gap: 30px; margin: 26px 0; padding: 0; list-style: none; counter-reset: protocol; }
@@ -113,7 +118,10 @@
 .track-badge { display: block; padding: 4px 5px; color: var(--blue); background: white; border: 1px solid #c8d4e1; font-size: 9px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
 .evidence-panel { min-width: 0; padding: 17px; overflow: hidden; background: #fff; border: 1px solid #dce5ef; border-radius: 3px 3px 8px 8px; box-shadow: 0 4px 16px rgba(23,32,51,.035); }
 .baseline .evidence-panel { border-top: 3px solid var(--muted); }
-.enhanced .evidence-panel { border-top: 3px solid var(--blue); }
+.enhanced .evidence-panel, .enhanced_deterministic .evidence-panel { border-top: 3px solid var(--blue); }
+.enhanced_jev .evidence-panel { border-top: 3px solid #5c35a5; }
+.jev-subheading { margin: 0 0 6px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.jev-panel .table-scroll { max-height: 240px; }
 .evidence-panel > h4, .evidence-heading h4 { font-size: 14px; font-weight: 750; }
 .evidence-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .evidence-heading > span { flex: 0 0 auto; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
@@ -167,6 +175,7 @@
   .lab-shell { padding-inline: 18px; }
   .run-summary { grid-template-columns: 1fr; gap: 16px; }
   .comparison-grid { grid-template-columns: minmax(0,1fr) 82px minmax(0,1fr); gap-inline: 8px; }
+  .comparison-grid.three-way { grid-template-columns: minmax(0,1fr) 70px minmax(0,1fr) minmax(0,1fr); gap-inline: 6px; }
   .evidence-panel { padding: 13px; }
   .metric-grid, .routing-list { grid-template-columns: 1fr; }
   .protocol-spine { padding-inline: 5px; }

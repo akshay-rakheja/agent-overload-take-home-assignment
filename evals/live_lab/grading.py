@@ -50,7 +50,7 @@ class ScenarioScorecard(_FrozenModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
     schema_version: Literal[1] = 1
     scenario_id: str
-    system: Literal["baseline", "enhanced"]
+    system: Literal["baseline", "enhanced", "enhanced_deterministic", "enhanced_jev"]
     routing: LayerGrade
     response: LayerGrade
     gmail_safety: LayerGrade
@@ -85,7 +85,7 @@ class ScenarioSequenceScorecard(_FrozenModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
     schema_version: Literal[1] = 1
     scenario_id: str
-    system: Literal["baseline", "enhanced"]
+    system: Literal["baseline", "enhanced", "enhanced_deterministic", "enhanced_jev"]
     turns: tuple[ScenarioScorecard, ...]
     identity_continuity: LayerGrade
 
@@ -187,7 +187,7 @@ def _grade_routing(scenario: ScenarioDefinition, result: SystemRunResult) -> Lay
         negatives.append(f"expected action {expected}, observed {action}")
     else:
         positives.append(f"action={expected}")
-    if scenario.expected.action is ExpectedAction.REUSE and result.system == "enhanced":
+    if scenario.expected.action is ExpectedAction.REUSE and result.system in ("enhanced", "enhanced_deterministic", "enhanced_jev"):
         expected_id = scenario.expected_agent_id
         if expected_id is not None and decision.get("agent_id") != expected_id:
             negatives.append("reuse recommendation did not match expected stable identity")
@@ -630,10 +630,10 @@ def _grade_identity(scenario: ScenarioDefinition, result: SystemRunResult) -> La
             return _missing("identity", "created identity")
         if not _identity_matches(created, scenario):
             negatives.append("created record name or stable identity did not match expectation")
-        if result.system == "enhanced" and not isinstance(created.get("agent_id"), str):
+        if result.system in ("enhanced", "enhanced_deterministic", "enhanced_jev") and not isinstance(created.get("agent_id"), str):
             negatives.append("enhanced creation did not emit a stable identity")
         selected = _mapping(result.selected_identity)
-        if result.system == "enhanced" and (
+        if result.system in ("enhanced", "enhanced_deterministic", "enhanced_jev") and (
             selected is None or selected.get("agent_id") != created.get("agent_id")
         ):
             negatives.append("created identity did not match the selected dispatched record")
@@ -681,7 +681,7 @@ def _grade_duplicate(scenario: ScenarioDefinition, result: SystemRunResult) -> L
     selected_ids = delta.get("selected_agent_ids")
     if not isinstance(selected_ids, (list, tuple)):
         selected_ids = []
-    if result.system == "enhanced" and len(set(created_ids)) != expected_growth:
+    if result.system in ("enhanced", "enhanced_deterministic", "enhanced_jev") and len(set(created_ids)) != expected_growth:
         negatives.append("created stable-ID count contradicted directory growth")
     if scenario.expected.action is ExpectedAction.CREATE_NEW and selected_ids:
         if len(set(selected_ids)) != 1 or set(selected_ids) != set(created_ids):

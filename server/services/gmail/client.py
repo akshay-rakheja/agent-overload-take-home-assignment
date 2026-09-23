@@ -265,10 +265,13 @@ def initiate_connect(payload: GmailConnectPayload, settings: Settings) -> JSONRe
     if settings.lab_enabled:
         configured_user_id = _normalized(settings.lab_composio_user_id)
         if requested_user_id and requested_user_id != configured_user_id:
-            return error_response(
-                "The requested Gmail user is not authorized for Evaluation Lab mode.",
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
+            if requested_user_id.startswith("web-"):
+                requested_user_id = None
+            else:
+                return error_response(
+                    "The requested Gmail user is not authorized for Evaluation Lab mode.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
         user_id = configured_user_id
     else:
         user_id = requested_user_id or f"web-{os.getpid()}"
@@ -305,9 +308,15 @@ def initiate_connect(payload: GmailConnectPayload, settings: Settings) -> JSONRe
 
 
 # Check Gmail connection status and retrieve user account information
-def fetch_status(payload: GmailStatusPayload) -> JSONResponse:
+def fetch_status(payload: GmailStatusPayload, settings: Optional[Settings] = None) -> JSONResponse:
+    resolved_settings = settings or get_settings()
     connection_request_id = _normalized(payload.connection_request_id)
     user_id = _normalized(payload.user_id)
+
+    if resolved_settings.lab_enabled:
+        configured_user_id = _normalized(resolved_settings.lab_composio_user_id)
+        if not user_id or user_id.startswith("web-"):
+            user_id = configured_user_id
 
     if not connection_request_id and not user_id:
         return error_response(

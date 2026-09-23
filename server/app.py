@@ -68,6 +68,9 @@ app.include_router(api_router)
 @app.on_event("startup")
 # Initialize background services (trigger scheduler and email watcher) when the app starts
 async def _start_trigger_scheduler() -> None:
+    if _settings.lab_enabled and _settings.lab_composio_user_id:
+        from .services.gmail.client import _set_active_gmail_user_id
+        _set_active_gmail_user_id(_settings.lab_composio_user_id)
     if not _settings.background_model_activity_enabled:
         return
     scheduler = get_trigger_scheduler()

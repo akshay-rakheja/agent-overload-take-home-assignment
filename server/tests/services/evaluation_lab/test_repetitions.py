@@ -271,7 +271,7 @@ def test_primary_preflight_records_config_provider_usage_and_read_only_tool_call
         MeasuredSystem.BASELINE,
         MeasuredSystem.ENHANCED,
     }
-    for system in MeasuredSystem:
+    for system in result.role_models:
         assert set(result.role_models[system]) == set(ModelRole)
         assert set(result.role_models[system].values()) == {PRIMARY_MODEL_ID}
 
@@ -313,7 +313,7 @@ def test_recorded_tool_incompatibility_requires_full_reset_before_fallback() -> 
         is CompatibilityFailureCode.TOOL_SCHEMA_INCOMPATIBLE
     )
     assert result.reset_evidence is not None
-    for system in MeasuredSystem:
+    for system in result.role_models:
         assert set(result.role_models[system].values()) == {FALLBACK_MODEL_ID}
 
 

@@ -1,7 +1,20 @@
-const serverBase = process.env.PY_SERVER_URL || 'http://localhost:8001';
-const historyPath = `${serverBase.replace(/\/$/, '')}/api/v1/chat/history`;
+export const runtime = 'nodejs';
 
-async function forward(method: 'GET' | 'DELETE') {
+function resolveServerBase(system?: string | null): string {
+  if (system === 'baseline') {
+    return process.env.BASELINE_SERVER_URL || 'http://localhost:8001';
+  }
+  if (system === 'enhanced' || system === 'enhanced_deterministic' || system === 'enhanced_jev' || system === 'jev') {
+    return process.env.ENHANCED_SERVER_URL || 'http://localhost:8002';
+  }
+  return process.env.PY_SERVER_URL || 'http://localhost:8001';
+}
+
+async function forward(method: 'GET' | 'DELETE', system?: string | null, includeSystemQuery: boolean = true) {
+  const serverBase = resolveServerBase(system);
+  const query = includeSystemQuery && system ? `?system=${encodeURIComponent(system)}` : '';
+  const historyPath = `${serverBase.replace(/\/$/, '')}/api/v1/chat/history${query}`;
+
   try {
     const res = await fetch(historyPath, {
       method,
@@ -21,10 +34,23 @@ async function forward(method: 'GET' | 'DELETE') {
   }
 }
 
-export async function GET() {
-  return forward('GET');
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const system = searchParams.get('system');
+  return forward('GET', system);
 }
 
-export async function DELETE() {
-  return forward('DELETE');
+export async function DELETE(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const system = searchParams.get('system');
+  if (system) {
+    return forward('DELETE', system);
+  }
+  const [resBaseline, resDet, resJev, resAll] = await Promise.all([
+    forward('DELETE', 'baseline'),
+    forward('DELETE', 'enhanced_deterministic'),
+    forward('DELETE', 'enhanced_jev'),
+    forward('DELETE', 'enhanced', false),
+  ]);
+  return resJev.ok ? resJev : resDet.ok ? resDet : resBaseline;
 }

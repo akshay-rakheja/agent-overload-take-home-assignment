@@ -808,6 +808,35 @@ def consolidate_trace(events: Sequence[TraceEvent]) -> SystemRunResult:
                     legacy_cost_events.append(normalized_cost)
                 else:
                     cost_by_attempt.setdefault(attempt_key, normalized_cost)
+        elif event.kind is TraceEventKind.JEV_MAP:
+            if "map_scores" in payload:
+                values["jev_map_scores"] = _available(payload["map_scores"])
+            if "latency_ms" in payload:
+                values["jev_map_latency_ms"] = _available(payload["latency_ms"])
+            if "card_digest" in payload:
+                values["jev_card_digest"] = _available(payload["card_digest"])
+            if "api_calls_count" in payload:
+                values["jev_api_calls_count"] = _available(payload["api_calls_count"])
+            if "partial_failures" in payload:
+                values["jev_partial_failures"] = _available(payload["partial_failures"])
+        elif event.kind is TraceEventKind.JEV_SHORTLIST:
+            shortlist = payload.get("shortlist", payload)
+            values["jev_shortlist"] = _available(
+                shortlist if isinstance(shortlist, list) else [payload]
+            )
+        elif event.kind is TraceEventKind.JEV_REDUCE:
+            if "decision" in payload:
+                values["jev_reduce_decision"] = _available(payload["decision"])
+            elif "action" in payload:
+                values["jev_reduce_decision"] = _available(payload)
+            if "winner_margin" in payload:
+                values["jev_winner_margin"] = _available(payload["winner_margin"])
+            if "latency_ms" in payload:
+                values["jev_reduce_latency_ms"] = _available(payload["latency_ms"])
+            if "total_latency_ms" in payload:
+                values["jev_total_latency_ms"] = _available(payload["total_latency_ms"])
+            if "token_usage" in payload:
+                values["jev_token_usage"] = _available(payload["token_usage"])
         elif event.kind in {TraceEventKind.ERROR, TraceEventKind.OBSERVABILITY_WARNING}:
             errors.append(payload)
 

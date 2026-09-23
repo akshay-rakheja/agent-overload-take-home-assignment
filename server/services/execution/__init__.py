@@ -8,7 +8,29 @@ from .retrieval import AgentCandidate, AgentRetriever, RetrievalQuery
 from .roster import AgentRoster, get_agent_directory, get_agent_roster
 from .routing import AgentRouter, RoutingAction, RoutingDecision
 
+from .activity_card import (
+    ActivityCard,
+    ActivityCardGenerator,
+    ActivityRecord,
+    ActivityRecordSummary,
+)
+from .jev_client import (
+    AgentScore,
+    FakeJevClient,
+    JevClient,
+    JevProviderError,
+    JevRateLimitError,
+    JevRoutingDecision,
+    JevTimeoutError,
+    TypeSafeJevClient,
+)
+from .jev_router import JevRouter, JevRoutingContext
+
 __all__ = [
+    "ActivityCard",
+    "ActivityCardGenerator",
+    "ActivityRecord",
+    "ActivityRecordSummary",
     "AgentDirectory",
     "ContextMetrics",
     "ContextRenderResult",
@@ -30,4 +52,14 @@ __all__ = [
     "AgentRouter",
     "RoutingAction",
     "RoutingDecision",
+    "AgentScore",
+    "FakeJevClient",
+    "JevClient",
+    "JevProviderError",
+    "JevRateLimitError",
+    "JevRoutingDecision",
+    "JevTimeoutError",
+    "TypeSafeJevClient",
+    "JevRouter",
+    "JevRoutingContext",
 ]

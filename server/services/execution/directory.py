@@ -302,6 +302,17 @@ class AgentDirectory:
         self.load()
         return self._require_from(self._records, parsed_id)
 
+    def get(self, agent_id: UUID | str) -> AgentRecord | None:
+        """Return one stable identity or None if not found."""
+        try:
+            return self.require(agent_id)
+        except UnknownAgentError:
+            return None
+
+    def get_record(self, agent_id: UUID | str) -> AgentRecord | None:
+        """Return one stable identity or None if not found."""
+        return self.get(agent_id)
+
     def _replace(self, agent_id: UUID | str, transform: Callable[[AgentRecord], AgentRecord]) -> AgentRecord:
         try:
             parsed_id = agent_id if isinstance(agent_id, UUID) else UUID(agent_id)

@@ -233,13 +233,6 @@ export default function SettingsModal({
   const refreshGmailStatus = useCallback(async () => {
     const userId = readStoredUserId();
     const connectionRequestId = readStoredConnectionRequestId();
-    if (!userId && !connectionRequestId) {
-      setGmailConnected(false);
-      setGmailProfile(null);
-      setGmailEmail('');
-      setGmailStatusMessage('Connect Gmail to get started.');
-      return;
-    }
 
     try {
       setIsRefreshingGmail(true);

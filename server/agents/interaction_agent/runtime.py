@@ -1,18 +1,37 @@
-"""Interaction Agent Runtime - handles LLM calls for user and agent turns."""
-
+import asyncio
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from time import monotonic_ns
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Literal, Optional, Set
 
-from .agent import build_candidate_context, build_system_prompt, prepare_message_with_history
+from .agent import CandidateContext, build_candidate_context, build_system_prompt, prepare_message_with_history
 from .tools import DispatchContext, ToolResult, get_tool_schemas, handle_tool_call
 from ...config import ModelRole, get_settings
 from ...services.conversation import get_conversation_log, get_working_memory_log
 from ...services.evaluation_lab.models import TraceEventKind
 from ...services.evaluation_lab.trace import emit_trace, trace_timing
 from ...services.evaluation_lab.usage import PhaseName, monotonic_phase
-from ...services.execution import AgentDirectory, RoutingAction, get_agent_directory
+from ...services.execution import (
+    ActivityCard,
+    ActivityCardGenerator,
+    AgentCandidate,
+    AgentDirectory,
+    AgentStatus,
+    FakeJevClient,
+    JevRouter,
+    RoutingAction,
+    RoutingDecision,
+    TypeSafeJevClient,
+    get_agent_directory,
+)
+from ...services.execution.inspector import (
+    finalize_turn_inspection,
+    record_agent_callback_response,
+    record_dispatch_result,
+    record_tool_dispatch,
+    record_turn_candidate_context,
+)
 from ...openrouter_client import request_chat_completion
 from ...logging_config import logger
 
@@ -50,19 +69,30 @@ class InteractionAgentRuntime:
     """Manages the interaction agent's request processing."""
 
     MAX_TOOL_ITERATIONS = 8
+    routing_mode: Literal["deterministic", "jev"] = "deterministic"
+    system_name: str = "enhanced_deterministic"
+    conversation_log: Any = None
 
     # Initialize interaction agent runtime with settings and service dependencies
-    def __init__(self, *, directory: AgentDirectory | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        directory: AgentDirectory | None = None,
+        routing_mode: Literal["deterministic", "jev"] = "deterministic",
+        system_name: str = "enhanced_deterministic",
+    ) -> None:
         settings = get_settings()
         self.api_key = settings.openrouter_api_key
         self.model_config = settings.model_call_config(ModelRole.INTERACTION)
         self.model = self.model_config.model_id
         self.settings = settings
-        self.conversation_log = get_conversation_log()
+        self.routing_mode = routing_mode
+        self.system_name = system_name
+        self.conversation_log = get_conversation_log(system_name)
         self.working_memory_log = get_working_memory_log()
         self.tool_schemas = get_tool_schemas()
-        self.agent_directory = directory or get_agent_directory()
-        self.dispatch_context = DispatchContext()
+        self.agent_directory = directory or get_agent_directory(system_name)
+        self.dispatch_context = DispatchContext(system_name=system_name)
 
         if not self.api_key:
             raise ValueError(
@@ -78,9 +108,16 @@ class InteractionAgentRuntime:
             self.conversation_log.record_user_message(user_message)
 
             system_prompt = build_system_prompt()
-            messages = self._prepare_turn_messages(
-                user_message, transcript_before, message_type="user"
-            )
+            routing_mode = getattr(self, "routing_mode", "deterministic")
+            system_name = getattr(self, "system_name", "enhanced_deterministic")
+            if routing_mode == "jev":
+                messages = await self._prepare_turn_messages_jev(
+                    user_message, transcript_before, message_type="user"
+                )
+            else:
+                messages = self._prepare_turn_messages(
+                    user_message, transcript_before, message_type="user"
+                )
 
             logger.info("Processing user message through interaction agent")
             summary = await self._run_interaction_loop(system_prompt, messages)
@@ -89,6 +126,8 @@ class InteractionAgentRuntime:
 
             if final_response and not summary.user_messages:
                 self.conversation_log.record_reply(final_response)
+
+            finalize_turn_inspection(user_message, final_response or "", system=system_name)
 
             return InteractionResult(
                 success=True,
@@ -106,9 +145,11 @@ class InteractionAgentRuntime:
                 },
             )
             logger.error("Interaction agent failed", extra={"error": str(exc)})
+            error_message = f"⚠️ Error: {exc}"
+            self.conversation_log.record_reply(error_message)
             return InteractionResult(
                 success=False,
-                response="",
+                response=error_message,
                 error=str(exc),
             )
 
@@ -121,9 +162,16 @@ class InteractionAgentRuntime:
             self.conversation_log.record_agent_message(agent_message)
 
             system_prompt = build_system_prompt()
-            messages = self._prepare_turn_messages(
-                agent_message, transcript_before, message_type="agent"
-            )
+            routing_mode = getattr(self, "routing_mode", "deterministic")
+            system_name = getattr(self, "system_name", "enhanced_deterministic")
+            if routing_mode == "jev":
+                messages = await self._prepare_turn_messages_jev(
+                    agent_message, transcript_before, message_type="agent"
+                )
+            else:
+                messages = self._prepare_turn_messages(
+                    agent_message, transcript_before, message_type="agent"
+                )
 
             logger.info("Processing execution agent results")
             summary = await self._run_interaction_loop(system_prompt, messages)
@@ -132,6 +180,8 @@ class InteractionAgentRuntime:
 
             if final_response and not summary.user_messages:
                 self.conversation_log.record_reply(final_response)
+
+            record_agent_callback_response(agent_message, final_response or "", system=system_name)
 
             return InteractionResult(
                 success=True,
@@ -149,9 +199,11 @@ class InteractionAgentRuntime:
                 },
             )
             logger.error("Interaction agent (agent message) failed", extra={"error": str(exc)})
+            error_message = f"⚠️ Error: {exc}"
+            self.conversation_log.record_reply(error_message)
             return InteractionResult(
                 success=False,
-                response="",
+                response=error_message,
                 error=str(exc),
             )
 
@@ -163,12 +215,34 @@ class InteractionAgentRuntime:
         message_type: str,
     ) -> List[Dict[str, str]]:
         """Bind the deterministic routing decision to this turn's tool permissions."""
+        routing_mode = getattr(self, "routing_mode", "deterministic")
+        system_name = getattr(self, "system_name", "enhanced_deterministic")
+        if routing_mode == "jev":
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(
+                    self._prepare_turn_messages_jev(
+                        latest_text, transcript, message_type=message_type
+                    )
+                )
+            else:
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    return pool.submit(
+                        asyncio.run,
+                        self._prepare_turn_messages_jev(
+                            latest_text, transcript, message_type=message_type
+                        ),
+                    ).result()
 
         candidate_context = build_candidate_context(
             latest_text,
             transcript,
             directory=self.agent_directory,
         )
+        if message_type == "user":
+            record_turn_candidate_context(candidate_context, system=system_name)
         allowed_ids = (
             frozenset({candidate_context.decision.agent_id})
             if candidate_context.decision.action is RoutingAction.REUSE
@@ -178,6 +252,7 @@ class InteractionAgentRuntime:
         self.dispatch_context = DispatchContext(
             routing_action=candidate_context.decision.action,
             allowed_agent_ids=allowed_ids,
+            system_name=system_name,
         )
         emit_trace(
             TraceEventKind.ROUTING_DECISION,
@@ -210,6 +285,159 @@ class InteractionAgentRuntime:
                 ),
             },
         )
+        return prepare_message_with_history(
+            latest_text,
+            transcript,
+            message_type=message_type,
+            directory=self.agent_directory,
+            candidate_context=candidate_context,
+        )
+
+    async def _prepare_turn_messages_jev(
+        self,
+        latest_text: str,
+        transcript: str,
+        *,
+        message_type: str,
+    ) -> List[Dict[str, str]]:
+        """Bind the TypeSafe Jev Map/Reduce routing decision to this turn's tool permissions."""
+        records = self.agent_directory.list_records()
+        cards: list[ActivityCard] = []
+
+        from ...services.execution import get_execution_agent_logs
+        log_store = get_execution_agent_logs()
+
+        for r in records:
+            gen = ActivityCardGenerator(
+                agent_id=r.agent_id,
+                name=r.name,
+                purpose=r.purpose,
+                status=r.status.value if hasattr(r.status, "value") else str(r.status),
+                created_at=r.created_at or datetime.now(timezone.utc),
+                last_used_at=r.last_used_at or datetime.now(timezone.utc),
+            )
+            journal_entries = []
+            try:
+                raw_bytes = b""
+                if hasattr(log_store, "read_raw_bytes"):
+                    raw_bytes = log_store.read_raw_bytes(str(r.agent_id))
+                    if not raw_bytes and getattr(r, "legacy_storage_key", None):
+                        raw_bytes = log_store.read_raw_bytes(r.legacy_storage_key)
+                    if not raw_bytes:
+                        raw_bytes = log_store.read_raw_bytes(r.name)
+                elif hasattr(log_store, "read_log"):
+                    raw_log = log_store.read_log(r.name)
+                    raw_bytes = raw_log.encode("utf-8", errors="replace") if isinstance(raw_log, str) else b""
+
+                raw_log = raw_bytes.decode("utf-8", errors="replace") if raw_bytes else ""
+                if raw_log:
+                    import re
+                    req_matches = list(re.finditer(r"<agent_request[^>]*>(.*?)</agent_request>", raw_log, re.DOTALL))
+                    for m in req_matches[-3:]:
+                        txt = m.group(1).strip()
+                        if txt:
+                            journal_entries.append({
+                                "agent_id": str(r.agent_id),
+                                "episode_id": str(r.agent_id),
+                                "occurred_at": (r.last_used_at or datetime.now(timezone.utc)).isoformat(),
+                                "request_intent": txt[:200],
+                                "disposition": "completed",
+                            })
+            except Exception:
+                pass
+
+            card = gen.generate_from_records(journal_entries, durable_summary=r.purpose)
+            cards.append(card)
+
+        # Instantiate Jev client (live TypeSafe client preferred if configured, fallback to Fake)
+        try:
+            client = TypeSafeJevClient()
+        except Exception:
+            client = FakeJevClient()
+
+        router = JevRouter(
+            client=client,
+            max_concurrency=25,
+            min_map_threshold=0.35,
+            ambiguity_margin=0.05,
+        )
+        with monotonic_phase(PhaseName.RETRIEVAL_ROUTING):
+            jev_ctx = await router.route(latest_text, cards)
+
+        # Build AgentCandidate list from Jev scoring
+        records_by_id = {r.agent_id: r for r in records}
+        candidates: list[AgentCandidate] = []
+        for s in (jev_ctx.shortlist or jev_ctx.map_scores):
+            rec = records_by_id.get(s.agent_id) or (self.agent_directory.get(s.agent_id) if hasattr(self.agent_directory, "get") else None)
+            cand_name = rec.name if rec else "agent"
+            cand_purpose = rec.purpose if rec else ""
+            cand_status = rec.status if rec else AgentStatus.HOT
+            candidates.append(
+                AgentCandidate(
+                    agent_id=s.agent_id,
+                    name=cand_name,
+                    purpose=cand_purpose,
+                    status=cand_status,
+                    score=s.composite_score,
+                    reasons=(
+                        f"TypeSafe Jev score: {s.composite_score:.2f} (affinity: {s.affinity_score:.2f}, continuity: {s.continuity_score:.2f}, risk: {s.risk_score:.2f})",
+                    ),
+                    score_components={
+                        "composite": s.composite_score,
+                        "affinity": s.affinity_score,
+                        "continuity": s.continuity_score,
+                        "risk": s.risk_score,
+                    },
+                )
+            )
+
+        decision = RoutingDecision(
+            action=jev_ctx.decision.action,
+            agent_id=jev_ctx.decision.recommended_agent_id,
+            confidence=jev_ctx.decision.confidence,
+            reasons=(jev_ctx.decision.rationale,),
+        )
+        candidate_context = CandidateContext(candidates=tuple(candidates), decision=decision)
+
+        if message_type == "user":
+            record_turn_candidate_context(
+                candidate_context,
+                system=self.system_name,
+                jev_context=jev_ctx,
+            )
+
+        allowed_ids = (
+            frozenset({jev_ctx.decision.recommended_agent_id})
+            if jev_ctx.decision.action is RoutingAction.REUSE
+            and jev_ctx.decision.recommended_agent_id is not None
+            else frozenset()
+        )
+        self.dispatch_context = DispatchContext(
+            routing_action=jev_ctx.decision.action,
+            allowed_agent_ids=allowed_ids,
+            system_name=self.system_name,
+        )
+
+        emit_trace(
+            TraceEventKind.ROUTING_DECISION,
+            {
+                "action": jev_ctx.decision.action.value,
+                "agent_id": str(jev_ctx.decision.recommended_agent_id) if jev_ctx.decision.recommended_agent_id else None,
+                "confidence": jev_ctx.decision.confidence,
+                "reasons": [jev_ctx.decision.rationale],
+                "recommendation": str(jev_ctx.decision.recommended_agent_id) if jev_ctx.decision.recommended_agent_id else jev_ctx.decision.action.value,
+                "system": "enhanced_jev",
+            },
+        )
+        emit_trace(
+            TraceEventKind.AUTHORIZATION,
+            {
+                "routing_action": self.dispatch_context.routing_action.value if self.dispatch_context.routing_action else None,
+                "authorized_ids": sorted(str(aid) for aid in self.dispatch_context.allowed_agent_ids),
+                "system": "enhanced_jev",
+            },
+        )
+
         return prepare_message_with_history(
             latest_text,
             transcript,
@@ -261,7 +489,11 @@ class InteractionAgentRuntime:
                     if isinstance(agent_reference, str) and agent_reference:
                         summary.execution_agents.add(agent_reference)
 
+                system_name = getattr(self, "system_name", "enhanced_deterministic")
+                record_tool_dispatch(tool_call.name, tool_call.arguments, system=system_name)
                 result = self._execute_tool(tool_call)
+                if tool_call.name == "send_message_to_agent":
+                    record_dispatch_result(tool_call.arguments, result, system=system_name)
 
                 if result.user_message:
                     summary.user_messages.append(result.user_message)
@@ -273,7 +505,9 @@ class InteractionAgentRuntime:
                 }
                 messages.append(tool_message)
         else:
-            raise RuntimeError("Reached tool iteration limit without final response")
+            if not summary.user_messages and not summary.last_assistant_text:
+                raise RuntimeError("Reached tool iteration limit without final response")
+            logger.warning("Reached tool iteration limit after delivering user messages")
 
         if not summary.user_messages and not summary.last_assistant_text:
             logger.warning("Interaction loop exited without assistant content")
@@ -450,10 +684,17 @@ class InteractionAgentRuntime:
         with trace_timing(monotonic_ns) as timing:
             try:
                 self._log_tool_invocation(tool_call, stage="start")
+                call_kwargs = {"dispatch_context": getattr(self, "dispatch_context", None)}
+                import inspect
+                sig = inspect.signature(handle_tool_call)
+                if "conversation_log" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                    call_kwargs["conversation_log"] = getattr(self, "conversation_log", None)
+                if "directory" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                    call_kwargs["directory"] = getattr(self, "agent_directory", None)
                 result = handle_tool_call(
                     tool_call.name,
                     tool_call.arguments,
-                    dispatch_context=self.dispatch_context,
+                    **call_kwargs,
                 )
             except Exception as exc:  # pragma: no cover - defensive
                 finished = timing.finish()

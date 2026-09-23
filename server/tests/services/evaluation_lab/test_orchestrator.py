@@ -234,7 +234,7 @@ async def test_mismatched_fingerprint_blocks_before_budget_or_side_transport(tmp
 @pytest.mark.anyio
 async def test_second_side_failure_preserves_first_success_and_never_retries(tmp_path) -> None:
     scenario = _scenario()
-    attempts = {system: 0 for system in MeasuredSystem}
+    attempts = {system: 0 for system in (MeasuredSystem.BASELINE, MeasuredSystem.ENHANCED)}
 
     async def resetter(*, system, **_kwargs):
         return _verification(system)

@@ -89,6 +89,9 @@ class TraceEventKind(str, Enum):
     COST = "cost"
     ERROR = "error"
     OBSERVABILITY_WARNING = "observability_warning"
+    JEV_MAP = "jev_map"
+    JEV_SHORTLIST = "jev_shortlist"
+    JEV_REDUCE = "jev_reduce"
 
 
 class TraceEvent(_FrozenModel):
@@ -97,7 +100,7 @@ class TraceEvent(_FrozenModel):
     turn_id: UUID
     sequence: int = Field(ge=1)
     occurred_at: datetime
-    system: Literal["baseline", "enhanced"]
+    system: Literal["baseline", "enhanced", "enhanced_deterministic", "enhanced_jev"]
     kind: TraceEventKind
     payload: Mapping[str, JsonValue]
 
@@ -126,7 +129,7 @@ class TraceEvent(_FrozenModel):
 class TraceContext(_FrozenModel):
     run_id: UUID
     turn_id: UUID
-    system: Literal["baseline", "enhanced"]
+    system: Literal["baseline", "enhanced", "enhanced_deterministic", "enhanced_jev"]
     revision: str
     mode: str
 
@@ -210,7 +213,7 @@ class SystemRunResult(_FrozenModel):
     schema_version: Literal[1] = 1
     run_id: UUID
     turn_id: UUID
-    system: Literal["baseline", "enhanced"]
+    system: Literal["baseline", "enhanced", "enhanced_deterministic", "enhanced_jev"]
     revision: ObservedValue[str] = Field(default_factory=_missing)
     mode: ObservedValue[str] = Field(default_factory=_missing)
     roster_count: ObservedValue[int] = Field(default_factory=_missing)
@@ -232,6 +235,18 @@ class SystemRunResult(_FrozenModel):
     usage: UsagePlaceholder = Field(default_factory=UsagePlaceholder)
     cost: CostPlaceholder = Field(default_factory=CostPlaceholder)
     errors: ObservedValue[list[JsonValue]] = Field(default_factory=_missing)
+    # Jev map/reduce trace fields
+    jev_map_scores: ObservedValue[list[JsonValue]] = Field(default_factory=_missing)
+    jev_shortlist: ObservedValue[list[JsonValue]] = Field(default_factory=_missing)
+    jev_reduce_decision: ObservedValue[JsonValue] = Field(default_factory=_missing)
+    jev_winner_margin: ObservedValue[float] = Field(default_factory=_missing)
+    jev_map_latency_ms: ObservedValue[float] = Field(default_factory=_missing)
+    jev_reduce_latency_ms: ObservedValue[float] = Field(default_factory=_missing)
+    jev_total_latency_ms: ObservedValue[float] = Field(default_factory=_missing)
+    jev_api_calls_count: ObservedValue[int] = Field(default_factory=_missing)
+    jev_token_usage: ObservedValue[JsonValue] = Field(default_factory=_missing)
+    jev_card_digest: ObservedValue[str] = Field(default_factory=_missing)
+    jev_partial_failures: ObservedValue[JsonValue] = Field(default_factory=_missing)
     availability_metadata: dict[str, Availability] = Field(default_factory=dict)
 
 

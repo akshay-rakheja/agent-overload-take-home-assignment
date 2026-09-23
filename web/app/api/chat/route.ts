@@ -19,6 +19,16 @@ function uiToOpenAIContent(messages: UIMessage[]): { role: string; content: stri
   return out;
 }
 
+function resolveServerBase(system?: string | null): string {
+  if (system === 'baseline') {
+    return process.env.BASELINE_SERVER_URL || 'http://localhost:8001';
+  }
+  if (system === 'enhanced' || system === 'enhanced_deterministic' || system === 'enhanced_jev' || system === 'jev') {
+    return process.env.ENHANCED_SERVER_URL || 'http://localhost:8002';
+  }
+  return process.env.PY_SERVER_URL || 'http://localhost:8001';
+}
+
 export async function POST(req: Request) {
   let body: any;
   try {
@@ -33,12 +43,14 @@ export async function POST(req: Request) {
     return new Response('Missing messages', { status: 400 });
   }
 
-  const serverBase = process.env.PY_SERVER_URL || 'http://localhost:8001';
+  const { searchParams } = new URL(req.url);
+  const system = searchParams.get('system') || body?.system;
+  const serverBase = resolveServerBase(system);
   const serverPath = process.env.PY_CHAT_PATH || '/api/v1/chat/send';
-  const url = `${serverBase.replace(/\/$/, '')}${serverPath}`;
+  const url = `${serverBase.replace(/\/$/, '')}${serverPath}${system ? `?system=${encodeURIComponent(system)}` : ''}`;
 
   const payload = {
-    system: '',
+    system: system || '',
     messages: uiToOpenAIContent(messages),
     stream: false,
   };

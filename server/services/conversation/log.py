@@ -18,6 +18,7 @@ if TYPE_CHECKING:  # pragma: no cover - used for type checkers only
 
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 _CONVERSATION_LOG_PATH = _DATA_DIR / "conversation" / "poke_conversation.log"
+_CONVERSATION_JEV_LOG_PATH = _DATA_DIR / "conversation" / "poke_conversation_jev.log"
 
 
 class TranscriptFormatter(Protocol):
@@ -212,9 +213,12 @@ class ConversationLog:
 
 
 _conversation_log = ConversationLog(_CONVERSATION_LOG_PATH)
+_conversation_log_jev = ConversationLog(_CONVERSATION_JEV_LOG_PATH)
 
 
-def get_conversation_log() -> ConversationLog:
+def get_conversation_log(system: str | None = None) -> ConversationLog:
+    if system in ("enhanced_jev", "jev"):
+        return _conversation_log_jev
     return _conversation_log
 
 

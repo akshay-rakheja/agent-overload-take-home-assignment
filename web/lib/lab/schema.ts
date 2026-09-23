@@ -7,7 +7,7 @@ export const AvailabilitySchema = z.enum(['available', 'inferred', 'not_applicab
 const text = z.string().refine((value) => !/\bbearer\s+[\w.~+/=-]+|\bsk-[\w-]{8,}|\b(?:api[_ -]?key|access[_ -]?token|client[_ -]?secret|password|token|secret|key)\b\s*[:=]\s*\S+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|https?:\/\/\S*(?:oauth|authorize|[?&](?:code|token|state)=)/i.test(value), 'Unsafe text');
 const uuid = z.string().uuid();
 const integer = z.number().int();
-const system = z.enum(['baseline', 'enhanced']);
+const system = z.enum(['baseline', 'enhanced', 'enhanced_deterministic', 'enhanced_jev']);
 const nullableText = text.nullable();
 const secretKey = /(?:authorizationcode|authcode|apikey|authconfigid|oauthcode|accesstoken|refreshtoken|idtoken|clientsecret|password|secret|token)$/i;
 const mailKeys = new Set(['email', 'emailaddress', 'address', 'from', 'to', 'cc', 'bcc', 'sender', 'recipient', 'messageid', 'threadid', 'gmailmessageid', 'gmailthreadid', 'snippet', 'body', 'rawbody', 'htmlbody']);
@@ -127,7 +127,19 @@ export const SystemRunResultSchema = z.object({
   duplicates: observedList, gmail_evidence: observedGmailEvidence, final_response: observedValue(text),
   context_metrics: observation, timings: observedList, usage,
   cost: z.object({ amount: observedValue(z.number().finite()), currency: observedValue(text), known_amount_subtotal: observedValue(z.number().finite()) }).strict(),
-  errors: observedList, availability_metadata: z.record(AvailabilitySchema),
+  errors: observedList,
+  jev_map_scores: observedValue(z.array(jsonValue)).optional(),
+  jev_shortlist: observedValue(z.array(jsonValue)).optional(),
+  jev_reduce_decision: observation.optional(),
+  jev_winner_margin: observedValue(z.number().finite()).optional(),
+  jev_map_latency_ms: observedValue(z.number().finite()).optional(),
+  jev_reduce_latency_ms: observedValue(z.number().finite()).optional(),
+  jev_total_latency_ms: observedValue(z.number().finite()).optional(),
+  jev_api_calls_count: observedValue(integer).optional(),
+  jev_token_usage: observation.optional(),
+  jev_card_digest: observedValue(text).optional(),
+  jev_partial_failures: observation.optional(),
+  availability_metadata: z.record(AvailabilitySchema),
 }).strict();
 
 export const ScenarioSchema = z.object({
@@ -140,9 +152,21 @@ export const StartRunRequestSchema = z.object({
   request_id: uuid,
   scenario_ids: z.array(z.string().trim().min(1).max(200).pipe(text)).refine((ids) => new Set(ids).size === ids.length, 'Scenario IDs must be unique'),
 }).strict();
-export const RunStatusSchema = z.enum(['queued', 'resetting', 'baseline_running', 'enhanced_running', 'grading', 'complete', 'partial_failure', 'blocked']);
+export const RunStatusSchema = z.enum([
+  'queued', 'resetting', 'baseline_running', 'enhanced_running',
+  'deterministic_running', 'jev_running', 'grading', 'complete',
+  'partial_failure', 'blocked'
+]);
 export const RunHandleSchema = z.object({ run_id: uuid, request_id: uuid, status: RunStatusSchema }).strict();
-const scheduledPair = z.object({ pair_id: uuid, scenario_id: text, repetition: integer.min(1), order: z.enum(['baseline_then_enhanced', 'enhanced_then_baseline']) }).strict();
+const scheduledPair = z.object({
+  pair_id: uuid, scenario_id: text, repetition: integer.min(1),
+  order: z.enum([
+    'baseline_then_enhanced', 'enhanced_then_baseline',
+    'baseline_then_deterministic_then_jev', 'baseline_then_jev_then_deterministic',
+    'deterministic_then_baseline_then_jev', 'deterministic_then_jev_then_baseline',
+    'jev_then_baseline_then_deterministic', 'jev_then_deterministic_then_baseline'
+  ])
+}).strict();
 const outcomeStatus = z.enum(['success', 'failure', 'timeout', 'budget_stop', 'malformed', 'unavailable']);
 const lateCompletion = z.object({ status: outcomeStatus, model_id: nullableText, results: z.array(SystemRunResultSchema), reason: nullableText }).strict();
 const sideOutcome = lateCompletion.extend({ system, attempt_count: z.literal(1), late_completion: lateCompletion.nullable() }).strict();
@@ -165,7 +189,7 @@ const sequenceScorecard = z.object({
   schema_version: z.literal(1), pair_id: uuid.optional(), repetition: integer.min(1).optional(), scenario_id: text, system, turns: z.array(scorecard), identity_continuity: layerGrade, passed: z.boolean(),
 }).strict();
 export const PairedRunResultSchema = z.object({
-  schema_version: z.literal(1), run_id: uuid, request: StartRunRequestSchema,
+  schema_version: z.union([z.literal(1), z.literal(2)]), run_id: uuid, request: StartRunRequestSchema,
   execution_mode: z.enum(['measured', 'offline_fake']),
   snapshot_contracts: z.array(z.object({ profile_id: text, snapshot_id: text, baseline_roster_fingerprint: text, enhanced_roster_fingerprint: text, fixture_fingerprint: text, raw_journal_fingerprint: text }).strict()),
   status: RunStatusSchema, generation: integer.min(0), schedule: z.array(scheduledPair),

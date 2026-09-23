@@ -5,8 +5,12 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {}
-  const userId = body?.userId || '';
+  let userId = body?.userId || '';
   const connectionRequestId = body?.connectionRequestId || '';
+
+  if (userId.startsWith('web-')) {
+    userId = '';
+  }
 
   const serverBase = process.env.PY_SERVER_URL || 'http://localhost:8001';
   const url = `${serverBase.replace(/\/$/, '')}/api/v1/gmail/status`;

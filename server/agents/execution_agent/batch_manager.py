@@ -33,17 +33,28 @@ class _BatchState:
     created_at: datetime = field(default_factory=datetime.now)
     pending: int = 0
     results: List[ExecutionResult] = field(default_factory=list)
+    system_name: str = "enhanced_deterministic"
 
 
 class ExecutionBatchManager:
     """Run execution agents and deliver their combined outcome."""
 
     # Initialize batch manager with timeout and coordination state for execution agents
-    def __init__(self, timeout_seconds: int = 90) -> None:
+    def __init__(self, timeout_seconds: int = 180) -> None:
         self.timeout_seconds = timeout_seconds
         self._pending: Dict[str, PendingExecution] = {}
         self._batch_lock = asyncio.Lock()
-        self._batch_state: Optional[_BatchState] = None
+        self._batch_states: Dict[str, _BatchState] = {}
+
+    @property
+    def _batch_state(self) -> Optional[_BatchState]:
+        return next(iter(self._batch_states.values()), None)
+
+    @_batch_state.setter
+    def _batch_state(self, val: Optional[_BatchState]) -> None:
+        self._batch_states.clear()
+        if val is not None:
+            self._batch_states[val.system_name] = val
 
     # Run execution agent with timeout handling and batch coordination for interaction agent
     async def execute_agent(
@@ -53,6 +64,7 @@ class ExecutionBatchManager:
         request_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         legacy_storage_key: Optional[str] = None,
+        system_name: str = "enhanced_deterministic",
     ) -> ExecutionResult:
         """Execute an agent asynchronously and buffer the result for batch dispatch."""
 
@@ -65,6 +77,7 @@ class ExecutionBatchManager:
             request_id,
             agent_id=agent_id,
             legacy_storage_key=legacy_storage_key,
+            system_name=system_name,
         )
 
         try:
@@ -110,17 +123,20 @@ class ExecutionBatchManager:
         request_id: str,
         agent_id: Optional[str] = None,
         legacy_storage_key: Optional[str] = None,
+        system_name: str = "enhanced_deterministic",
     ) -> str:
         """Attach a new execution to the active batch, opening one when required."""
 
         async with self._batch_lock:
-            if self._batch_state is None:
+            state = self._batch_states.get(system_name)
+            if state is None:
                 batch_id = str(uuid.uuid4())
-                self._batch_state = _BatchState(batch_id=batch_id)
+                state = _BatchState(batch_id=batch_id, system_name=system_name)
+                self._batch_states[system_name] = state
             else:
-                batch_id = self._batch_state.batch_id
+                batch_id = state.batch_id
 
-            self._batch_state.pending += 1
+            state.pending += 1
             self._pending[request_id] = PendingExecution(
                 request_id=request_id,
                 agent_name=agent_name,
@@ -142,10 +158,18 @@ class ExecutionBatchManager:
         """Record the execution result and dispatch when the batch drains."""
 
         dispatch_payload: Optional[str] = None
+        system_name: str = "enhanced_deterministic"
 
         async with self._batch_lock:
-            state = self._batch_state
-            if state is None or state.batch_id != batch_id:
+            target_sys = None
+            state = None
+            for sys_name, bs in self._batch_states.items():
+                if bs.batch_id == batch_id:
+                    target_sys = sys_name
+                    state = bs
+                    break
+
+            if state is None:
                 logger.warning(f"[{agent_name}] Dropping result for unknown batch")
                 return
 
@@ -154,12 +178,19 @@ class ExecutionBatchManager:
 
             if state.pending == 0:
                 dispatch_payload = self._format_batch_payload(state.results)
+                system_name = state.system_name
                 agent_names = [entry.agent_name for entry in state.results]
                 logger.info(f"Execution batch completed: {', '.join(agent_names)}")
-                self._batch_state = None
+                if target_sys:
+                    self._batch_states.pop(target_sys, None)
 
         if dispatch_payload:
-            await self._dispatch_to_interaction_agent(dispatch_payload)
+            import inspect
+            sig = inspect.signature(self._dispatch_to_interaction_agent)
+            if "system_name" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                await self._dispatch_to_interaction_agent(dispatch_payload, system_name=system_name)
+            else:
+                await self._dispatch_to_interaction_agent(dispatch_payload)
 
     # Return list of currently pending execution requests for monitoring purposes
     def get_pending_executions(self) -> List[Dict[str, str]]:
@@ -178,12 +209,11 @@ class ExecutionBatchManager:
         ]
 
     # Clean up all pending executions and batch state on shutdown
-    async def shutdown(self) -> None:
-        """Clear pending bookkeeping (no background work remains)."""
+    def reset(self) -> None:
+        """Clear active and pending executions during test cleanup."""
 
         self._pending.clear()
-        async with self._batch_lock:
-            self._batch_state = None
+        self._batch_states.clear()
 
     # Format multiple execution results into single message for interaction agent
     def _format_batch_payload(self, results: List[ExecutionResult]) -> str:
@@ -197,12 +227,13 @@ class ExecutionBatchManager:
         return "\n".join(entries)
 
     # Forward combined execution results to interaction agent for user response generation
-    async def _dispatch_to_interaction_agent(self, payload: str) -> None:
+    async def _dispatch_to_interaction_agent(self, payload: str, system_name: str = "enhanced_deterministic") -> None:
         """Send the aggregated execution summary to the interaction agent."""
 
         from ..interaction_agent.runtime import InteractionAgentRuntime
 
-        runtime = InteractionAgentRuntime()
+        routing_mode = "jev" if system_name in ("enhanced_jev", "jev") else "deterministic"
+        runtime = InteractionAgentRuntime(routing_mode=routing_mode, system_name=system_name)
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:

@@ -75,11 +75,330 @@ def _unavailable(reason: str):
     return {"availability": "unavailable", "value": None, "reason": reason}
 
 
+def _emit_enhanced_turn_traces(
+    *,
+    run_id: UUID,
+    pair_id: UUID,
+    turn_idx: int,
+    turn_exp: Any,
+    turn_action: str,
+    query: str,
+    identity_name: str | None,
+    target_agent_id: UUID | None,
+    fact_ids: Sequence[str],
+    final_response: str,
+    system_name: str,
+    mode_name: str,
+    is_jev: bool = False,
+) -> SystemRunResult:
+    turn_id = uuid5(run_id, f"{system_name}-turn-{pair_id}-{turn_idx}")
+    sink = _CollectingSink()
+    trace_context = TraceContext(
+        run_id=run_id,
+        turn_id=turn_id,
+        system=system_name,
+        revision=f"{system_name}@local",
+        mode=mode_name,
+    )
+    with trace_scope(trace_context, sink):
+        emit_trace(
+            TraceEventKind.RUN_METADATA,
+            {"revision": trace_context.revision, "mode": trace_context.mode, "roster_count": 100},
+        )
+        if is_jev:
+            scores = (
+                [
+                    {
+                        "agent_id": str(target_agent_id),
+                        "composite_score": 0.95,
+                        "affinity_score": 0.95,
+                        "continuity_score": 1.0,
+                        "risk_score": 0.0,
+                        "reasoning": "exact match",
+                        "card_digest": "card-digest-001",
+                        "latency_ms": 12.0,
+                    }
+                ]
+                if turn_action == "reuse"
+                else []
+            )
+            emit_trace(
+                TraceEventKind.JEV_MAP,
+                {
+                    "map_scores": scores,
+                    "card_digest": "card-digest-001",
+                    "latency_ms": 32.5,
+                    "api_calls_count": 3,
+                    "partial_failures": [],
+                },
+            )
+            shortlist = [str(target_agent_id)] if turn_action == "reuse" else []
+            emit_trace(TraceEventKind.JEV_SHORTLIST, {"shortlist": shortlist})
+            emit_trace(
+                TraceEventKind.JEV_REDUCE,
+                {
+                    "decision": {
+                        "action": turn_action,
+                        "recommended_agent_id": str(target_agent_id) if turn_action != "abstain" else None,
+                        "confidence": 0.95 if turn_action != "abstain" else 0.5,
+                        "winner_margin": 0.35 if turn_action == "reuse" else 0.0,
+                        "rationale": "Jev map-reduce routing decision",
+                    },
+                    "winner_margin": 0.35 if turn_action == "reuse" else 0.0,
+                    "latency_ms": 18.2,
+                    "total_latency_ms": 50.7,
+                    "token_usage": {"input_tokens": 350, "output_tokens": 65},
+                },
+            )
+
+        if turn_action == "reuse":
+            emit_trace(
+                TraceEventKind.CANDIDATES,
+                {
+                    "candidates": [
+                        {
+                            "agent_id": str(target_agent_id),
+                            "name": identity_name,
+                            "status": "hot",
+                        }
+                    ]
+                },
+            )
+            emit_trace(
+                TraceEventKind.ROUTING_DECISION,
+                {
+                    "action": "reuse",
+                    "agent_id": str(target_agent_id),
+                    "confidence": 0.95,
+                    "reasons": ["exact match"],
+                    "recommendation": str(target_agent_id),
+                },
+            )
+            emit_trace(
+                TraceEventKind.AUTHORIZATION,
+                {"routing_action": "reuse", "authorized_ids": [str(target_agent_id)]},
+            )
+            emit_trace(
+                TraceEventKind.DISPATCH_ATTEMPT,
+                {
+                    "reference_type": "reuse",
+                    "action": "reuse",
+                    "requested_agent_id": str(target_agent_id),
+                    "routing_action": "reuse",
+                    "authorized_ids": [str(target_agent_id)],
+                    "directory_count_before": 100,
+                    "message_preview": query,
+                    "target_name": identity_name,
+                },
+            )
+            emit_trace(
+                TraceEventKind.DISPATCH_RESULT,
+                {
+                    "status": "accepted",
+                    "accepted": True,
+                    "success": True,
+                    "selected_agent_id": str(target_agent_id),
+                    "agent_id": str(target_agent_id),
+                    "target_name": identity_name,
+                    "new_agent_created": False,
+                    "idempotent_creation": False,
+                    "directory_count_before": 100,
+                    "directory_count_after": 100,
+                },
+            )
+            emit_trace(
+                TraceEventKind.IDENTITY,
+                {
+                    "action": "reuse",
+                    "agent_id": str(target_agent_id),
+                    "name": identity_name,
+                    "selected": {
+                        "agent_id": str(target_agent_id),
+                        "name": identity_name,
+                        "status": "hot",
+                    },
+                },
+            )
+        elif turn_action == "create_new":
+            emit_trace(
+                TraceEventKind.CANDIDATES,
+                {"candidates": []},
+            )
+            emit_trace(
+                TraceEventKind.ROUTING_DECISION,
+                {
+                    "action": "create_new",
+                    "agent_id": str(target_agent_id),
+                    "confidence": 0.95,
+                    "reasons": ["novel capability"],
+                    "recommendation": "create_new",
+                },
+            )
+            emit_trace(
+                TraceEventKind.AUTHORIZATION,
+                {"routing_action": "create_new", "authorized_ids": [str(target_agent_id)]},
+            )
+            emit_trace(
+                TraceEventKind.DISPATCH_ATTEMPT,
+                {
+                    "reference_type": "create",
+                    "action": "create_new",
+                    "requested_agent_id": str(target_agent_id),
+                    "routing_action": "create_new",
+                    "authorized_ids": [str(target_agent_id)],
+                    "directory_count_before": 100,
+                    "message_preview": query,
+                    "target_name": identity_name,
+                },
+            )
+            emit_trace(
+                TraceEventKind.DISPATCH_RESULT,
+                {
+                    "status": "accepted",
+                    "accepted": True,
+                    "success": True,
+                    "selected_agent_id": str(target_agent_id),
+                    "agent_id": str(target_agent_id),
+                    "target_name": identity_name,
+                    "new_agent_created": True,
+                    "idempotent_creation": False,
+                    "directory_count_before": 100,
+                    "directory_count_after": 101,
+                },
+            )
+            emit_trace(
+                TraceEventKind.IDENTITY,
+                {
+                    "action": "create_new",
+                    "agent_id": str(target_agent_id),
+                    "name": identity_name,
+                    "selected": {
+                        "agent_id": str(target_agent_id),
+                        "name": identity_name,
+                        "status": "hot",
+                    },
+                    "created": {
+                        "agent_id": str(target_agent_id),
+                        "name": identity_name,
+                        "status": "hot",
+                    },
+                },
+            )
+        else:
+            emit_trace(
+                TraceEventKind.CANDIDATES,
+                {"candidates": []},
+            )
+            emit_trace(
+                TraceEventKind.ROUTING_DECISION,
+                {
+                    "action": "abstain",
+                    "agent_id": None,
+                    "confidence": 0.5,
+                    "reasons": ["ambiguous query requires clarification"],
+                    "recommendation": None,
+                },
+            )
+            emit_trace(
+                TraceEventKind.AUTHORIZATION,
+                {"routing_action": "abstain", "authorized_ids": []},
+            )
+            emit_trace(
+                TraceEventKind.DISPATCH_RESULT,
+                {
+                    "status": "abstain",
+                    "accepted": False,
+                    "success": True,
+                    "selected_agent_id": None,
+                    "new_agent_created": False,
+                    "idempotent_creation": False,
+                    "directory_count_before": 100,
+                    "directory_count_after": 100,
+                },
+            )
+
+        if turn_exp.gmail is not None:
+            fixture_run_key = f"fixture-run-{run_id.hex[:8]}"
+            messages = render_fixture_messages(fixture_run_key)
+            manifest = build_fact_manifest(messages)
+            with search_email_tool.fixture_fact_manifest_scope(manifest):
+                controlled_fixture_evidence = search_email_tool._controlled_fixture_evidence(
+                    list(fact_ids)
+                )
+            emit_trace(
+                TraceEventKind.GMAIL_EVIDENCE,
+                {
+                    "boundary": "email_search_task",
+                    "operation_name": turn_exp.gmail.operation,
+                    "stage": "completed",
+                    "result_count": 0 if turn_exp.gmail.expect_no_result else len(fact_ids),
+                    "has_more": False,
+                    "attachment_count": 0,
+                    "query_sha256": hashlib.sha256(turn_exp.gmail.query.encode("utf-8")).hexdigest(),
+                    "fact_ids": list(fact_ids),
+                    "controlled_fixture_evidence": controlled_fixture_evidence,
+                },
+            )
+
+        history_entries = tuple(
+            (
+                "agent_request" if index % 2 == 0 else "agent_response",
+                f"2026-09-20T12:{index % 60:02d}:00Z",
+                f"Fixture history entry {index:05d} for bounded context evidence.",
+            )
+            for index in range(100)
+        )
+        context = ExecutionContextPolicy(
+            max_recent_episodes=8,
+            max_characters=4_000,
+        ).render(history_entries, memory_summary="Controlled fixture summary.")
+        emit_trace(TraceEventKind.CONTEXT_METRICS, asdict(context.metrics))
+        emit_trace(
+            TraceEventKind.PHASE_TIMING,
+            {
+                "phase": "retrieval_routing",
+                "started_monotonic_ns": 10,
+                "finished_monotonic_ns": 19_300_010,
+                "elapsed_ns": 19_300_000,
+            },
+        )
+        emit_trace(
+            TraceEventKind.PHASE_TIMING,
+            {
+                "phase": "total_run",
+                "started_monotonic_ns": 100,
+                "finished_monotonic_ns": 436_800_100,
+                "elapsed_ns": 436_800_000,
+            },
+        )
+        emit_usage_evidence(
+            {
+                "usage": {
+                    "prompt_tokens": 968,
+                    "completion_tokens": 126,
+                    "cached_tokens": 0,
+                    "total_tokens": 1_094,
+                    "cost": 0.0048,
+                }
+            },
+            role="interaction",
+            call_id=f"{system_name}-fixture-call-{turn_idx}",
+            attempt=0,
+        )
+        emit_trace(
+            TraceEventKind.FINAL_RESPONSE,
+            {"response": final_response},
+        )
+
+    return consolidate_trace(sink.events)
+
+
 def run_offline_evaluation(
     scenario_ids: Sequence[str] | None = None,
     repetitions: int = 1,
     seed: int = 42,
     model: str = "openai/gpt-4.1-mini",
+    three_way: bool = False,
 ) -> PairedRunResult:
     """Execute deterministic offline paired evaluation and return projected PairedRunResult."""
     all_scenarios = load_controlled_scenarios()
@@ -98,7 +417,9 @@ def run_offline_evaluation(
     schedule = tuple(
         pair
         for scen in selected_scenarios
-        for pair in build_repetition_schedule([scen.scenario_id], repetitions=repetitions)
+        for pair in build_repetition_schedule(
+            [scen.scenario_id], repetitions=repetitions, three_way=three_way
+        )
     )
 
     expected_agent_id = UUID("292943fa-641b-5ae6-a8d2-ab631be77ba8")
@@ -163,6 +484,8 @@ def run_offline_evaluation(
 
         baseline_turn_results: list[SystemRunResult] = []
         enhanced_turn_results: list[SystemRunResult] = []
+        det_turn_results: list[SystemRunResult] = []
+        jev_turn_results: list[SystemRunResult] = []
 
         if scen.identity_contract is not None:
             if scen.expected_agent_id:
@@ -253,269 +576,63 @@ def run_offline_evaluation(
             )
             baseline_turn_results.append(adapt_baseline(baseline_obs, turn_id=baseline_turn_id))
 
-            # 2. Enhanced turn
-            enhanced_turn_id = uuid5(run_id, f"enhanced-turn-{scheduled.pair_id}-{turn_idx}")
-            sink = _CollectingSink()
-            trace_context = TraceContext(
-                run_id=run_id,
-                turn_id=enhanced_turn_id,
-                system="enhanced",
-                revision="enhanced@local",
-                mode="bounded_directory",
-            )
-            with trace_scope(trace_context, sink):
-                emit_trace(
-                    TraceEventKind.RUN_METADATA,
-                    {"revision": trace_context.revision, "mode": trace_context.mode, "roster_count": 100},
+            # 2. Enhanced turn(s)
+            if three_way:
+                det_turn_results.append(
+                    _emit_enhanced_turn_traces(
+                        run_id=run_id,
+                        pair_id=scheduled.pair_id,
+                        turn_idx=turn_idx,
+                        turn_exp=turn_exp,
+                        turn_action=turn_action,
+                        query=query,
+                        identity_name=identity_name,
+                        target_agent_id=target_agent_id,
+                        fact_ids=fact_ids,
+                        final_response=final_response,
+                        system_name="enhanced_deterministic",
+                        mode_name="bounded_directory",
+                        is_jev=False,
+                    )
                 )
-                if turn_action == "reuse":
-                    emit_trace(
-                        TraceEventKind.CANDIDATES,
-                        {
-                            "candidates": [
-                                {
-                                    "agent_id": str(target_agent_id),
-                                    "name": identity_name,
-                                    "status": "hot",
-                                }
-                            ]
-                        },
+                jev_turn_results.append(
+                    _emit_enhanced_turn_traces(
+                        run_id=run_id,
+                        pair_id=scheduled.pair_id,
+                        turn_idx=turn_idx,
+                        turn_exp=turn_exp,
+                        turn_action=turn_action,
+                        query=query,
+                        identity_name=identity_name,
+                        target_agent_id=target_agent_id,
+                        fact_ids=fact_ids,
+                        final_response=final_response,
+                        system_name="enhanced_jev",
+                        mode_name="jev_map_reduce",
+                        is_jev=True,
                     )
-                    emit_trace(
-                        TraceEventKind.ROUTING_DECISION,
-                        {
-                            "action": "reuse",
-                            "agent_id": str(target_agent_id),
-                            "confidence": 0.95,
-                            "reasons": ["exact match"],
-                            "recommendation": str(target_agent_id),
-                        },
-                    )
-                    emit_trace(
-                        TraceEventKind.AUTHORIZATION,
-                        {"routing_action": "reuse", "authorized_ids": [str(target_agent_id)]},
-                    )
-                    emit_trace(
-                        TraceEventKind.DISPATCH_ATTEMPT,
-                        {
-                            "reference_type": "reuse",
-                            "action": "reuse",
-                            "requested_agent_id": str(target_agent_id),
-                            "routing_action": "reuse",
-                            "authorized_ids": [str(target_agent_id)],
-                            "directory_count_before": 100,
-                            "message_preview": query,
-                            "target_name": identity_name,
-                        },
-                    )
-                    emit_trace(
-                        TraceEventKind.DISPATCH_RESULT,
-                        {
-                            "status": "accepted",
-                            "accepted": True,
-                            "success": True,
-                            "selected_agent_id": str(target_agent_id),
-                            "agent_id": str(target_agent_id),
-                            "target_name": identity_name,
-                            "new_agent_created": False,
-                            "idempotent_creation": False,
-                            "directory_count_before": 100,
-                            "directory_count_after": 100,
-                        },
-                    )
-                    emit_trace(
-                        TraceEventKind.IDENTITY,
-                        {
-                            "action": "reuse",
-                            "agent_id": str(target_agent_id),
-                            "name": identity_name,
-                            "selected": {
-                                "agent_id": str(target_agent_id),
-                                "name": identity_name,
-                                "status": "hot",
-                            },
-                        },
-                    )
-                elif turn_action == "create_new":
-                    emit_trace(
-                        TraceEventKind.CANDIDATES,
-                        {"candidates": []},
-                    )
-                    emit_trace(
-                        TraceEventKind.ROUTING_DECISION,
-                        {
-                            "action": "create_new",
-                            "agent_id": str(target_agent_id),
-                            "confidence": 0.95,
-                            "reasons": ["novel capability"],
-                            "recommendation": "create_new",
-                        },
-                    )
-                    emit_trace(
-                        TraceEventKind.AUTHORIZATION,
-                        {"routing_action": "create_new", "authorized_ids": [str(target_agent_id)]},
-                    )
-                    emit_trace(
-                        TraceEventKind.DISPATCH_ATTEMPT,
-                        {
-                            "reference_type": "create",
-                            "action": "create_new",
-                            "requested_agent_id": str(target_agent_id),
-                            "routing_action": "create_new",
-                            "authorized_ids": [str(target_agent_id)],
-                            "directory_count_before": 100,
-                            "message_preview": query,
-                            "target_name": identity_name,
-                        },
-                    )
-                    emit_trace(
-                        TraceEventKind.DISPATCH_RESULT,
-                        {
-                            "status": "accepted",
-                            "accepted": True,
-                            "success": True,
-                            "selected_agent_id": str(target_agent_id),
-                            "agent_id": str(target_agent_id),
-                            "target_name": identity_name,
-                            "new_agent_created": True,
-                            "idempotent_creation": False,
-                            "directory_count_before": 100,
-                            "directory_count_after": 101,
-                        },
-                    )
-                    emit_trace(
-                        TraceEventKind.IDENTITY,
-                        {
-                            "action": "create_new",
-                            "agent_id": str(target_agent_id),
-                            "name": identity_name,
-                            "selected": {
-                                "agent_id": str(target_agent_id),
-                                "name": identity_name,
-                                "status": "hot",
-                            },
-                            "created": {
-                                "agent_id": str(target_agent_id),
-                                "name": identity_name,
-                                "status": "hot",
-                            },
-                        },
-                    )
-                else:
-                    emit_trace(
-                        TraceEventKind.CANDIDATES,
-                        {"candidates": []},
-                    )
-                    emit_trace(
-                        TraceEventKind.ROUTING_DECISION,
-                        {
-                            "action": "abstain",
-                            "agent_id": None,
-                            "confidence": 0.5,
-                            "reasons": ["ambiguous query requires clarification"],
-                            "recommendation": None,
-                        },
-                    )
-                    emit_trace(
-                        TraceEventKind.AUTHORIZATION,
-                        {"routing_action": "abstain", "authorized_ids": []},
-                    )
-                    emit_trace(
-                        TraceEventKind.DISPATCH_RESULT,
-                        {
-                            "status": "abstain",
-                            "accepted": False,
-                            "success": True,
-                            "selected_agent_id": None,
-                            "new_agent_created": False,
-                            "idempotent_creation": False,
-                            "directory_count_before": 100,
-                            "directory_count_after": 100,
-                        },
-                    )
-
-                if turn_exp.gmail is not None:
-                    fixture_run_key = f"fixture-run-{run_id.hex[:8]}"
-                    messages = render_fixture_messages(fixture_run_key)
-                    manifest = build_fact_manifest(messages)
-                    with search_email_tool.fixture_fact_manifest_scope(manifest):
-                        controlled_fixture_evidence = search_email_tool._controlled_fixture_evidence(
-                            list(fact_ids)
-                        )
-                    emit_trace(
-                        TraceEventKind.GMAIL_EVIDENCE,
-                        {
-                            "boundary": "email_search_task",
-                            "operation_name": turn_exp.gmail.operation,
-                            "stage": "completed",
-                            "result_count": 0 if turn_exp.gmail.expect_no_result else len(fact_ids),
-                            "has_more": False,
-                            "attachment_count": 0,
-                            "query_sha256": hashlib.sha256(turn_exp.gmail.query.encode("utf-8")).hexdigest(),
-                            "fact_ids": list(fact_ids),
-                            "controlled_fixture_evidence": controlled_fixture_evidence,
-                        },
-                    )
-
-                history_entries = tuple(
-                    (
-                        "agent_request" if index % 2 == 0 else "agent_response",
-                        f"2026-09-20T12:{index % 60:02d}:00Z",
-                        f"Fixture history entry {index:05d} for bounded context evidence.",
-                    )
-                    for index in range(100)
                 )
-                context = ExecutionContextPolicy(
-                    max_recent_episodes=8,
-                    max_characters=4_000,
-                ).render(history_entries, memory_summary="Controlled fixture summary.")
-                emit_trace(TraceEventKind.CONTEXT_METRICS, asdict(context.metrics))
-                emit_trace(
-                    TraceEventKind.PHASE_TIMING,
-                    {
-                        "phase": "retrieval_routing",
-                        "started_monotonic_ns": 10,
-                        "finished_monotonic_ns": 19_300_010,
-                        "elapsed_ns": 19_300_000,
-                    },
+            else:
+                enhanced_turn_results.append(
+                    _emit_enhanced_turn_traces(
+                        run_id=run_id,
+                        pair_id=scheduled.pair_id,
+                        turn_idx=turn_idx,
+                        turn_exp=turn_exp,
+                        turn_action=turn_action,
+                        query=query,
+                        identity_name=identity_name,
+                        target_agent_id=target_agent_id,
+                        fact_ids=fact_ids,
+                        final_response=final_response,
+                        system_name="enhanced",
+                        mode_name="bounded_directory",
+                        is_jev=False,
+                    )
                 )
-                emit_trace(
-                    TraceEventKind.PHASE_TIMING,
-                    {
-                        "phase": "total_run",
-                        "started_monotonic_ns": 100,
-                        "finished_monotonic_ns": 436_800_100,
-                        "elapsed_ns": 436_800_000,
-                    },
-                )
-                emit_usage_evidence(
-                    {
-                        "usage": {
-                            "prompt_tokens": 968,
-                            "completion_tokens": 126,
-                            "cached_tokens": 0,
-                            "total_tokens": 1_094,
-                            "cost": 0.0048,
-                        }
-                    },
-                    role="interaction",
-                    call_id=f"enhanced-fixture-call-{turn_idx}",
-                    attempt=0,
-                )
-                emit_trace(
-                    TraceEventKind.FINAL_RESPONSE,
-                    {"response": final_response},
-                )
-
-            enhanced_turn_results.append(consolidate_trace(sink.events))
 
         baseline_results = tuple(baseline_turn_results)
-        enhanced_results = tuple(enhanced_turn_results)
-
-        # Grade
         baseline_graded = grade_scenario_sequence(scen, baseline_results)
-        enhanced_graded = grade_scenario_sequence(scen, enhanced_results)
-
         scorecards.append(
             PairedSequenceScorecard(
                 scenario_id=scen.scenario_id,
@@ -526,46 +643,111 @@ def run_offline_evaluation(
                 identity_continuity=baseline_graded.identity_continuity,
             )
         )
-        scorecards.append(
-            PairedSequenceScorecard(
-                scenario_id=scen.scenario_id,
-                system="enhanced",
-                pair_id=pair_id,
-                repetition=rep,
-                turns=enhanced_graded.turns,
-                identity_continuity=enhanced_graded.identity_continuity,
-            )
-        )
 
-        pairs.append(
-            PairExecutionRecord(
-                scheduled=scheduled,
-                outcomes=(
-                    PersistedSideOutcome(
-                        system=MeasuredSystem.BASELINE,
-                        status=OutcomeStatus.SUCCESS,
-                        model_id=model,
-                        results=baseline_results,
-                    ),
-                    PersistedSideOutcome(
-                        system=MeasuredSystem.ENHANCED,
-                        status=OutcomeStatus.SUCCESS,
-                        model_id=model,
-                        results=enhanced_results,
-                    ),
-                ),
-            )
-        )
+        if three_way:
+            det_results = tuple(det_turn_results)
+            jev_results = tuple(jev_turn_results)
+            det_graded = grade_scenario_sequence(scen, det_results)
+            jev_graded = grade_scenario_sequence(scen, jev_results)
 
-    transitions = (
-        RunTransition(sequence=1, status=RunStatus.QUEUED, occurred_at=now),
-        RunTransition(sequence=2, status=RunStatus.BASELINE_RUNNING, occurred_at=now),
-        RunTransition(sequence=3, status=RunStatus.ENHANCED_RUNNING, occurred_at=now),
-        RunTransition(sequence=4, status=RunStatus.GRADING, occurred_at=now),
-        RunTransition(sequence=5, status=RunStatus.COMPLETE, occurred_at=now),
-    )
+            scorecards.append(
+                PairedSequenceScorecard(
+                    scenario_id=scen.scenario_id,
+                    system="enhanced_deterministic",
+                    pair_id=pair_id,
+                    repetition=rep,
+                    turns=det_graded.turns,
+                    identity_continuity=det_graded.identity_continuity,
+                )
+            )
+            scorecards.append(
+                PairedSequenceScorecard(
+                    scenario_id=scen.scenario_id,
+                    system="enhanced_jev",
+                    pair_id=pair_id,
+                    repetition=rep,
+                    turns=jev_graded.turns,
+                    identity_continuity=jev_graded.identity_continuity,
+                )
+            )
+            pairs.append(
+                PairExecutionRecord(
+                    scheduled=scheduled,
+                    outcomes=(
+                        PersistedSideOutcome(
+                            system=MeasuredSystem.BASELINE,
+                            status=OutcomeStatus.SUCCESS,
+                            model_id=model,
+                            results=baseline_results,
+                        ),
+                        PersistedSideOutcome(
+                            system=MeasuredSystem.ENHANCED_DETERMINISTIC,
+                            status=OutcomeStatus.SUCCESS,
+                            model_id=model,
+                            results=det_results,
+                        ),
+                        PersistedSideOutcome(
+                            system=MeasuredSystem.ENHANCED_JEV,
+                            status=OutcomeStatus.SUCCESS,
+                            model_id="typesafe/jev-routing-v1",
+                            results=jev_results,
+                        ),
+                    ),
+                )
+            )
+        else:
+            enhanced_results = tuple(enhanced_turn_results)
+            enhanced_graded = grade_scenario_sequence(scen, enhanced_results)
+            scorecards.append(
+                PairedSequenceScorecard(
+                    scenario_id=scen.scenario_id,
+                    system="enhanced",
+                    pair_id=pair_id,
+                    repetition=rep,
+                    turns=enhanced_graded.turns,
+                    identity_continuity=enhanced_graded.identity_continuity,
+                )
+            )
+            pairs.append(
+                PairExecutionRecord(
+                    scheduled=scheduled,
+                    outcomes=(
+                        PersistedSideOutcome(
+                            system=MeasuredSystem.BASELINE,
+                            status=OutcomeStatus.SUCCESS,
+                            model_id=model,
+                            results=baseline_results,
+                        ),
+                        PersistedSideOutcome(
+                            system=MeasuredSystem.ENHANCED,
+                            status=OutcomeStatus.SUCCESS,
+                            model_id=model,
+                            results=enhanced_results,
+                        ),
+                    ),
+                )
+            )
+
+    if three_way:
+        transitions = (
+            RunTransition(sequence=1, status=RunStatus.QUEUED, occurred_at=now),
+            RunTransition(sequence=2, status=RunStatus.BASELINE_RUNNING, occurred_at=now),
+            RunTransition(sequence=3, status=RunStatus.DETERMINISTIC_RUNNING, occurred_at=now),
+            RunTransition(sequence=4, status=RunStatus.JEV_RUNNING, occurred_at=now),
+            RunTransition(sequence=5, status=RunStatus.GRADING, occurred_at=now),
+            RunTransition(sequence=6, status=RunStatus.COMPLETE, occurred_at=now),
+        )
+    else:
+        transitions = (
+            RunTransition(sequence=1, status=RunStatus.QUEUED, occurred_at=now),
+            RunTransition(sequence=2, status=RunStatus.BASELINE_RUNNING, occurred_at=now),
+            RunTransition(sequence=3, status=RunStatus.ENHANCED_RUNNING, occurred_at=now),
+            RunTransition(sequence=4, status=RunStatus.GRADING, occurred_at=now),
+            RunTransition(sequence=5, status=RunStatus.COMPLETE, occurred_at=now),
+        )
 
     raw_result = PairedRunResult(
+        schema_version=2 if three_way else 1,
         run_id=run_id,
         request=StartRunRequest(request_id=request_id, scenario_ids=scen_id_tuple),
         status=RunStatus.COMPLETE,

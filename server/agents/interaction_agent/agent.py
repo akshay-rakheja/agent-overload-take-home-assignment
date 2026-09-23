@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
+import re
 from typing import Dict, List
 
 from ...config import MAX_AGENT_CANDIDATES, get_settings
@@ -74,6 +75,31 @@ def _render_conversation_history(transcript: str) -> str:
     return f"<conversation_history>\n{history}\n</conversation_history>"
 
 
+def _clean_transcript_for_routing(transcript: str) -> str:
+    """Filter out internal execution agent messages and wait markers from routing context.
+
+    Internal logs like `<agent_message>[SUCCESS] AgentName: ...</agent_message>` leak
+    agent names into the retrieval query, which causes unintended exact-phrase matches
+    and prevents creating new agents for domain shifts.
+    """
+    if not transcript:
+        return ""
+    cleaned = re.sub(r"<agent_message[^>]*>.*?</agent_message>", "", transcript, flags=re.DOTALL)
+    cleaned = re.sub(r"<wait[^>]*>.*?</wait>", "", cleaned, flags=re.DOTALL)
+    extracted: list[str] = []
+    for match in re.finditer(
+        r"<(?:user_message|poke_reply)[^>]*>(.*?)</(?:user_message|poke_reply)>",
+        cleaned,
+        flags=re.DOTALL,
+    ):
+        text = match.group(1).strip()
+        if text:
+            extracted.append(text)
+    if extracted:
+        return " ".join(extracted)
+    return cleaned.strip()
+
+
 def build_candidate_context(
     latest_text: str,
     transcript: str,
@@ -84,7 +110,8 @@ def build_candidate_context(
 
     resolved_directory = directory or get_agent_directory()
     context_limit = get_settings().agent_routing_context_max_characters
-    bounded_transcript = transcript[-context_limit:]
+    cleaned_transcript = _clean_transcript_for_routing(transcript)
+    bounded_transcript = cleaned_transcript[-context_limit:]
     query = RetrievalQuery(text=latest_text, conversation_context=bounded_transcript)
     with monotonic_phase(PhaseName.RETRIEVAL_ROUTING):
         candidates = AgentRetriever(resolved_directory.list_records).retrieve(query)

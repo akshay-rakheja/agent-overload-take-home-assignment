@@ -12,7 +12,8 @@ import './lab.css';
 
 const statusLabels = {
   queued: 'Queued', resetting: 'Resetting fixtures', baseline_running: 'Baseline running',
-  enhanced_running: 'Enhanced running', grading: 'Grading evidence', complete: 'Complete',
+  enhanced_running: 'Enhanced running', deterministic_running: 'Deterministic running',
+  jev_running: 'Jev running', grading: 'Grading evidence', complete: 'Complete',
   partial_failure: 'Partial failure', blocked: 'Blocked',
 };
 

@@ -8,11 +8,12 @@ interface ChatMessagesProps {
   isWaitingForResponse: boolean;
   scrollContainerRef: RefObject<HTMLDivElement | null>;
   onScroll: () => void;
+  className?: string;
 }
 
-export function ChatMessages({ messages, isWaitingForResponse, scrollContainerRef, onScroll }: ChatMessagesProps) {
+export function ChatMessages({ messages, isWaitingForResponse, scrollContainerRef, onScroll, className }: ChatMessagesProps) {
   return (
-    <div ref={scrollContainerRef} onScroll={onScroll} className="flex h-[70vh] flex-col gap-2 overflow-y-auto p-4">
+    <div ref={scrollContainerRef} onScroll={onScroll} className={clsx('flex flex-col gap-2 overflow-y-auto p-4', className || 'h-[70vh]')}>
       {messages.length === 0 && <EmptyState />}
 
       {messages.map((message, index) => {
@@ -21,11 +22,17 @@ export function ChatMessages({ messages, isWaitingForResponse, scrollContainerRe
         const next = messages[index + 1];
         const tail = !next || next.role !== message.role;
 
+        const isError = !isUser && message.text.startsWith('⚠️');
+
         return (
           <div key={message.id} className={clsx('flex', isUser ? 'justify-end' : 'justify-start')}>
             <div
               className={clsx(
-                isUser ? 'bubble-out' : 'bubble-in',
+                isUser
+                  ? 'bubble-out'
+                  : isError
+                  ? 'bubble-in border border-amber-500/40 bg-amber-950/20 text-amber-200'
+                  : 'bubble-in',
                 tail ? (isUser ? 'bubble-tail-out' : 'bubble-tail-in') : '',
                 isDraft && 'whitespace-pre-wrap',
               )}

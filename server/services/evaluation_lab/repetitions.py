@@ -29,17 +29,61 @@ _SCHEDULE_NAMESPACE = UUID("90a44066-93a3-5c13-923e-a1c4b227b8b1")
 class MeasuredSystem(str, Enum):
     BASELINE = "baseline"
     ENHANCED = "enhanced"
+    ENHANCED_DETERMINISTIC = "enhanced_deterministic"
+    ENHANCED_JEV = "enhanced_jev"
 
 
 class PairOrder(str, Enum):
     BASELINE_THEN_ENHANCED = "baseline_then_enhanced"
     ENHANCED_THEN_BASELINE = "enhanced_then_baseline"
+    BASELINE_DETERMINISTIC_JEV = "baseline_deterministic_jev"
+    DETERMINISTIC_JEV_BASELINE = "deterministic_jev_baseline"
+    JEV_BASELINE_DETERMINISTIC = "jev_baseline_deterministic"
+    BASELINE_JEV_DETERMINISTIC = "baseline_jev_deterministic"
+    DETERMINISTIC_BASELINE_JEV = "deterministic_baseline_jev"
+    JEV_DETERMINISTIC_BASELINE = "jev_deterministic_baseline"
 
     @property
-    def systems(self) -> tuple[MeasuredSystem, MeasuredSystem]:
+    def systems(self) -> tuple[MeasuredSystem, ...]:
         if self is PairOrder.BASELINE_THEN_ENHANCED:
             return MeasuredSystem.BASELINE, MeasuredSystem.ENHANCED
-        return MeasuredSystem.ENHANCED, MeasuredSystem.BASELINE
+        if self is PairOrder.ENHANCED_THEN_BASELINE:
+            return MeasuredSystem.ENHANCED, MeasuredSystem.BASELINE
+        if self is PairOrder.BASELINE_DETERMINISTIC_JEV:
+            return (
+                MeasuredSystem.BASELINE,
+                MeasuredSystem.ENHANCED_DETERMINISTIC,
+                MeasuredSystem.ENHANCED_JEV,
+            )
+        if self is PairOrder.DETERMINISTIC_JEV_BASELINE:
+            return (
+                MeasuredSystem.ENHANCED_DETERMINISTIC,
+                MeasuredSystem.ENHANCED_JEV,
+                MeasuredSystem.BASELINE,
+            )
+        if self is PairOrder.JEV_BASELINE_DETERMINISTIC:
+            return (
+                MeasuredSystem.ENHANCED_JEV,
+                MeasuredSystem.BASELINE,
+                MeasuredSystem.ENHANCED_DETERMINISTIC,
+            )
+        if self is PairOrder.BASELINE_JEV_DETERMINISTIC:
+            return (
+                MeasuredSystem.BASELINE,
+                MeasuredSystem.ENHANCED_JEV,
+                MeasuredSystem.ENHANCED_DETERMINISTIC,
+            )
+        if self is PairOrder.DETERMINISTIC_BASELINE_JEV:
+            return (
+                MeasuredSystem.ENHANCED_DETERMINISTIC,
+                MeasuredSystem.BASELINE,
+                MeasuredSystem.ENHANCED_JEV,
+            )
+        return (
+            MeasuredSystem.ENHANCED_JEV,
+            MeasuredSystem.ENHANCED_DETERMINISTIC,
+            MeasuredSystem.BASELINE,
+        )
 
 
 class OutcomeStatus(str, Enum):
@@ -67,8 +111,18 @@ class ScheduledPair(BaseModel):
         return normalized
 
 
+THREE_WAY_CYCLE = (
+    PairOrder.BASELINE_DETERMINISTIC_JEV,
+    PairOrder.DETERMINISTIC_JEV_BASELINE,
+    PairOrder.JEV_BASELINE_DETERMINISTIC,
+    PairOrder.BASELINE_JEV_DETERMINISTIC,
+    PairOrder.DETERMINISTIC_BASELINE_JEV,
+    PairOrder.JEV_DETERMINISTIC_BASELINE,
+)
+
+
 def build_repetition_schedule(
-    scenario_ids: Sequence[str], repetitions: int = 3
+    scenario_ids: Sequence[str], repetitions: int = 3, three_way: bool = False
 ) -> tuple[ScheduledPair, ...]:
     """Build stable IDs independent of caller ordering and alternate each repeat."""
 
@@ -82,16 +136,20 @@ def build_repetition_schedule(
     schedule: list[ScheduledPair] = []
     for scenario_id in normalized:
         for repetition in range(1, repetitions + 1):
-            order = (
-                PairOrder.BASELINE_THEN_ENHANCED
-                if repetition % 2 == 1
-                else PairOrder.ENHANCED_THEN_BASELINE
-            )
+            if three_way:
+                order = THREE_WAY_CYCLE[(repetition - 1) % len(THREE_WAY_CYCLE)]
+            else:
+                order = (
+                    PairOrder.BASELINE_THEN_ENHANCED
+                    if repetition % 2 == 1
+                    else PairOrder.ENHANCED_THEN_BASELINE
+                )
+            version_tag = "v2" if three_way else "v1"
             schedule.append(
                 ScheduledPair(
                     pair_id=uuid5(
                         _SCHEDULE_NAMESPACE,
-                        f"scheduled-pair:v1:{scenario_id}:{repetition}",
+                        f"scheduled-pair:{version_tag}:{scenario_id}:{repetition}",
                     ),
                     scenario_id=scenario_id,
                     repetition=repetition,
@@ -272,7 +330,7 @@ def aggregate_repetitions(records: Sequence[PairResult]) -> RepetitionAggregate:
         metric_names.update(
             name for outcome in record.outcomes for name in outcome.metrics
         )
-        missing_sides = 2 - len(record.outcomes)
+        missing_sides = len(record.scheduled.order.systems) - len(record.outcomes)
         if missing_sides:
             partial_pairs += 1
             unavailable_records += missing_sides
@@ -290,7 +348,7 @@ def aggregate_repetitions(records: Sequence[PairResult]) -> RepetitionAggregate:
         metric_failures = 0
         for record in preserved:
             outcomes = {outcome.system: outcome for outcome in record.outcomes}
-            for system in MeasuredSystem:
+            for system in record.scheduled.order.systems:
                 outcome = outcomes.get(system)
                 if outcome is None:
                     unavailable += 1
@@ -491,9 +549,12 @@ class CompatibilityPreflightResult(BaseModel):
             return self
         if self.selected_model_id not in {PRIMARY_MODEL_ID, FALLBACK_MODEL_ID}:
             raise ValueError("ready preflight must select an approved model")
-        if set(self.role_models) != set(MeasuredSystem):
+        if set(self.role_models) not in (
+            {MeasuredSystem.BASELINE, MeasuredSystem.ENHANCED},
+            set(MeasuredSystem),
+        ):
             raise ValueError("both measured systems must be pinned")
-        for system in MeasuredSystem:
+        for system in self.role_models:
             roles = self.role_models[system]
             if set(roles) != set(ModelRole):
                 raise ValueError("all five roles must be pinned")
@@ -518,10 +579,13 @@ def _measured_config(model_id: str) -> ModelCallConfig:
     )
 
 
-def _pinned_roles(model_id: str) -> dict[MeasuredSystem, dict[ModelRole, str]]:
+def _pinned_roles(
+    model_id: str,
+    systems: Sequence[MeasuredSystem] = (MeasuredSystem.BASELINE, MeasuredSystem.ENHANCED),
+) -> dict[MeasuredSystem, dict[ModelRole, str]]:
     return {
         system: {role: model_id for role in ModelRole}
-        for system in MeasuredSystem
+        for system in systems
     }
 
 

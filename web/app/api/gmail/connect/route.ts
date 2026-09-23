@@ -5,27 +5,47 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {}
-  const userId = body?.userId || '';
+  let userId = body?.userId || '';
   const authConfigId = body?.authConfigId || '';
 
-  const serverBase = process.env.PY_SERVER_URL || 'http://localhost:8001';
-  const url = `${serverBase.replace(/\/$/, '')}/api/v1/gmail/connect`;
+  if (userId.startsWith('web-')) {
+    userId = '';
+  }
 
-  try {
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ user_id: userId, auth_config_id: authConfigId }),
-    });
-    const data = await resp.json().catch(() => ({}));
-    return new Response(JSON.stringify(data), {
-      status: resp.status,
+  const targets = Array.from(new Set([
+    process.env.PY_SERVER_URL || 'http://localhost:8001',
+    'http://localhost:8001',
+    'http://localhost:8002'
+  ]));
+
+  let primaryData: any = null;
+  let primaryStatus = 200;
+
+  for (const base of targets) {
+    const url = `${base.replace(/\/$/, '')}/api/v1/gmail/connect`;
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ user_id: userId, auth_config_id: authConfigId }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!primaryData) {
+        primaryData = data;
+        primaryStatus = resp.status;
+      }
+    } catch {}
+  }
+
+  if (primaryData) {
+    return new Response(JSON.stringify(primaryData), {
+      status: primaryStatus,
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
     });
-  } catch (e: any) {
-    return new Response(
-      JSON.stringify({ ok: false, error: 'Upstream error', detail: e?.message || String(e) }),
-      { status: 502, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
-    );
   }
+
+  return new Response(
+    JSON.stringify({ ok: false, error: 'Upstream error' }),
+    { status: 502, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
+  );
 }

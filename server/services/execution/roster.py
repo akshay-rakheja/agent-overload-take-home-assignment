@@ -42,17 +42,19 @@ class AgentRoster:
 
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 _ROSTER_PATH = _DATA_DIR / "execution_agents" / "roster.json"
+_ROSTER_PATH_JEV = _DATA_DIR / "execution_agents" / "roster_jev.json"
 
-_agent_roster = AgentRoster(_ROSTER_PATH)
-
-
-def get_agent_roster() -> AgentRoster:
-    """Get the singleton compatibility roster."""
-
-    return _agent_roster
+_agent_roster_det = AgentRoster(_ROSTER_PATH)
+_agent_roster_jev = AgentRoster(_ROSTER_PATH_JEV)
 
 
-def get_agent_directory() -> AgentDirectory:
+def get_agent_roster(system: str | None = None) -> AgentRoster:
+    """Get the singleton compatibility roster for the requested system."""
+    if system in ("enhanced_jev", "jev"):
+        return _agent_roster_jev
+    return _agent_roster_det
+
+
+def get_agent_directory(system: str | None = None) -> AgentDirectory:
     """Get the persistent directory behind the compatibility roster."""
-
-    return _agent_roster.directory
+    return get_agent_roster(system).directory

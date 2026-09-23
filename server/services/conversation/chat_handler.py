@@ -19,8 +19,10 @@ def _extract_latest_user_message(payload: ChatRequest) -> Optional[ChatMessage]:
     return None
 
 
-# Process incoming chat requests by routing them to the interaction agent runtime
-async def handle_chat_request(payload: ChatRequest) -> Union[PlainTextResponse, JSONResponse]:
+async def handle_chat_request(
+    payload: ChatRequest,
+    system: Optional[str] = None,
+) -> Union[PlainTextResponse, JSONResponse]:
     """Handle a chat request using the InteractionAgentRuntime."""
 
     # Extract user message
@@ -30,10 +32,24 @@ async def handle_chat_request(payload: ChatRequest) -> Union[PlainTextResponse, 
 
     user_content = user_message.content.strip()  # Already checked in _extract_latest_user_message
 
-    logger.info("chat request", extra={"message_length": len(user_content)})
+    resolved_system = system or payload.system or "enhanced_deterministic"
+    routing_mode = "jev" if resolved_system in ("enhanced_jev", "jev") else "deterministic"
+    system_name = "enhanced_jev" if routing_mode == "jev" else "enhanced_deterministic"
+
+    logger.info(
+        "chat request",
+        extra={
+            "message_length": len(user_content),
+            "routing_mode": routing_mode,
+            "system_name": system_name,
+        },
+    )
 
     try:
-        runtime = InteractionAgentRuntime()
+        runtime = InteractionAgentRuntime(
+            routing_mode=routing_mode,
+            system_name=system_name,
+        )
     except ValueError as ve:
         # Missing API key error
         logger.error("configuration error", extra={"error": str(ve)})

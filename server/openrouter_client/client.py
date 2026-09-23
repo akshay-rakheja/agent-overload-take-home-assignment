@@ -504,6 +504,12 @@ async def request_chat_completion(
                     503,
                     504,
                 }:
+                    retry_header = response.headers.get("retry-after")
+                    try:
+                        backoff = float(retry_header) if retry_header else min(2.0 ** attempt + 1.5, 10.0)
+                    except (ValueError, TypeError):
+                        backoff = min(2.0 ** attempt + 1.5, 10.0)
+                    await asyncio.sleep(backoff)
                     continue
                 _handle_response_error(exc)
             try:

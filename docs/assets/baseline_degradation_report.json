@@ -1,0 +1,344 @@
+[
+  {
+    "roster_size": 10,
+    "accuracy": 100.0,
+    "passed": 4,
+    "total": 4,
+    "avg_tokens": 4651,
+    "avg_latency_ms": 3063.3,
+    "probes": [
+      {
+        "probe_type": "HEAD (Index 2)",
+        "target": "caltrain_transit_tracker",
+        "selected": "caltrain_transit_tracker",
+        "matched": true,
+        "latency_ms": 3447.38,
+        "input_tokens": 5330
+      },
+      {
+        "probe_type": "MIDDLE (Index 5)",
+        "target": "uber_eats_receipts",
+        "selected": "uber_eats_receipts",
+        "matched": true,
+        "latency_ms": 2567.16,
+        "input_tokens": 5318
+      },
+      {
+        "probe_type": "TAIL (Index 8)",
+        "target": "opentable_dining_reservations",
+        "selected": "opentable_dining_reservations",
+        "matched": true,
+        "latency_ms": 1747.15,
+        "input_tokens": 2630
+      },
+      {
+        "probe_type": "DISTRACTOR (Uber Eats vs Ride)",
+        "target": "uber_eats_receipts",
+        "selected": "uber_eats_receipts",
+        "matched": true,
+        "latency_ms": 4491.35,
+        "input_tokens": 5325
+      }
+    ]
+  },
+  {
+    "roster_size": 25,
+    "accuracy": 100.0,
+    "passed": 5,
+    "total": 5,
+    "avg_tokens": 4505,
+    "avg_latency_ms": 3066.4,
+    "probes": [
+      {
+        "probe_type": "HEAD (Index 2)",
+        "target": "caltrain_transit_tracker",
+        "selected": "caltrain_transit_tracker",
+        "matched": true,
+        "latency_ms": 1961.26,
+        "input_tokens": 2796
+      },
+      {
+        "probe_type": "MIDDLE (Index 12)",
+        "target": "azure_cloud_billing",
+        "selected": "azure_cloud_billing",
+        "matched": true,
+        "latency_ms": 3467.15,
+        "input_tokens": 5637
+      },
+      {
+        "probe_type": "TAIL (Index 23)",
+        "target": "delta_flight_tracker",
+        "selected": "delta_flight_tracker",
+        "matched": true,
+        "latency_ms": 3416.28,
+        "input_tokens": 5644
+      },
+      {
+        "probe_type": "PARAPHRASE",
+        "target": "aws_cloud_billing",
+        "selected": "aws_cloud_billing",
+        "matched": true,
+        "latency_ms": 2770.36,
+        "input_tokens": 2800
+      },
+      {
+        "probe_type": "DISTRACTOR (Uber Eats vs Ride)",
+        "target": "uber_eats_receipts",
+        "selected": "uber_eats_receipts",
+        "matched": true,
+        "latency_ms": 3717.09,
+        "input_tokens": 5646
+      }
+    ]
+  },
+  {
+    "roster_size": 50,
+    "accuracy": 100.0,
+    "passed": 5,
+    "total": 5,
+    "avg_tokens": 4938,
+    "avg_latency_ms": 2847.5,
+    "probes": [
+      {
+        "probe_type": "HEAD (Index 2)",
+        "target": "caltrain_transit_tracker",
+        "selected": "caltrain_transit_tracker",
+        "matched": true,
+        "latency_ms": 2925.64,
+        "input_tokens": 6191
+      },
+      {
+        "probe_type": "MIDDLE (Index 25)",
+        "target": "marriott_hotel_receipts",
+        "selected": "marriott_hotel_receipts",
+        "matched": true,
+        "latency_ms": 2693.71,
+        "input_tokens": 6188
+      },
+      {
+        "probe_type": "TAIL (Index 48)",
+        "target": "pharmacy_prescription_refills",
+        "selected": "pharmacy_prescription_refills",
+        "matched": true,
+        "latency_ms": 2814.19,
+        "input_tokens": 6172
+      },
+      {
+        "probe_type": "PARAPHRASE",
+        "target": "aws_cloud_billing",
+        "selected": "aws_cloud_billing",
+        "matched": true,
+        "latency_ms": 3248.73,
+        "input_tokens": 3071
+      },
+      {
+        "probe_type": "DISTRACTOR (Uber Eats vs Ride)",
+        "target": "uber_eats_receipts",
+        "selected": "uber_eats_receipts",
+        "matched": true,
+        "latency_ms": 2555.23,
+        "input_tokens": 3066
+      }
+    ]
+  },
+  {
+    "roster_size": 75,
+    "accuracy": 100.0,
+    "passed": 5,
+    "total": 5,
+    "avg_tokens": 4729,
+    "avg_latency_ms": 3078.3,
+    "probes": [
+      {
+        "probe_type": "HEAD (Index 2)",
+        "target": "caltrain_transit_tracker",
+        "selected": "caltrain_transit_tracker",
+        "matched": true,
+        "latency_ms": 2160.91,
+        "input_tokens": 3361
+      },
+      {
+        "probe_type": "MIDDLE (Index 37)",
+        "target": "zoom_meeting_recordings",
+        "selected": "zoom_meeting_recordings",
+        "matched": true,
+        "latency_ms": 1623.59,
+        "input_tokens": 3354
+      },
+      {
+        "probe_type": "TAIL (Index 73)",
+        "target": "submittable_literary_submissions",
+        "selected": "submittable_literary_submissions",
+        "matched": true,
+        "latency_ms": 2149.51,
+        "input_tokens": 3356
+      },
+      {
+        "probe_type": "PARAPHRASE",
+        "target": "aws_cloud_billing",
+        "selected": "aws_cloud_billing",
+        "matched": true,
+        "latency_ms": 5088.75,
+        "input_tokens": 6796
+      },
+      {
+        "probe_type": "DISTRACTOR (Uber Eats vs Ride)",
+        "target": "uber_eats_receipts",
+        "selected": "uber_eats_receipts",
+        "matched": true,
+        "latency_ms": 4368.61,
+        "input_tokens": 6779
+      }
+    ]
+  },
+  {
+    "roster_size": 100,
+    "accuracy": 100.0,
+    "passed": 5,
+    "total": 5,
+    "avg_tokens": 5893,
+    "avg_latency_ms": 2818.2,
+    "probes": [
+      {
+        "probe_type": "HEAD (Index 2)",
+        "target": "caltrain_transit_tracker",
+        "selected": "caltrain_transit_tracker",
+        "matched": true,
+        "latency_ms": 3295.66,
+        "input_tokens": 7387
+      },
+      {
+        "probe_type": "MIDDLE (Index 50)",
+        "target": "pge_electric_utility_bills",
+        "selected": "pge_electric_utility_bills",
+        "matched": true,
+        "latency_ms": 1771.7,
+        "input_tokens": 3663
+      },
+      {
+        "probe_type": "TAIL (Index 98)",
+        "target": "hackernews_comment_replies",
+        "selected": "hackernews_comment_replies",
+        "matched": true,
+        "latency_ms": 2651.71,
+        "input_tokens": 7367
+      },
+      {
+        "probe_type": "PARAPHRASE",
+        "target": "aws_cloud_billing",
+        "selected": "aws_cloud_billing",
+        "matched": true,
+        "latency_ms": 2868.11,
+        "input_tokens": 3668
+      },
+      {
+        "probe_type": "DISTRACTOR (Uber Eats vs Ride)",
+        "target": "uber_eats_receipts",
+        "selected": "uber_eats_receipts",
+        "matched": true,
+        "latency_ms": 3504.01,
+        "input_tokens": 7378
+      }
+    ]
+  },
+  {
+    "roster_size": 125,
+    "accuracy": 100.0,
+    "passed": 5,
+    "total": 5,
+    "avg_tokens": 7979,
+    "avg_latency_ms": 3788.3,
+    "probes": [
+      {
+        "probe_type": "HEAD (Index 2)",
+        "target": "caltrain_transit_tracker",
+        "selected": "caltrain_transit_tracker",
+        "matched": true,
+        "latency_ms": 3255.19,
+        "input_tokens": 7985
+      },
+      {
+        "probe_type": "MIDDLE (Index 62)",
+        "target": "linkedin_networking_agent",
+        "selected": "linkedin_networking_agent",
+        "matched": true,
+        "latency_ms": 3788.28,
+        "input_tokens": 7963
+      },
+      {
+        "probe_type": "TAIL (Index 123)",
+        "target": "sonos_speaker_system_updates",
+        "selected": "sonos_speaker_system_updates",
+        "matched": true,
+        "latency_ms": 3333.33,
+        "input_tokens": 7969
+      },
+      {
+        "probe_type": "PARAPHRASE",
+        "target": "aws_cloud_billing",
+        "selected": "aws_cloud_billing",
+        "matched": true,
+        "latency_ms": 4396.64,
+        "input_tokens": 7996
+      },
+      {
+        "probe_type": "DISTRACTOR (Uber Eats vs Ride)",
+        "target": "uber_eats_receipts",
+        "selected": "uber_eats_receipts",
+        "matched": true,
+        "latency_ms": 4168.06,
+        "input_tokens": 7982
+      }
+    ]
+  },
+  {
+    "roster_size": 150,
+    "accuracy": 100.0,
+    "passed": 5,
+    "total": 5,
+    "avg_tokens": 6869,
+    "avg_latency_ms": 3676.4,
+    "probes": [
+      {
+        "probe_type": "HEAD (Index 2)",
+        "target": "caltrain_transit_tracker",
+        "selected": "caltrain_transit_tracker",
+        "matched": true,
+        "latency_ms": 2822.79,
+        "input_tokens": 4274
+      },
+      {
+        "probe_type": "MIDDLE (Index 75)",
+        "target": "adp_tax_w2_statements",
+        "selected": "adp_tax_w2_statements",
+        "matched": true,
+        "latency_ms": 2877.53,
+        "input_tokens": 8595
+      },
+      {
+        "probe_type": "TAIL (Index 148)",
+        "target": "miro_whiteboard_workspace_bill",
+        "selected": "miro_whiteboard_workspace_bill",
+        "matched": true,
+        "latency_ms": 3532.64,
+        "input_tokens": 8592
+      },
+      {
+        "probe_type": "PARAPHRASE",
+        "target": "aws_cloud_billing",
+        "selected": "aws_cloud_billing",
+        "matched": true,
+        "latency_ms": 4814.09,
+        "input_tokens": 4278
+      },
+      {
+        "probe_type": "DISTRACTOR (Uber Eats vs Ride)",
+        "target": "uber_eats_receipts",
+        "selected": "uber_eats_receipts",
+        "matched": true,
+        "latency_ms": 4334.99,
+        "input_tokens": 8604
+      }
+    ]
+  }
+]

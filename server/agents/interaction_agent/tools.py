@@ -42,6 +42,7 @@ class DispatchContext:
     routing_action: RoutingAction | None = None
     allowed_agent_ids: frozenset[UUID] = frozenset()
     created_agent_ids: dict[tuple[str, str], UUID] = field(default_factory=dict)
+    system_name: str = "enhanced_deterministic"
 
 # Tool schemas for OpenRouter
 TOOL_SCHEMAS = [
@@ -72,10 +73,6 @@ TOOL_SCHEMAS = [
                     "instructions": {"type": "string", "description": "Instructions for the agent to execute."},
                 },
                 "required": ["instructions"],
-                "oneOf": [
-                    {"required": ["agent_id"]},
-                    {"required": ["agent_name", "agent_purpose"]}
-                ],
                 "additionalProperties": False,
             },
         },
@@ -230,10 +227,10 @@ def send_message_to_agent(
 ) -> ToolResult:
     """Dispatch by stable ID, or idempotently create a new identity for this turn."""
 
-    resolved_directory = directory or get_agent_directory()
+    context = dispatch_context or DispatchContext()
+    resolved_directory = directory or (get_agent_directory(context.system_name) if context else get_agent_directory())
     resolved_logs = log_store or get_execution_agent_logs()
     resolved_batch_manager = batch_manager or _EXECUTION_BATCH_MANAGER
-    context = dispatch_context or DispatchContext()
     tracing = trace_active()
     directory_count_before = (
         _directory_count(resolved_directory)
@@ -425,6 +422,11 @@ def send_message_to_agent(
             execution_kwargs: dict[str, Any] = {"agent_id": stable_id}
             if record.legacy_storage_key:
                 execution_kwargs["legacy_storage_key"] = record.legacy_storage_key
+            import inspect
+            if hasattr(resolved_batch_manager, "execute_agent"):
+                sig = inspect.signature(resolved_batch_manager.execute_agent)
+                if "system_name" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                    execution_kwargs["system_name"] = getattr(context, "system_name", "enhanced_deterministic")
             result = await resolved_batch_manager.execute_agent(
                 record.name,
                 instructions,
@@ -454,9 +456,9 @@ def send_message_to_agent(
 
 
 # Send immediate message to user and record in conversation history
-def send_message_to_user(message: str) -> ToolResult:
+def send_message_to_user(message: str, *, conversation_log: Any = None) -> ToolResult:
     """Record a user-visible reply in the conversation log."""
-    log = get_conversation_log()
+    log = conversation_log or get_conversation_log()
     log.record_reply(message)
 
     return ToolResult(
@@ -472,6 +474,8 @@ def send_draft(
     to: str,
     subject: str,
     body: str,
+    *,
+    conversation_log: Any = None,
 ) -> ToolResult:
     """Record a draft update in the conversation log for the interaction agent."""
     if get_settings().lab_enabled:
@@ -492,7 +496,7 @@ def send_draft(
             payload=lab_tool_rejection("send_draft", decision),
         )
 
-    log = get_conversation_log()
+    log = conversation_log or get_conversation_log()
 
     message = f"To: {to}\nSubject: {subject}\n\n{body}"
 
@@ -511,9 +515,9 @@ def send_draft(
 
 
 # Record silent wait state to avoid duplicate responses
-def wait(reason: str) -> ToolResult:
+def wait(reason: str, *, conversation_log: Any = None) -> ToolResult:
     """Wait silently and add a wait log entry that is not visible to the user."""
-    log = get_conversation_log()
+    log = conversation_log or get_conversation_log()
     
     # Record a dedicated wait entry so the UI knows to ignore it
     log.record_wait(reason)
@@ -541,6 +545,8 @@ def handle_tool_call(
     arguments: Any,
     *,
     dispatch_context: DispatchContext | None = None,
+    conversation_log: Any = None,
+    directory: AgentDirectory | None = None,
 ) -> ToolResult:
     """Handle tool calls from interaction agent."""
     try:
@@ -552,13 +558,13 @@ def handle_tool_call(
             return ToolResult(success=False, payload={"error": "Invalid arguments format"})
 
         if name == "send_message_to_agent":
-            return send_message_to_agent(**args, dispatch_context=dispatch_context)
+            return send_message_to_agent(**args, dispatch_context=dispatch_context, directory=directory)
         if name == "send_message_to_user":
-            return send_message_to_user(**args)
+            return send_message_to_user(**args, conversation_log=conversation_log)
         if name == "send_draft":
-            return send_draft(**args)
+            return send_draft(**args, conversation_log=conversation_log)
         if name == "wait":
-            return wait(**args)
+            return wait(**args, conversation_log=conversation_log)
 
         logger.warning("unexpected tool", extra={"tool": name})
         return ToolResult(success=False, payload={"error": f"Unknown tool: {name}"})
