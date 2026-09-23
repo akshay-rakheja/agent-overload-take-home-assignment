@@ -1,0 +1,932 @@
+[
+  {
+    "turn": 1,
+    "title": "Rideshare Transit (Uber vs Lyft vs Transit)",
+    "prompt": "Search my emails for my recent Uber ride receipt, trip fare, and driver tip.",
+    "expected": "uber_ride_receipts",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "uber_ride_receipts",
+      "matched": true
+    },
+    "deterministic": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "uber_ride_receipts",
+      "matched": true
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "uber_ride_receipts",
+      "matched": true,
+      "confidence": 0.7345,
+      "winner_margin": 1,
+      "map_latency_ms": 987.93,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 988.03,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 2,
+    "title": "Developer Engineering (GitHub PR Reviews)",
+    "prompt": "Did anyone review or comment on my GitHub pull request or tag me in an issue today?",
+    "expected": "github_pull_requests",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "github_pull_requests",
+      "matched": true
+    },
+    "deterministic": {
+      "roster_count": 101,
+      "action": "create_new",
+      "selected_agent": "github_activity_today",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "github_pull_requests",
+      "matched": true,
+      "confidence": 0.6765,
+      "winner_margin": 1,
+      "map_latency_ms": 951.04,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 951.14,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 3,
+    "title": "Cloud Infrastructure (AWS EC2 Compute Charges)",
+    "prompt": "Check my inbox for my monthly Amazon Web Services cloud compute and EC2 billing invoice.",
+    "expected": "aws_cloud_billing",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "uber_ride_receipts",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 102,
+      "action": "create_new",
+      "selected_agent": "aws_billing_invoice_search",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "aws_cloud_billing",
+      "matched": true,
+      "confidence": 0.7045,
+      "winner_margin": 0.3,
+      "map_latency_ms": 1059.29,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 1059.43,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 4,
+    "title": "Airline Concierge (United Airlines Booking)",
+    "prompt": "Find my United Airlines flight confirmation number and boarding pass for tomorrow's flight.",
+    "expected": "united_flight_concierge",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "aws_cloud_billing",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 103,
+      "action": "create_new",
+      "selected_agent": "united_flight_confirmation",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "united_flight_concierge",
+      "matched": true,
+      "confidence": 0.7175,
+      "winner_margin": 1,
+      "map_latency_ms": 19755.68,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 19755.76,
+      "api_calls_count": 91
+    }
+  },
+  {
+    "turn": 5,
+    "title": "Streaming Services (Netflix Subscription)",
+    "prompt": "Check my emails for my monthly Netflix streaming subscription receipt or plan updates.",
+    "expected": "netflix_subscription_manager",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "united_flight_concierge",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 104,
+      "action": "create_new",
+      "selected_agent": "netflix_subscription_search",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "netflix_subscription_manager",
+      "matched": true,
+      "confidence": 0.721,
+      "winner_margin": 1,
+      "map_latency_ms": 43346.79,
+      "reduce_latency_ms": 0.03,
+      "total_latency_ms": 43346.93,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 6,
+    "title": "Food Delivery Distractor (Uber Eats vs Uber Rides)",
+    "prompt": "Find how much I spent on my dinner food delivery order from Uber Eats last night.",
+    "expected": "uber_eats_receipts",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "netflix_subscription_manager",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 105,
+      "action": "create_new",
+      "selected_agent": "uber_eats_order_search",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "uber_eats_receipts",
+      "matched": true,
+      "confidence": 0.7225,
+      "winner_margin": 1,
+      "map_latency_ms": 41304.43,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 41304.52,
+      "api_calls_count": 100
+    }
+  },
+  {
+    "turn": 7,
+    "title": "Healthcare & Doctor (Annual Physical Confirmation)",
+    "prompt": "Find my upcoming doctor appointment confirmation and annual physical instructions.",
+    "expected": "medical_doctor_appointments",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "uber_eats_receipts",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 106,
+      "action": "create_new",
+      "selected_agent": "doctor_appointment_search",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "medical_doctor_appointments",
+      "matched": true,
+      "confidence": 0.758,
+      "winner_margin": 1,
+      "map_latency_ms": 35543.27,
+      "reduce_latency_ms": 0.05,
+      "total_latency_ms": 35543.45,
+      "api_calls_count": 91
+    }
+  },
+  {
+    "turn": 8,
+    "title": "Utilities & Power (PG&E Electric Statement)",
+    "prompt": "Find my monthly electric and natural gas utility billing statement from PG&E.",
+    "expected": "pge_electric_utility_bills",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "medical_doctor_appointments",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 106,
+      "action": "reuse",
+      "selected_agent": "pge_electric_utility_bills",
+      "matched": true
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "pge_electric_utility_bills",
+      "matched": true,
+      "confidence": 0.7505,
+      "winner_margin": 1,
+      "map_latency_ms": 927.7,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 927.78,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 9,
+    "title": "Banking & Credit (Chase Card Statement)",
+    "prompt": "Find my Chase credit card monthly electronic statement and minimum payment due.",
+    "expected": "chase_bank_statements",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "pge_electric_utility_bills",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "chase_credit_card_statement_search",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "chase_bank_statements",
+      "matched": true,
+      "confidence": 0.7005,
+      "winner_margin": 1,
+      "map_latency_ms": 1272.56,
+      "reduce_latency_ms": 0.03,
+      "total_latency_ms": 1272.73,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 10,
+    "title": "E-Commerce Logistics (Amazon Package Shipment)",
+    "prompt": "Check my emails for Amazon package shipment confirmations and tracking date.",
+    "expected": "amazon_delivery_tracker",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "chase_bank_statements",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": true,
+      "confidence": 0.744,
+      "winner_margin": 1,
+      "map_latency_ms": 1412.82,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 1412.92,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 11,
+    "title": "Developer Monitoring (Datadog APM & CPU Spikes)",
+    "prompt": "Search my inbox for Datadog CPU monitor alert warnings and APM error rate spikes.",
+    "expected": "datadog_incident_monitor",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "datadog_incident_monitor",
+      "matched": true,
+      "confidence": 0.4985,
+      "winner_margin": 1,
+      "map_latency_ms": 1032.08,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 1032.18,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 12,
+    "title": "Calendar & Meetings (Team Sync Invite)",
+    "prompt": "Find weekly team sync calendar invite and Google Meet link for next week.",
+    "expected": "team_sync_scheduler",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "team_sync_scheduler",
+      "matched": true,
+      "confidence": 0.7425,
+      "winner_margin": 1,
+      "map_latency_ms": 881.7,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 881.78,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 13,
+    "title": "HR & Payroll (Gusto Paycheck Direct Deposit)",
+    "prompt": "Find my latest Gusto employee direct deposit paycheck stub and salary payment.",
+    "expected": "gusto_payroll_stubs",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "gusto_payroll_stubs",
+      "matched": true,
+      "confidence": 0.693,
+      "winner_margin": 1,
+      "map_latency_ms": 935.82,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 935.91,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 14,
+    "title": "Music Subscriptions (Spotify Premium Receipts)",
+    "prompt": "Check my emails for my Spotify Premium monthly student discount subscription invoice.",
+    "expected": "spotify_premium_receipts",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "spotify_premium_receipts",
+      "matched": true,
+      "confidence": 0.576,
+      "winner_margin": 1,
+      "map_latency_ms": 895.5,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 895.6,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 15,
+    "title": "Novel Domain 1 (Veterinary & Pet Care)",
+    "prompt": "Find my dog's veterinary rabies vaccination record and pet insurance claim from Chewy.",
+    "expected": "CREATE_NEW",
+    "expected_action": "create_new",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": true
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": true,
+      "confidence": 1,
+      "winner_margin": 0,
+      "map_latency_ms": 911.22,
+      "reduce_latency_ms": 0.01,
+      "total_latency_ms": 911.3,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 16,
+    "title": "Rideshare Distractor (Lyft Airport Pickup vs Uber)",
+    "prompt": "Find my recent Lyft airport ride receipt and airport terminal pickup fare.",
+    "expected": "lyft_transit_receipts",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "lyft_transit_receipts",
+      "matched": true,
+      "confidence": 0.7055,
+      "winner_margin": 1,
+      "map_latency_ms": 893.12,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 893.2,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 17,
+    "title": "Food Delivery Distractor (DoorDash vs Uber Eats)",
+    "prompt": "Track my DoorDash dinner order confirmation and food delivery receipt.",
+    "expected": "doordash_order_tracker",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "doordash_order_tracker",
+      "matched": true,
+      "confidence": 0.74,
+      "winner_margin": 1,
+      "map_latency_ms": 891.71,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 891.79,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 18,
+    "title": "Cloud Infrastructure Distractor (Google Cloud GCP vs AWS)",
+    "prompt": "Search emails for my monthly Google Cloud Platform GCP project billing statement and Cloud Run invoices.",
+    "expected": "gcp_cloud_billing",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "gcp_cloud_billing",
+      "matched": true,
+      "confidence": 0.5875,
+      "winner_margin": 0.1455,
+      "map_latency_ms": 992.71,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 992.81,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 19,
+    "title": "Airline Concierge Distractor (Delta Air Lines vs United)",
+    "prompt": "Find my Delta Air Lines flight boarding pass and seat upgrade confirmation email.",
+    "expected": "delta_flight_tracker",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "delta_flight_tracker",
+      "matched": true,
+      "confidence": 0.6005,
+      "winner_margin": 1,
+      "map_latency_ms": 890.69,
+      "reduce_latency_ms": 0.03,
+      "total_latency_ms": 890.82,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 20,
+    "title": "E-Commerce Hardware Distractor (Apple Store vs Amazon)",
+    "prompt": "Search my inbox for my recent Apple Store hardware purchase receipt and AppleCare warranty.",
+    "expected": "apple_store_receipts",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "apple_store_receipts",
+      "matched": true,
+      "confidence": 0.7395,
+      "winner_margin": 1,
+      "map_latency_ms": 897.8,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 897.91,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 21,
+    "title": "Healthcare Specialty (Dental Cleaning vs Doctor Physical)",
+    "prompt": "Find my upcoming dental cleaning appointment reminder and dentist office instructions.",
+    "expected": "dental_cleaning_scheduler",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "dental_cleaning_scheduler",
+      "matched": true,
+      "confidence": 0.7095,
+      "winner_margin": 0.1355,
+      "map_latency_ms": 913.73,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 913.81,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 22,
+    "title": "Utilities Distractor (ConEd Gas vs PG&E Electric)",
+    "prompt": "Check my emails for my monthly ConEd natural gas utility statement and billing balance.",
+    "expected": "coned_gas_statements",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "coned_gas_statements",
+      "matched": true,
+      "confidence": 0.643,
+      "winner_margin": 1,
+      "map_latency_ms": 1005.96,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 1006.03,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 23,
+    "title": "Banking Distractor (Amex Rewards vs Chase Statements)",
+    "prompt": "Check my emails for my American Express Amex credit card monthly statement and membership reward points.",
+    "expected": "amex_rewards_monitor",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amex_membership_rewards",
+      "matched": false,
+      "confidence": 0.705,
+      "winner_margin": 1,
+      "map_latency_ms": 862.94,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 863.03,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 24,
+    "title": "Issue Tracking Distractor (Linear Tickets vs GitHub PRs)",
+    "prompt": "Did someone assign or update a bug ticket on my Linear issue tracker today?",
+    "expected": "linear_issue_tracker",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "reuse",
+      "selected_agent": "linear_issue_tracker",
+      "matched": true
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "linear_issue_tracker",
+      "matched": true,
+      "confidence": 0.6685,
+      "winner_margin": 1,
+      "map_latency_ms": 881.01,
+      "reduce_latency_ms": 0.03,
+      "total_latency_ms": 881.1,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 25,
+    "title": "Travel & Lodging (Airbnb Reservation vs Hotel Receipts)",
+    "prompt": "Find my Airbnb vacation rental confirmation and host check-in instructions for this weekend.",
+    "expected": "airbnb_reservation_assistant",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "reuse",
+      "selected_agent": "linear_issue_tracker",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "airbnb_reservation_assistant",
+      "matched": true,
+      "confidence": 0.7445,
+      "winner_margin": 1,
+      "map_latency_ms": 929.32,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 929.42,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 26,
+    "title": "Meetings & Video Recordings (Zoom vs Google Meet)",
+    "prompt": "Search for the cloud recording link and automated transcript from yesterday's Zoom team meeting.",
+    "expected": "zoom_meeting_recordings",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "reuse",
+      "selected_agent": "linear_issue_tracker",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "zoom_meeting_recordings",
+      "matched": true,
+      "confidence": 0.71,
+      "winner_margin": 1,
+      "map_latency_ms": 894.95,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 895.04,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 27,
+    "title": "HR & Tax Statements (ADP W-2 vs Gusto Paycheck)",
+    "prompt": "Search my emails for my annual ADP W-2 tax form and wage statement for filing taxes.",
+    "expected": "adp_w2_tax_forms",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "reuse",
+      "selected_agent": "linear_issue_tracker",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "adp_tax_w2_statements",
+      "matched": false,
+      "confidence": 0.73,
+      "winner_margin": 1,
+      "map_latency_ms": 992.66,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 992.75,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 28,
+    "title": "Media Streaming Distractor (YouTube Premium vs Netflix)",
+    "prompt": "Find my monthly YouTube Premium family plan streaming membership billing receipt.",
+    "expected": "youtube_premium_receipts",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "reuse",
+      "selected_agent": "linear_issue_tracker",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "youtube_premium_receipts",
+      "matched": true,
+      "confidence": 0.5815,
+      "winner_margin": 1,
+      "map_latency_ms": 973.87,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 973.96,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 29,
+    "title": "Education & Learning (Coursera Certificates)",
+    "prompt": "Find my Coursera machine learning course certificate completion confirmation.",
+    "expected": "coursera_course_certificates",
+    "expected_action": "reuse",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "reuse",
+      "selected_agent": "linear_issue_tracker",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "coursera_course_certificates",
+      "matched": true,
+      "confidence": 0.729,
+      "winner_margin": 1,
+      "map_latency_ms": 870.3,
+      "reduce_latency_ms": 0.01,
+      "total_latency_ms": 870.38,
+      "api_calls_count": 101
+    }
+  },
+  {
+    "turn": 30,
+    "title": "Novel Domain 2 (Automotive Repair & Mechanic Services)",
+    "prompt": "Check my inbox for my automobile mechanic repair estimate and transmission service invoice from Firestone.",
+    "expected": "CREATE_NEW",
+    "expected_action": "create_new",
+    "baseline": {
+      "roster_count": 100,
+      "action": "reuse",
+      "selected_agent": "amazon_delivery_tracker",
+      "matched": false
+    },
+    "deterministic": {
+      "roster_count": 108,
+      "action": "reuse",
+      "selected_agent": "linear_issue_tracker",
+      "matched": false
+    },
+    "jev": {
+      "roster_count": 100,
+      "action": "create_new",
+      "selected_agent": "none",
+      "matched": true,
+      "confidence": 1,
+      "winner_margin": 0,
+      "map_latency_ms": 902.29,
+      "reduce_latency_ms": 0.01,
+      "total_latency_ms": 902.37,
+      "api_calls_count": 101
+    }
+  }
+]

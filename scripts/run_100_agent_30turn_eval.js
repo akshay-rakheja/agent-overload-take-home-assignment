@@ -10,6 +10,7 @@ const { chromium } = require('playwright');
 const ARTIFACT_DIR = process.env.ARTIFACT_DIR || path.join(__dirname, '../docs/assets');
 
 const SCENARIOS = [
+  // Block 1 (Turns 1-15): 14 Distinct Domain Reuses + 1 Novel Domain
   {
     turn: 1,
     title: 'Rideshare Transit (Uber vs Lyft vs Transit)',
@@ -68,50 +69,157 @@ const SCENARIOS = [
   },
   {
     turn: 9,
-    title: 'Banking & Financial (Chase Credit Card Statement)',
+    title: 'Banking & Credit (Chase Card Statement)',
     prompt: 'Find my Chase credit card monthly electronic statement and minimum payment due.',
     expected_agent: 'chase_bank_statements',
     expected_action: 'reuse',
   },
   {
     turn: 10,
-    title: 'E-Commerce Logistics (Amazon Package Delivery)',
+    title: 'E-Commerce Logistics (Amazon Package Shipment)',
     prompt: 'Check my emails for Amazon package shipment confirmations and tracking date.',
     expected_agent: 'amazon_delivery_tracker',
     expected_action: 'reuse',
   },
   {
     turn: 11,
-    title: 'Developer Monitoring (Datadog Alert Spikes)',
+    title: 'Developer Monitoring (Datadog APM & CPU Spikes)',
     prompt: 'Search my inbox for Datadog CPU monitor alert warnings and APM error rate spikes.',
     expected_agent: 'datadog_incident_monitor',
     expected_action: 'reuse',
   },
   {
     turn: 12,
-    title: 'Calendar & Team (Weekly Team Sync Invite)',
+    title: 'Calendar & Meetings (Team Sync Invite)',
     prompt: 'Find weekly team sync calendar invite and Google Meet link for next week.',
     expected_agent: 'team_sync_scheduler',
     expected_action: 'reuse',
   },
   {
     turn: 13,
-    title: 'HR & Payroll (Gusto Paycheck Deposit)',
+    title: 'HR & Payroll (Gusto Paycheck Direct Deposit)',
     prompt: 'Find my latest Gusto employee direct deposit paycheck stub and salary payment.',
     expected_agent: 'gusto_payroll_stubs',
     expected_action: 'reuse',
   },
   {
     turn: 14,
-    title: 'Cross-Domain Subscription (Spotify Student Plan)',
+    title: 'Music Subscriptions (Spotify Premium Receipts)',
     prompt: 'Check my emails for my Spotify Premium monthly student discount subscription invoice.',
     expected_agent: 'spotify_premium_receipts',
     expected_action: 'reuse',
   },
   {
     turn: 15,
-    title: 'Novel Unrepresented Domain (Veterinary & Pet Care)',
+    title: 'Novel Domain 1 (Veterinary & Pet Care)',
     prompt: 'Find my dog\'s veterinary rabies vaccination record and pet insurance claim from Chewy.',
+    expected_agent: 'CREATE_NEW',
+    expected_action: 'create_new',
+  },
+
+  // Block 2 (Turns 16-30): Additional Domain Depth, Subtle Distractors & Second Novel Domain
+  {
+    turn: 16,
+    title: 'Rideshare Distractor (Lyft Airport Pickup vs Uber)',
+    prompt: 'Find my recent Lyft airport ride receipt and airport terminal pickup fare.',
+    expected_agent: 'lyft_transit_receipts',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 17,
+    title: 'Food Delivery Distractor (DoorDash vs Uber Eats)',
+    prompt: 'Track my DoorDash dinner order confirmation and food delivery receipt.',
+    expected_agent: 'doordash_order_tracker',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 18,
+    title: 'Cloud Infrastructure Distractor (Google Cloud GCP vs AWS)',
+    prompt: 'Search emails for my monthly Google Cloud Platform GCP project billing statement and Cloud Run invoices.',
+    expected_agent: 'gcp_cloud_billing',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 19,
+    title: 'Airline Concierge Distractor (Delta Air Lines vs United)',
+    prompt: 'Find my Delta Air Lines flight boarding pass and seat upgrade confirmation email.',
+    expected_agent: 'delta_flight_tracker',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 20,
+    title: 'E-Commerce Hardware Distractor (Apple Store vs Amazon)',
+    prompt: 'Search my inbox for my recent Apple Store hardware purchase receipt and AppleCare warranty.',
+    expected_agent: 'apple_store_receipts',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 21,
+    title: 'Healthcare Specialty (Dental Cleaning vs Doctor Physical)',
+    prompt: 'Find my upcoming dental cleaning appointment reminder and dentist office instructions.',
+    expected_agent: 'dental_cleaning_scheduler',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 22,
+    title: 'Utilities Distractor (ConEd Gas vs PG&E Electric)',
+    prompt: 'Check my emails for my monthly ConEd natural gas utility statement and billing balance.',
+    expected_agent: 'coned_gas_statements',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 23,
+    title: 'Banking Distractor (Amex Rewards vs Chase Statements)',
+    prompt: 'Check my emails for my American Express Amex credit card monthly statement and membership reward points.',
+    expected_agent: 'amex_rewards_monitor',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 24,
+    title: 'Issue Tracking Distractor (Linear Tickets vs GitHub PRs)',
+    prompt: 'Did someone assign or update a bug ticket on my Linear issue tracker today?',
+    expected_agent: 'linear_issue_tracker',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 25,
+    title: 'Travel & Lodging (Airbnb Reservation vs Hotel Receipts)',
+    prompt: 'Find my Airbnb vacation rental confirmation and host check-in instructions for this weekend.',
+    expected_agent: 'airbnb_reservation_assistant',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 26,
+    title: 'Meetings & Video Recordings (Zoom vs Google Meet)',
+    prompt: 'Search for the cloud recording link and automated transcript from yesterday\'s Zoom team meeting.',
+    expected_agent: 'zoom_meeting_recordings',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 27,
+    title: 'HR & Tax Statements (ADP W-2 vs Gusto Paycheck)',
+    prompt: 'Search my emails for my annual ADP W-2 tax form and wage statement for filing taxes.',
+    expected_agent: 'adp_w2_tax_forms',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 28,
+    title: 'Media Streaming Distractor (YouTube Premium vs Netflix)',
+    prompt: 'Find my monthly YouTube Premium family plan streaming membership billing receipt.',
+    expected_agent: 'youtube_premium_receipts',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 29,
+    title: 'Education & Learning (Coursera Certificates)',
+    prompt: 'Find my Coursera machine learning course certificate completion confirmation.',
+    expected_agent: 'coursera_course_certificates',
+    expected_action: 'reuse',
+  },
+  {
+    turn: 30,
+    title: 'Novel Domain 2 (Automotive Repair & Mechanic Services)',
+    prompt: 'Check my inbox for my automobile mechanic repair estimate and transmission service invoice from Firestone.',
     expected_agent: 'CREATE_NEW',
     expected_action: 'create_new',
   },
@@ -144,7 +252,7 @@ async function fetchInspectors() {
   };
 }
 
-async function waitForTurnSettled(turnNum, timeoutMs = 75000) {
+async function waitForTurnSettled(turnNum, timeoutMs = 85000) {
   const start = Date.now();
   console.log(`  [WAIT] Waiting for Turn ${turnNum} to settle across Baseline, Deterministic & Jev...`);
 
@@ -154,13 +262,14 @@ async function waitForTurnSettled(turnNum, timeoutMs = 75000) {
     const dLast = h.deterministic[h.deterministic.length - 1];
     const jLast = h.jev[h.jev.length - 1];
 
-    const bDone = bLast?.role === 'assistant';
-    const dDone = dLast?.role === 'assistant';
-    const jDone = jLast?.role === 'assistant';
+    const expectedMin = turnNum * 2;
+    const bDone = h.baseline.length >= expectedMin && bLast?.role === 'assistant';
+    const dDone = h.deterministic.length >= expectedMin && dLast?.role === 'assistant';
+    const jDone = h.jev.length >= expectedMin && jLast?.role === 'assistant';
 
     process.stdout.write(`    [Progress] Base: ${h.baseline.length} msgs (${bDone ? '✓' : '…'}), Det: ${h.deterministic.length} msgs (${dDone ? '✓' : '…'}), Jev: ${h.jev.length} msgs (${jDone ? '✓' : '…'})\r`);
 
-    if (bDone && dDone && jDone && (Date.now() - start >= 12000)) {
+    if (bDone && dDone && jDone && (Date.now() - start >= 6000)) {
       console.log(`\n  [WAIT] Turn ${turnNum} settled in ${((Date.now() - start) / 1000).toFixed(1)}s`);
       return true;
     }
@@ -172,7 +281,7 @@ async function waitForTurnSettled(turnNum, timeoutMs = 75000) {
 
 (async () => {
   console.log('================================================================');
-  console.log('🚀 100-AGENT 15-TURN BENCHMARK: BASELINE vs DETERMINISTIC vs JEV');
+  console.log('🚀 100-AGENT 30-TURN BENCHMARK: BASELINE vs DETERMINISTIC vs JEV');
   console.log('================================================================\n');
 
   const browser = await chromium.launch({ headless: true });
@@ -190,7 +299,7 @@ async function waitForTurnSettled(turnNum, timeoutMs = 75000) {
   for (let i = 0; i < SCENARIOS.length; i++) {
     const s = SCENARIOS[i];
     console.log(`\n----------------------------------------------------------------`);
-    console.log(`▶ Turn ${s.turn}/15: [${s.title}]`);
+    console.log(`▶ Turn ${s.turn}/30: [${s.title}]`);
     console.log(`  Prompt: "${s.prompt}"`);
     console.log(`  Expected Target: "${s.expected_agent}" (${s.expected_action.toUpperCase()})`);
 
@@ -199,7 +308,7 @@ async function waitForTurnSettled(turnNum, timeoutMs = 75000) {
     await page.click('button[type="submit"]');
 
     await waitForTurnSettled(s.turn);
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(2500);
 
     // Capture inspector state
     const insp = await fetchInspectors();
@@ -237,7 +346,6 @@ async function waitForTurnSettled(turnNum, timeoutMs = 75000) {
         action: detAction,
         selected_agent: detSelected,
         matched: detMatched,
-        candidates: (insp.deterministic.candidates || []).slice(0, 3).map((c) => ({ name: c.name, score: c.score })),
       },
       jev: {
         roster_count: insp.jev.roster_count,
@@ -261,7 +369,7 @@ async function waitForTurnSettled(turnNum, timeoutMs = 75000) {
     report.push(turnReport);
 
     // Save screenshots at milestone turns
-    if ([1, 5, 10, 15].includes(s.turn)) {
+    if ([1, 5, 10, 15, 20, 25, 30].includes(s.turn)) {
       const ssPath = `${ARTIFACT_DIR}/eval_100_turn_${s.turn}.png`;
       await page.screenshot({ path: ssPath, fullPage: true });
       console.log(`  📸 Saved milestone screenshot: ${ssPath}`);
@@ -273,9 +381,9 @@ async function waitForTurnSettled(turnNum, timeoutMs = 75000) {
   await browser.close();
 
   // Save report JSON
-  const repPath = `${ARTIFACT_DIR}/eval_100_15turns_report.json`;
+  const repPath = `${ARTIFACT_DIR}/eval_100_30turns_report.json`;
   fs.writeFileSync(repPath, JSON.stringify(report, null, 2), 'utf-8');
   console.log(`\n================================================================`);
-  console.log(`🎉 15-Turn Benchmark Complete! Saved full report to ${repPath}`);
+  console.log(`🎉 30-Turn Benchmark Complete! Saved full report to ${repPath}`);
   console.log(`================================================================`);
 })();
