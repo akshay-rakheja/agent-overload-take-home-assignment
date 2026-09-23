@@ -91,8 +91,8 @@ The original behavior baseline can be regenerated separately:
 
 ## Five-minute review
 
-Run `.venv/bin/python -m evals.demo`, then open the generated report. The exact
-talk track is in [demo-script.md](docs/demo-script.md). It covers:
+Run `.venv/bin/python -m evals.demo`, then open the generated report. The review
+covers:
 
 1. current all-roster prompt growth;
 2. retrieval from 1,000 identities;
