@@ -15,7 +15,7 @@ In this repository, I built an end-to-end evaluation lab and production-grade so
 > * **2. Coded Solutions**: Implemented and documented across [Three Routing Approaches Compared](#coded-solution-three-routing-approaches-compared), [Bounded Execution Context](#1-bounded-execution-agent-context-depth), and [TypeSafe JEV Activity Card Architecture](#3-enhanced-typesafe-jev-semantic-mapreduce).
 > * **3. Test Cases & Evaluators**: Detailed in [Test Cases & Evaluators: Methodology & Verification](#test-cases--evaluators-methodology--verification). Includes **753 automated unit/integration tests**, **135 web contract tests**, headless offline evaluators (`evals/runner.py`), and live Playwright-driven multi-turn evaluation benchmarks (`scripts/run_100_agent_30turn_eval.js`).
 > * **4. How I Assessed Performance**: Scored on selection accuracy, domain reuse, novel domain fallback, roster inflation/duplicate bloat, token cost, end-to-end latency, and live visual inspector state in [Scorecard](#executive-summary--scorecard), [30-Turn Multi-Domain Stress Test Matrix](#30-turn-multi-domain-stress-test-matrix), and [Milestone Visual Evidence](#milestone-visual-evidence).
-> * **5. My Own Thinking (Unaddressed Gaps & Solutions)**: Explored in [My Own Thinking: Gaps in Multi-Agent Systems & Production Solutions](#my-own-thinking-gaps-in-multi-agent-systems--production-solutions), addressing agent lifecycle decay/pruning, dynamic agent contract enforcement, cross-agent blackboard state transfer, capability shadowing, and two-stage hybrid retrieval.
+> * **5. Production Architecture & Scaling Considerations**: Explored in [Production Architecture & Scaling Considerations](#production-architecture--scaling-considerations), addressing agent lifecycle decay/pruning, dynamic agent contract enforcement, cross-agent blackboard state transfer, capability shadowing, and two-stage hybrid retrieval.
 
 ---
 
@@ -455,9 +455,9 @@ I evaluated the systems across six quantitative and qualitative axes:
 
 ---
 
-## My Own Thinking: Gaps in Multi-Agent Systems & Production Solutions
+## Production Architecture & Scaling Considerations
 
-Beyond the baseline evaluation, my research into the agent overload problem revealed five critical architectural gaps that exist in current multi-agent systems. Here is how I would solve each in code:
+Scaling multi-agent architectures to production requires addressing several critical design challenges beyond routing. Below are the key gaps and corresponding architectural solutions implemented or designed for this system:
 
 ### 1. Agent Lifecycle Management & Garbage Collection (Tombstoning & Decay)
 * **The Gap**: In systems that support dynamic agent creation (`CREATE_NEW`), rosters grow monotonically. Most created agents are ephemeral (e.g. *"Search for that one flight receipt from last summer"*). As the roster reaches hundreds or thousands of agents, stale agents pollute the retrieval index and increase the probability of false-positive candidate collisions.
