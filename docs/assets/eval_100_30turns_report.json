@@ -13,20 +13,20 @@
     },
     "deterministic": {
       "roster_count": 100,
-      "action": "reuse",
-      "selected_agent": "uber_ride_receipts",
-      "matched": true
+      "action": "abstain",
+      "selected_agent": "none",
+      "matched": false
     },
     "jev": {
       "roster_count": 100,
       "action": "reuse",
       "selected_agent": "uber_ride_receipts",
       "matched": true,
-      "confidence": 0.7345,
+      "confidence": 0.736,
       "winner_margin": 1,
-      "map_latency_ms": 987.93,
-      "reduce_latency_ms": 0.02,
-      "total_latency_ms": 988.03,
+      "map_latency_ms": 960.23,
+      "reduce_latency_ms": 0.06,
+      "total_latency_ms": 960.37,
       "api_calls_count": 101
     }
   },
@@ -39,8 +39,8 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "github_pull_requests",
-      "matched": true
+      "selected_agent": "uber_ride_receipts",
+      "matched": false
     },
     "deterministic": {
       "roster_count": 101,
@@ -53,11 +53,11 @@
       "action": "reuse",
       "selected_agent": "github_pull_requests",
       "matched": true,
-      "confidence": 0.6765,
+      "confidence": 0.683,
       "winner_margin": 1,
-      "map_latency_ms": 951.04,
+      "map_latency_ms": 964.05,
       "reduce_latency_ms": 0.02,
-      "total_latency_ms": 951.14,
+      "total_latency_ms": 964.14,
       "api_calls_count": 101
     }
   },
@@ -84,12 +84,12 @@
       "action": "reuse",
       "selected_agent": "aws_cloud_billing",
       "matched": true,
-      "confidence": 0.7045,
-      "winner_margin": 0.3,
-      "map_latency_ms": 1059.29,
-      "reduce_latency_ms": 0.02,
-      "total_latency_ms": 1059.43,
-      "api_calls_count": 101
+      "confidence": 0.707,
+      "winner_margin": 0.2675,
+      "map_latency_ms": 34427.66,
+      "reduce_latency_ms": 0.03,
+      "total_latency_ms": 34427.76,
+      "api_calls_count": 100
     }
   },
   {
@@ -115,12 +115,12 @@
       "action": "reuse",
       "selected_agent": "united_flight_concierge",
       "matched": true,
-      "confidence": 0.7175,
+      "confidence": 0.724,
       "winner_margin": 1,
-      "map_latency_ms": 19755.68,
-      "reduce_latency_ms": 0.02,
-      "total_latency_ms": 19755.76,
-      "api_calls_count": 91
+      "map_latency_ms": 1069.9,
+      "reduce_latency_ms": 0.03,
+      "total_latency_ms": 1070.01,
+      "api_calls_count": 101
     }
   },
   {
@@ -136,9 +136,9 @@
       "matched": false
     },
     "deterministic": {
-      "roster_count": 104,
+      "roster_count": 103,
       "action": "create_new",
-      "selected_agent": "netflix_subscription_search",
+      "selected_agent": "netflix_subscription_receipts",
       "matched": false
     },
     "jev": {
@@ -146,11 +146,11 @@
       "action": "reuse",
       "selected_agent": "netflix_subscription_manager",
       "matched": true,
-      "confidence": 0.721,
+      "confidence": 0.734,
       "winner_margin": 1,
-      "map_latency_ms": 43346.79,
-      "reduce_latency_ms": 0.03,
-      "total_latency_ms": 43346.93,
+      "map_latency_ms": 1197.3,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 1197.39,
       "api_calls_count": 101
     }
   },
@@ -167,7 +167,7 @@
       "matched": false
     },
     "deterministic": {
-      "roster_count": 105,
+      "roster_count": 103,
       "action": "create_new",
       "selected_agent": "uber_eats_order_search",
       "matched": false
@@ -177,12 +177,12 @@
       "action": "reuse",
       "selected_agent": "uber_eats_receipts",
       "matched": true,
-      "confidence": 0.7225,
+      "confidence": 0.7275,
       "winner_margin": 1,
-      "map_latency_ms": 41304.43,
-      "reduce_latency_ms": 0.02,
-      "total_latency_ms": 41304.52,
-      "api_calls_count": 100
+      "map_latency_ms": 1003.9,
+      "reduce_latency_ms": 0.03,
+      "total_latency_ms": 1004,
+      "api_calls_count": 101
     }
   },
   {
@@ -194,11 +194,11 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "uber_eats_receipts",
+      "selected_agent": "netflix_subscription_manager",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 106,
+      "roster_count": 103,
       "action": "create_new",
       "selected_agent": "doctor_appointment_search",
       "matched": false
@@ -210,10 +210,10 @@
       "matched": true,
       "confidence": 0.758,
       "winner_margin": 1,
-      "map_latency_ms": 35543.27,
-      "reduce_latency_ms": 0.05,
-      "total_latency_ms": 35543.45,
-      "api_calls_count": 91
+      "map_latency_ms": 4031.34,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 4031.43,
+      "api_calls_count": 101
     }
   },
   {
@@ -225,11 +225,11 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "medical_doctor_appointments",
+      "selected_agent": "netflix_subscription_manager",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 106,
+      "roster_count": 103,
       "action": "reuse",
       "selected_agent": "pge_electric_utility_bills",
       "matched": true
@@ -239,11 +239,11 @@
       "action": "reuse",
       "selected_agent": "pge_electric_utility_bills",
       "matched": true,
-      "confidence": 0.7505,
+      "confidence": 0.7455,
       "winner_margin": 1,
-      "map_latency_ms": 927.7,
-      "reduce_latency_ms": 0.02,
-      "total_latency_ms": 927.78,
+      "map_latency_ms": 4282.92,
+      "reduce_latency_ms": 0.04,
+      "total_latency_ms": 4283.07,
       "api_calls_count": 101
     }
   },
@@ -256,25 +256,25 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "pge_electric_utility_bills",
+      "selected_agent": "netflix_subscription_manager",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 103,
       "action": "create_new",
-      "selected_agent": "chase_credit_card_statement_search",
+      "selected_agent": "chase_credit_card_statement",
       "matched": false
     },
     "jev": {
       "roster_count": 100,
-      "action": "reuse",
-      "selected_agent": "chase_bank_statements",
-      "matched": true,
-      "confidence": 0.7005,
+      "action": "create_new",
+      "selected_agent": "chase_statement_lookup",
+      "matched": false,
+      "confidence": 0.715,
       "winner_margin": 1,
-      "map_latency_ms": 1272.56,
-      "reduce_latency_ms": 0.03,
-      "total_latency_ms": 1272.73,
+      "map_latency_ms": 2706.06,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 2706.15,
       "api_calls_count": 101
     }
   },
@@ -287,13 +287,13 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "chase_bank_statements",
+      "selected_agent": "netflix_subscription_manager",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 103,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "amazon_package_shipments",
       "matched": false
     },
     "jev": {
@@ -301,11 +301,11 @@
       "action": "reuse",
       "selected_agent": "amazon_delivery_tracker",
       "matched": true,
-      "confidence": 0.744,
+      "confidence": 0.7425,
       "winner_margin": 1,
-      "map_latency_ms": 1412.82,
+      "map_latency_ms": 992.98,
       "reduce_latency_ms": 0.02,
-      "total_latency_ms": 1412.92,
+      "total_latency_ms": 993.07,
       "api_calls_count": 101
     }
   },
@@ -318,13 +318,13 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "netflix_subscription_manager",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
-      "action": "create_new",
-      "selected_agent": "none",
+      "roster_count": 103,
+      "action": "reuse",
+      "selected_agent": "aws_cloud_billing",
       "matched": false
     },
     "jev": {
@@ -332,11 +332,11 @@
       "action": "reuse",
       "selected_agent": "datadog_incident_monitor",
       "matched": true,
-      "confidence": 0.4985,
+      "confidence": 0.5145,
       "winner_margin": 1,
-      "map_latency_ms": 1032.08,
-      "reduce_latency_ms": 0.02,
-      "total_latency_ms": 1032.18,
+      "map_latency_ms": 3776.98,
+      "reduce_latency_ms": 0.03,
+      "total_latency_ms": 3777.08,
       "api_calls_count": 101
     }
   },
@@ -349,13 +349,13 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "pge_electric_utility_bills",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 103,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "team_sync_scheduler_next_week",
       "matched": false
     },
     "jev": {
@@ -363,11 +363,11 @@
       "action": "reuse",
       "selected_agent": "team_sync_scheduler",
       "matched": true,
-      "confidence": 0.7425,
+      "confidence": 0.755,
       "winner_margin": 1,
-      "map_latency_ms": 881.7,
-      "reduce_latency_ms": 0.02,
-      "total_latency_ms": 881.78,
+      "map_latency_ms": 3483.15,
+      "reduce_latency_ms": 0.01,
+      "total_latency_ms": 3483.23,
       "api_calls_count": 101
     }
   },
@@ -380,13 +380,13 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "pge_electric_utility_bills",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 103,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "gusto_paycheck_stub",
       "matched": false
     },
     "jev": {
@@ -394,11 +394,11 @@
       "action": "reuse",
       "selected_agent": "gusto_payroll_stubs",
       "matched": true,
-      "confidence": 0.693,
+      "confidence": 0.6985,
       "winner_margin": 1,
-      "map_latency_ms": 935.82,
+      "map_latency_ms": 1197.29,
       "reduce_latency_ms": 0.02,
-      "total_latency_ms": 935.91,
+      "total_latency_ms": 1197.37,
       "api_calls_count": 101
     }
   },
@@ -411,13 +411,13 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "pge_electric_utility_bills",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 104,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "spotify_student_invoice_search",
       "matched": false
     },
     "jev": {
@@ -425,11 +425,11 @@
       "action": "reuse",
       "selected_agent": "spotify_premium_receipts",
       "matched": true,
-      "confidence": 0.576,
+      "confidence": 0.5695,
       "winner_margin": 1,
-      "map_latency_ms": 895.5,
+      "map_latency_ms": 941.52,
       "reduce_latency_ms": 0.02,
-      "total_latency_ms": 895.6,
+      "total_latency_ms": 941.6,
       "api_calls_count": 101
     }
   },
@@ -442,25 +442,25 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "gusto_payroll_stubs",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 105,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "pet_vet_chewy_records",
       "matched": true
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 101,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "chewy_pet_records",
       "matched": true,
       "confidence": 1,
       "winner_margin": 0,
-      "map_latency_ms": 911.22,
+      "map_latency_ms": 11539.41,
       "reduce_latency_ms": 0.01,
-      "total_latency_ms": 911.3,
+      "total_latency_ms": 11539.49,
       "api_calls_count": 101
     }
   },
@@ -473,26 +473,26 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "gusto_payroll_stubs",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 106,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "lyft_airport_receipt_search",
       "matched": false
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 101,
       "action": "reuse",
       "selected_agent": "lyft_transit_receipts",
       "matched": true,
-      "confidence": 0.7055,
+      "confidence": 0.722,
       "winner_margin": 1,
-      "map_latency_ms": 893.12,
-      "reduce_latency_ms": 0.02,
-      "total_latency_ms": 893.2,
-      "api_calls_count": 101
+      "map_latency_ms": 8872.54,
+      "reduce_latency_ms": 0.01,
+      "total_latency_ms": 8872.61,
+      "api_calls_count": 102
     }
   },
   {
@@ -504,26 +504,26 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "gusto_payroll_stubs",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 107,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "doordash_dinner_order_search",
       "matched": false
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 101,
       "action": "reuse",
       "selected_agent": "doordash_order_tracker",
       "matched": true,
-      "confidence": 0.74,
+      "confidence": 0.7425,
       "winner_margin": 1,
-      "map_latency_ms": 891.71,
+      "map_latency_ms": 4128.06,
       "reduce_latency_ms": 0.02,
-      "total_latency_ms": 891.79,
-      "api_calls_count": 101
+      "total_latency_ms": 4128.16,
+      "api_calls_count": 102
     }
   },
   {
@@ -535,26 +535,26 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "gusto_payroll_stubs",
       "matched": false
     },
     "deterministic": {
       "roster_count": 108,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "gcp_cloud_billing_search",
       "matched": false
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 101,
       "action": "reuse",
       "selected_agent": "gcp_cloud_billing",
       "matched": true,
-      "confidence": 0.5875,
-      "winner_margin": 0.1455,
-      "map_latency_ms": 992.71,
+      "confidence": 0.581,
+      "winner_margin": 0.165,
+      "map_latency_ms": 7623.38,
       "reduce_latency_ms": 0.02,
-      "total_latency_ms": 992.81,
-      "api_calls_count": 101
+      "total_latency_ms": 7623.47,
+      "api_calls_count": 102
     }
   },
   {
@@ -566,26 +566,26 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "gusto_payroll_stubs",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 109,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "delta_flight_confirmation_search",
       "matched": false
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 101,
       "action": "reuse",
       "selected_agent": "delta_flight_tracker",
       "matched": true,
-      "confidence": 0.6005,
+      "confidence": 0.5975,
       "winner_margin": 1,
-      "map_latency_ms": 890.69,
-      "reduce_latency_ms": 0.03,
-      "total_latency_ms": 890.82,
-      "api_calls_count": 101
+      "map_latency_ms": 1190.77,
+      "reduce_latency_ms": 0.02,
+      "total_latency_ms": 1190.86,
+      "api_calls_count": 102
     }
   },
   {
@@ -596,27 +596,27 @@
     "expected_action": "reuse",
     "baseline": {
       "roster_count": 100,
-      "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "action": "create_new",
+      "selected_agent": "lyft_transit_receipts",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 110,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "apple_store_receipt_search",
       "matched": false
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 101,
       "action": "reuse",
       "selected_agent": "apple_store_receipts",
       "matched": true,
-      "confidence": 0.7395,
+      "confidence": 0.7405,
       "winner_margin": 1,
-      "map_latency_ms": 897.8,
-      "reduce_latency_ms": 0.02,
-      "total_latency_ms": 897.91,
-      "api_calls_count": 101
+      "map_latency_ms": 19657.98,
+      "reduce_latency_ms": 0.01,
+      "total_latency_ms": 19658.08,
+      "api_calls_count": 92
     }
   },
   {
@@ -627,27 +627,27 @@
     "expected_action": "reuse",
     "baseline": {
       "roster_count": 100,
-      "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "action": "create_new",
+      "selected_agent": "lyft_transit_receipts",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 111,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "dental_appointment_search",
       "matched": false
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 101,
       "action": "reuse",
       "selected_agent": "dental_cleaning_scheduler",
       "matched": true,
       "confidence": 0.7095,
-      "winner_margin": 0.1355,
-      "map_latency_ms": 913.73,
+      "winner_margin": 0.111,
+      "map_latency_ms": 6280.61,
       "reduce_latency_ms": 0.02,
-      "total_latency_ms": 913.81,
-      "api_calls_count": 101
+      "total_latency_ms": 6280.72,
+      "api_calls_count": 102
     }
   },
   {
@@ -658,27 +658,27 @@
     "expected_action": "reuse",
     "baseline": {
       "roster_count": 100,
-      "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "action": "create_new",
+      "selected_agent": "dental_cleaning_scheduler",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 112,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "coned_gas_statement_search",
       "matched": false
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 101,
       "action": "reuse",
       "selected_agent": "coned_gas_statements",
       "matched": true,
-      "confidence": 0.643,
+      "confidence": 0.6355,
       "winner_margin": 1,
-      "map_latency_ms": 1005.96,
+      "map_latency_ms": 1095.49,
       "reduce_latency_ms": 0.02,
-      "total_latency_ms": 1006.03,
-      "api_calls_count": 101
+      "total_latency_ms": 1095.61,
+      "api_calls_count": 102
     }
   },
   {
@@ -689,27 +689,27 @@
     "expected_action": "reuse",
     "baseline": {
       "roster_count": 100,
-      "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "action": "create_new",
+      "selected_agent": "coned_gas_statements",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 113,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "amex_statement_rewards_search",
       "matched": false
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 101,
       "action": "reuse",
       "selected_agent": "amex_membership_rewards",
       "matched": false,
-      "confidence": 0.705,
+      "confidence": 0.6985,
       "winner_margin": 1,
-      "map_latency_ms": 862.94,
+      "map_latency_ms": 20146.84,
       "reduce_latency_ms": 0.02,
-      "total_latency_ms": 863.03,
-      "api_calls_count": 101
+      "total_latency_ms": 20146.93,
+      "api_calls_count": 102
     }
   },
   {
@@ -720,27 +720,27 @@
     "expected_action": "reuse",
     "baseline": {
       "roster_count": 100,
-      "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "action": "create_new",
+      "selected_agent": "coned_gas_statements",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
+      "roster_count": 113,
       "action": "reuse",
       "selected_agent": "linear_issue_tracker",
       "matched": true
     },
     "jev": {
-      "roster_count": 100,
-      "action": "reuse",
-      "selected_agent": "linear_issue_tracker",
-      "matched": true,
-      "confidence": 0.6685,
-      "winner_margin": 1,
-      "map_latency_ms": 881.01,
-      "reduce_latency_ms": 0.03,
-      "total_latency_ms": 881.1,
-      "api_calls_count": 101
+      "roster_count": 102,
+      "action": "create_new",
+      "selected_agent": "linear_issue_activity",
+      "matched": false,
+      "confidence": 1,
+      "winner_margin": 0,
+      "map_latency_ms": 20645.95,
+      "reduce_latency_ms": 0.01,
+      "total_latency_ms": 20646.05,
+      "api_calls_count": 90
     }
   },
   {
@@ -752,26 +752,26 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "amex_membership_rewards",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
-      "action": "reuse",
-      "selected_agent": "linear_issue_tracker",
+      "roster_count": 113,
+      "action": "create_new",
+      "selected_agent": "airbnb_reservation_search",
       "matched": false
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 102,
       "action": "reuse",
       "selected_agent": "airbnb_reservation_assistant",
       "matched": true,
-      "confidence": 0.7445,
+      "confidence": 0.751,
       "winner_margin": 1,
-      "map_latency_ms": 929.32,
-      "reduce_latency_ms": 0.02,
-      "total_latency_ms": 929.42,
-      "api_calls_count": 101
+      "map_latency_ms": 10724.7,
+      "reduce_latency_ms": 0.01,
+      "total_latency_ms": 10724.78,
+      "api_calls_count": 103
     }
   },
   {
@@ -783,26 +783,26 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "amex_membership_rewards",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
-      "action": "reuse",
-      "selected_agent": "linear_issue_tracker",
+      "roster_count": 113,
+      "action": "create_new",
+      "selected_agent": "zoom_meeting_recording_transcript_search",
       "matched": false
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 102,
       "action": "reuse",
       "selected_agent": "zoom_meeting_recordings",
       "matched": true,
-      "confidence": 0.71,
+      "confidence": 0.709,
       "winner_margin": 1,
-      "map_latency_ms": 894.95,
+      "map_latency_ms": 998.57,
       "reduce_latency_ms": 0.02,
-      "total_latency_ms": 895.04,
-      "api_calls_count": 101
+      "total_latency_ms": 998.66,
+      "api_calls_count": 103
     }
   },
   {
@@ -814,26 +814,26 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "amex_membership_rewards",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
-      "action": "reuse",
-      "selected_agent": "linear_issue_tracker",
+      "roster_count": 113,
+      "action": "create_new",
+      "selected_agent": "adp_w2_tax_form_search",
       "matched": false
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 102,
       "action": "reuse",
       "selected_agent": "adp_tax_w2_statements",
       "matched": false,
-      "confidence": 0.73,
+      "confidence": 0.7285,
       "winner_margin": 1,
-      "map_latency_ms": 992.66,
+      "map_latency_ms": 9440.72,
       "reduce_latency_ms": 0.02,
-      "total_latency_ms": 992.75,
-      "api_calls_count": 101
+      "total_latency_ms": 9440.81,
+      "api_calls_count": 103
     }
   },
   {
@@ -845,26 +845,26 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "amex_membership_rewards",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
-      "action": "reuse",
-      "selected_agent": "linear_issue_tracker",
+      "roster_count": 113,
+      "action": "create_new",
+      "selected_agent": "youtube_premium_family_receipt",
       "matched": false
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 102,
       "action": "reuse",
       "selected_agent": "youtube_premium_receipts",
       "matched": true,
-      "confidence": 0.5815,
+      "confidence": 0.578,
       "winner_margin": 1,
-      "map_latency_ms": 973.87,
+      "map_latency_ms": 1022.05,
       "reduce_latency_ms": 0.02,
-      "total_latency_ms": 973.96,
-      "api_calls_count": 101
+      "total_latency_ms": 1022.14,
+      "api_calls_count": 103
     }
   },
   {
@@ -876,26 +876,26 @@
     "baseline": {
       "roster_count": 100,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "amex_membership_rewards",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
-      "action": "reuse",
-      "selected_agent": "linear_issue_tracker",
+      "roster_count": 113,
+      "action": "create_new",
+      "selected_agent": "coursera_certificate_search",
       "matched": false
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 102,
       "action": "reuse",
       "selected_agent": "coursera_course_certificates",
       "matched": true,
-      "confidence": 0.729,
+      "confidence": 0.7375,
       "winner_margin": 1,
-      "map_latency_ms": 870.3,
-      "reduce_latency_ms": 0.01,
-      "total_latency_ms": 870.38,
-      "api_calls_count": 101
+      "map_latency_ms": 6510.35,
+      "reduce_latency_ms": 0.06,
+      "total_latency_ms": 6510.55,
+      "api_calls_count": 103
     }
   },
   {
@@ -905,28 +905,28 @@
     "expected": "CREATE_NEW",
     "expected_action": "create_new",
     "baseline": {
-      "roster_count": 100,
+      "roster_count": 101,
       "action": "reuse",
-      "selected_agent": "amazon_delivery_tracker",
+      "selected_agent": "amex_membership_rewards",
       "matched": false
     },
     "deterministic": {
-      "roster_count": 108,
-      "action": "reuse",
-      "selected_agent": "linear_issue_tracker",
-      "matched": false
+      "roster_count": 113,
+      "action": "create_new",
+      "selected_agent": "firestone_repair_invoice_search",
+      "matched": true
     },
     "jev": {
-      "roster_count": 100,
+      "roster_count": 103,
       "action": "create_new",
-      "selected_agent": "none",
+      "selected_agent": "firestone_auto_service_records",
       "matched": true,
       "confidence": 1,
       "winner_margin": 0,
-      "map_latency_ms": 902.29,
+      "map_latency_ms": 1034.61,
       "reduce_latency_ms": 0.01,
-      "total_latency_ms": 902.37,
-      "api_calls_count": 101
+      "total_latency_ms": 1034.7,
+      "api_calls_count": 103
     }
   }
 ]

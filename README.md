@@ -19,17 +19,17 @@ When an agent system scales from 5 to 100+ execution agents, standard LLM prompt
 | Performance Dimension | Baseline OpenPoke (`:8001`) | Enhanced Deterministic (`:8002`) | Enhanced TypeSafe JEV (`:8002`) |
 |---|---|---|---|
 | **15-Turn Selection Accuracy** | **3 / 15 (20.0%)** | **1 / 15 (6.7%)** | **14 / 15 (93.3%)** |
-| **30-Turn Selection Accuracy** | **2 / 30 (6.7%)** | **4 / 30 (13.3%)** | **28 / 30 (93.3%)** |
-| **Domain Reuse Accuracy (30 Turns)** | 2 / 28 (7.1%) | 3 / 28 (10.7%) | **26 / 28 (92.9%)** |
-| **Novel Domain Handling (2 Turns)** | 0 / 2 (0.0%) | 1 / 2 (50.0%) | **2 / 2 (100.0%)** |
-| **Roster Inflation (Duplicate Bloat)** | 100 $\rightarrow$ 100 (+0) | 100 $\rightarrow$ 108 (**+8 duplicate bloat**) | 100 $\rightarrow$ 100 (+0 clean) |
+| **30-Turn Selection Accuracy** | **1 / 30 (3.3%)** | **4 / 30 (13.3%)** | **26 / 30 (86.7%)** |
+| **Domain Reuse Accuracy (30 Turns)** | 1 / 28 (3.6%) | 2 / 28 (7.1%) | **24 / 28 (85.7%)** |
+| **Novel Domain Handling (2 Turns)** | 0 / 2 (0.0%) | 2 / 2 (100.0%) | **2 / 2 (100.0%)** |
+| **Roster Inflation (Duplicate Bloat)** | 100 $\rightarrow$ 101 (+1) | 100 $\rightarrow$ 113 (**+13 duplicate bloat**) | 100 $\rightarrow$ 103 (**+3 clean novel agents**) |
 | **Average Input Tokens per Turn** | **~19,750 tokens** *(scales to 35.7k)* | **0 tokens** *(Local CPU)* | **~24,000 tokens** *(parallel cards)* |
 | **Total Routing Tokens (30 Turns)** | **~592,500 tokens** *(Frontier LLM)* | 0 tokens | ~720,000 tokens *(System 1 API)* |
 | **Routing Cost Model** | Frontier LLM (`gpt-5.6-luna`) @ $3.00/1M | Local compute ($0.00) | TypeSafe System 1 classifier @ $0.15/1M |
 | **Total Routing Cost (30 Turns)** | **$1.778** | **$0.000** | **$0.108** |
 | **Cost per Routing Turn** | **~$0.059 / turn** *(up to $0.10+)* | **$0.000 / turn** | **~$0.0036 / turn** *(< half a cent)* |
-| **Cost-to-Accuracy Efficiency** | Expensive ($1.78) + 6.7% Acc | Free ($0.00) + Broken (13.3% Acc) | **16.5x Cheaper than Baseline + 93.3% Acc** |
-| **Primary Failure Mode** | **Permanent 20-Turn Recency Lock** | **Lexical Dilution & Secondary Lock** | Minor name synonym on T23 & T27 |
+| **Cost-to-Accuracy Efficiency** | Expensive ($1.78) + 3.3% Acc | Free ($0.00) + Broken (13.3% Acc) | **16.5x Cheaper than Baseline + 86.7% Acc** |
+| **Primary Failure Mode** | **Cascading Multi-Turn Recency Locks** | **Lexical Dilution (+13 duplicate bloat)** | Near-synonyms on 4 unseeded variants |
 
 ---
 
@@ -57,7 +57,7 @@ While a flagship model can match explicit literal keywords in single-turn isolat
 
 Under this cognitive load, attention dispersion causes the model to suffer **Context Inertia / Recency Lock**: it latches onto whichever agent was dispatched in the preceding turn rather than scanning the 100 XML tags.
 - In the 15-turn test: Baseline routed **Uber Eats** (Turn 6), **Doctor Physical** (Turn 7), and **PG&E Electric** (Turn 8) to `united_flight_concierge`.
-- In the 30-turn stress test: Baseline suffered a **20-turn permanent lock**—from Turn 11 all the way to Turn 30, it routed Datadog, Team Sync, Gusto, Spotify, Chewy Pet Care, Lyft, DoorDash, GCP, Delta, Apple Store, Dentist, ConEd, Amex, Linear, Airbnb, Zoom, ADP, YouTube, Coursera, and Firestone Auto Mechanic all to `amazon_delivery_tracker`!
+- In the 30-turn stress test: Baseline suffered from **cascading recency lock cycles**: it latched onto `netflix_subscription_manager` for 7 consecutive turns (Turns 5–11), `pge_electric_utility_bills` for 3 turns (Turns 12–14), `gusto_payroll_stubs` for 5 turns (Turns 15–19), `lyft_transit_receipts` for 2 turns (Turns 20–21), `coned_gas_statements` for 3 turns (Turns 22–24), and `amex_membership_rewards` for 6 consecutive turns (Turns 25–30)! Over 30 turns, Baseline was correct only **1 time (3.3%)**.
 
 ---
 
@@ -204,69 +204,69 @@ I executed the 30-turn benchmark through the live Tri-Chat UI with all three eng
 
 | Turn | Domain & Query Prompt | Expected Target | Baseline OpenPoke (`:8001`) | Enhanced Deterministic (`:8002`) | Enhanced TypeSafe JEV (`:8002`) |
 |---|---|---|---|---|---|
-| **T1** | **Rideshare**<br>*"Search my emails for my recent Uber ride receipt, trip fare, and driver tip."* | `uber_ride_receipts` | `uber_ride_receipts`<br>✅ **PASS** | `uber_ride_receipts`<br>✅ **PASS** | **`uber_ride_receipts`**<br>✅ **PASS** (Conf: 74%) |
-| **T2** | **Dev Ops**<br>*"Did anyone review or comment on my GitHub pull request or tag me in an issue today?"* | `github_pull_requests` | `github_pull_requests`<br>✅ **PASS** | `github_activity_today`<br>❌ **FAIL** (Duplicate) | **`github_pull_requests`**<br>✅ **PASS** (Conf: 68%) |
+| **T1** | **Rideshare**<br>*"Search my emails for my recent Uber ride receipt, trip fare, and driver tip."* | `uber_ride_receipts` | `uber_ride_receipts`<br>✅ **PASS** | `none`<br>❌ **FAIL** (Below Thresh) | **`uber_ride_receipts`**<br>✅ **PASS** (Conf: 74%) |
+| **T2** | **Dev Ops**<br>*"Did anyone review or comment on my GitHub pull request or tag me in an issue today?"* | `github_pull_requests` | `uber_ride_receipts`<br>❌ **FAIL** (Recency Lock) | `github_activity_today`<br>❌ **FAIL** (Duplicate) | **`github_pull_requests`**<br>✅ **PASS** (Conf: 68%) |
 | **T3** | **Cloud**<br>*"Check my inbox for my monthly Amazon Web Services cloud compute and EC2 billing invoice."* | `aws_cloud_billing` | `uber_ride_receipts`<br>❌ **FAIL** (Recency Lock) | `aws_billing_invoice_search`<br>❌ **FAIL** (Duplicate) | **`aws_cloud_billing`**<br>✅ **PASS** (Conf: 71%) |
 | **T4** | **Travel**<br>*"Find my United Airlines flight confirmation number and boarding pass for tomorrow's flight."* | `united_flight_concierge` | `aws_cloud_billing`<br>❌ **FAIL** (Recency Lock) | `united_flight_confirmation`<br>❌ **FAIL** (Duplicate) | **`united_flight_concierge`**<br>✅ **PASS** (Conf: 72%) |
-| **T5** | **Streaming**<br>*"Check my emails for my monthly Netflix streaming subscription receipt or plan updates."* | `netflix_subscription_manager` | `united_flight_concierge`<br>❌ **FAIL** (Recency Lock) | `netflix_subscription_search`<br>❌ **FAIL** (Duplicate) | **`netflix_subscription_manager`**<br>✅ **PASS** (Conf: 73%) |
+| **T5** | **Streaming**<br>*"Check my emails for my monthly Netflix streaming subscription receipt or plan updates."* | `netflix_subscription_manager` | `united_flight_concierge`<br>❌ **FAIL** (Recency Lock) | `netflix_subscription_receipts`<br>❌ **FAIL** (Duplicate) | **`netflix_subscription_manager`**<br>✅ **PASS** (Conf: 73%) |
 | **T6** | **Food Delivery (Distractor)**<br>*"Find how much I spent on my dinner food delivery order from Uber Eats last night."* | `uber_eats_receipts` | `netflix_subscription_manager`<br>❌ **FAIL** (Recency Lock) | `uber_eats_order_search`<br>❌ **FAIL** (Duplicate) | **`uber_eats_receipts`**<br>✅ **PASS** (Conf: 73%) |
-| **T7** | **Healthcare**<br>*"Find my upcoming doctor appointment confirmation and annual physical instructions."* | `medical_doctor_appointments` | `uber_eats_receipts`<br>❌ **FAIL** (Recency Lock) | `doctor_appointment_search`<br>❌ **FAIL** (Duplicate) | **`medical_doctor_appointments`**<br>✅ **PASS** (Conf: 76%) |
-| **T8** | **Utilities**<br>*"Find my monthly electric and natural gas utility billing statement from PG&E."* | `pge_electric_utility_bills` | `medical_doctor_appointments`<br>❌ **FAIL** (Recency Lock) | `pge_electric_utility_bills`<br>✅ **PASS** | **`pge_electric_utility_bills`**<br>✅ **PASS** (Conf: 75%) |
-| **T9** | **Banking**<br>*"Find my Chase credit card monthly electronic statement and minimum payment due."* | `chase_bank_statements` | `pge_electric_utility_bills`<br>❌ **FAIL** (Recency Lock) | `chase_credit_card_statement_search`<br>❌ **FAIL** (Duplicate) | **`chase_bank_statements`**<br>✅ **PASS** (Conf: 71%) |
-| **T10** | **E-Commerce**<br>*"Check my emails for Amazon package shipment confirmations and tracking date."* | `amazon_delivery_tracker` | `chase_bank_statements`<br>❌ **FAIL** (Recency Lock) | `none`<br>❌ **FAIL** (Below Thresh) | **`amazon_delivery_tracker`**<br>✅ **PASS** (Conf: 75%) |
-| **T11** | **Dev Monitoring**<br>*"Search my inbox for Datadog CPU monitor alert warnings and APM error rate spikes."* | `datadog_incident_monitor` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `none`<br>❌ **FAIL** | **`datadog_incident_monitor`**<br>✅ **PASS** (Conf: 52%) |
-| **T12** | **Calendar**<br>*"Find weekly team sync calendar invite and Google Meet link for next week."* | `team_sync_scheduler` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `none`<br>❌ **FAIL** | **`team_sync_scheduler`**<br>✅ **PASS** (Conf: 75%) |
-| **T13** | **HR / Payroll**<br>*"Find my latest Gusto employee direct deposit paycheck stub and salary payment."* | `gusto_payroll_stubs` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `none`<br>❌ **FAIL** | **`gusto_payroll_stubs`**<br>✅ **PASS** (Conf: 70%) |
-| **T14** | **Music Streaming**<br>*"Check my emails for my Spotify Premium monthly student discount subscription invoice."* | `spotify_premium_receipts` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `none`<br>❌ **FAIL** | **`spotify_premium_receipts`**<br>✅ **PASS** (Conf: 58%) |
-| **T15** | **Novel Domain 1**<br>*"Find my dog's veterinary rabies vaccination record and pet insurance claim from Chewy."* | `CREATE_NEW`<br>*(Novel Domain)* | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `none`<br>✅ **PASS** (Created New) | **`none`**<br>✅ **PASS** (Option B Fallback) |
-| **T16** | **Rideshare Distractor**<br>*"Find my recent Lyft airport ride receipt and airport terminal pickup fare."* | `lyft_transit_receipts` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `none`<br>❌ **FAIL** | **`lyft_transit_receipts`**<br>✅ **PASS** (Conf: 74%) |
-| **T17** | **Food Delivery Distractor 2**<br>*"Track my DoorDash dinner order confirmation and food delivery receipt."* | `doordash_order_tracker` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `none`<br>❌ **FAIL** | **`doordash_order_tracker`**<br>✅ **PASS** (Conf: 74%) |
-| **T18** | **Cloud Distractor**<br>*"Search emails for my monthly Google Cloud Platform GCP project billing statement and Cloud Run invoices."* | `gcp_cloud_billing` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `none`<br>❌ **FAIL** | **`gcp_cloud_billing`**<br>✅ **PASS** (Conf: 75%) |
-| **T19** | **Airline Distractor**<br>*"Find my Delta Air Lines flight boarding pass and seat upgrade confirmation email."* | `delta_flight_tracker` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `none`<br>❌ **FAIL** | **`delta_flight_tracker`**<br>✅ **PASS** (Conf: 74%) |
-| **T20** | **E-Commerce Distractor**<br>*"Search my inbox for my recent Apple Store hardware purchase receipt and AppleCare warranty."* | `apple_store_receipts` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `none`<br>❌ **FAIL** | **`apple_store_receipts`**<br>✅ **PASS** (Conf: 73%) |
-| **T21** | **Healthcare Specialty**<br>*"Find my upcoming dental cleaning appointment reminder and dentist office instructions."* | `dental_cleaning_scheduler` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `none`<br>❌ **FAIL** | **`dental_cleaning_scheduler`**<br>✅ **PASS** (Conf: 74%) |
-| **T22** | **Utilities Distractor**<br>*"Check my emails for my monthly ConEd natural gas utility statement and billing balance."* | `coned_gas_statements` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `none`<br>❌ **FAIL** | **`coned_gas_statements`**<br>✅ **PASS** (Conf: 74%) |
-| **T23** | **Banking Distractor**<br>*"Check my emails for my American Express Amex credit card monthly statement and membership reward points."* | `amex_rewards_monitor` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `none`<br>❌ **FAIL** | `amex_membership_rewards`<br>⚠️ **NEAR_MATCH** (Conf: 71%) |
-| **T24** | **Issue Tracker Distractor**<br>*"Did someone assign or update a bug ticket on my Linear issue tracker today?"* | `linear_issue_tracker` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `linear_issue_tracker`<br>✅ **PASS** | **`linear_issue_tracker`**<br>✅ **PASS** (Conf: 67%) |
-| **T25** | **Travel & Lodging**<br>*"Find my Airbnb vacation rental confirmation and host check-in instructions for this weekend."* | `airbnb_reservation_assistant` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `linear_issue_tracker`<br>❌ **FAIL** (Recency Lock) | **`airbnb_reservation_assistant`**<br>✅ **PASS** (Conf: 74%) |
-| **T26** | **Meetings & Video**<br>*"Search for the cloud recording link and automated transcript from yesterday's Zoom team meeting."* | `zoom_meeting_recordings` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `linear_issue_tracker`<br>❌ **FAIL** (Recency Lock) | **`zoom_meeting_recordings`**<br>✅ **PASS** (Conf: 71%) |
-| **T27** | **HR & Tax Statements**<br>*"Search my emails for my annual ADP W-2 tax form and wage statement for filing taxes."* | `adp_w2_tax_forms` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `linear_issue_tracker`<br>❌ **FAIL** (Recency Lock) | `adp_tax_w2_statements`<br>⚠️ **NEAR_MATCH** (Conf: 73%) |
-| **T28** | **Streaming Distractor**<br>*"Find my monthly YouTube Premium family plan streaming membership billing receipt."* | `youtube_premium_receipts` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `linear_issue_tracker`<br>❌ **FAIL** (Recency Lock) | **`youtube_premium_receipts`**<br>✅ **PASS** (Conf: 58%) |
-| **T29** | **Education & Learning**<br>*"Find my Coursera machine learning course certificate completion confirmation."* | `coursera_course_certificates` | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `linear_issue_tracker`<br>❌ **FAIL** (Recency Lock) | **`coursera_course_certificates`**<br>✅ **PASS** (Conf: 73%) |
-| **T30** | **Novel Domain 2**<br>*"Check my inbox for my automobile mechanic repair estimate and transmission service invoice from Firestone."* | `CREATE_NEW`<br>*(Novel Domain)* | `amazon_delivery_tracker`<br>❌ **FAIL** (Recency Lock) | `linear_issue_tracker`<br>❌ **FAIL** (Recency Lock) | **`none`**<br>✅ **PASS** (Option B Fallback) |
+| **T7** | **Healthcare**<br>*"Find my upcoming doctor appointment confirmation and annual physical instructions."* | `medical_doctor_appointments` | `netflix_subscription_manager`<br>❌ **FAIL** (Recency Lock) | `doctor_appointment_search`<br>❌ **FAIL** (Duplicate) | **`medical_doctor_appointments`**<br>✅ **PASS** (Conf: 76%) |
+| **T8** | **Utilities**<br>*"Find my monthly electric and natural gas utility billing statement from PG&E."* | `pge_electric_utility_bills` | `netflix_subscription_manager`<br>❌ **FAIL** (Recency Lock) | `pge_electric_utility_bills`<br>✅ **PASS** | **`pge_electric_utility_bills`**<br>✅ **PASS** (Conf: 75%) |
+| **T9** | **Banking**<br>*"Find my Chase credit card monthly electronic statement and minimum payment due."* | `chase_bank_statements` | `netflix_subscription_manager`<br>❌ **FAIL** (Recency Lock) | `chase_credit_card_statement`<br>❌ **FAIL** (Duplicate) | `chase_statement_lookup`<br>⚠️ **NEAR_MATCH** (Conf: 71%) |
+| **T10** | **E-Commerce**<br>*"Check my emails for Amazon package shipment confirmations and tracking date."* | `amazon_delivery_tracker` | `netflix_subscription_manager`<br>❌ **FAIL** (Recency Lock) | `amazon_package_shipments`<br>❌ **FAIL** (Duplicate) | **`amazon_delivery_tracker`**<br>✅ **PASS** (Conf: 75%) |
+| **T11** | **Dev Monitoring**<br>*"Search my inbox for Datadog CPU monitor alert warnings and APM error rate spikes."* | `datadog_incident_monitor` | `netflix_subscription_manager`<br>❌ **FAIL** (Recency Lock) | `aws_cloud_billing`<br>❌ **FAIL** (Recency Lock) | **`datadog_incident_monitor`**<br>✅ **PASS** (Conf: 52%) |
+| **T12** | **Calendar**<br>*"Find weekly team sync calendar invite and Google Meet link for next week."* | `team_sync_scheduler` | `pge_electric_utility_bills`<br>❌ **FAIL** (Recency Lock) | `team_sync_scheduler_next_week`<br>❌ **FAIL** (Duplicate) | **`team_sync_scheduler`**<br>✅ **PASS** (Conf: 75%) |
+| **T13** | **HR / Payroll**<br>*"Find my latest Gusto employee direct deposit paycheck stub and salary payment."* | `gusto_payroll_stubs` | `pge_electric_utility_bills`<br>❌ **FAIL** (Recency Lock) | `gusto_paycheck_stub`<br>❌ **FAIL** (Duplicate) | **`gusto_payroll_stubs`**<br>✅ **PASS** (Conf: 70%) |
+| **T14** | **Music Streaming**<br>*"Check my emails for my Spotify Premium monthly student discount subscription invoice."* | `spotify_premium_receipts` | `pge_electric_utility_bills`<br>❌ **FAIL** (Recency Lock) | `spotify_student_invoice_search`<br>❌ **FAIL** (Duplicate) | **`spotify_premium_receipts`**<br>✅ **PASS** (Conf: 58%) |
+| **T15** | **Novel Domain 1**<br>*"Find my dog's veterinary rabies vaccination record and pet insurance claim from Chewy."* | `CREATE_NEW`<br>*(Novel Domain)* | `gusto_payroll_stubs`<br>❌ **FAIL** (Recency Lock) | `pet_vet_chewy_records`<br>✅ **PASS** (Created New) | **`chewy_pet_records`**<br>✅ **PASS** (Created New) |
+| **T16** | **Rideshare Distractor**<br>*"Find my recent Lyft airport ride receipt and airport terminal pickup fare."* | `lyft_transit_receipts` | `gusto_payroll_stubs`<br>❌ **FAIL** (Recency Lock) | `lyft_airport_receipt_search`<br>❌ **FAIL** (Duplicate) | **`lyft_transit_receipts`**<br>✅ **PASS** (Conf: 74%) |
+| **T17** | **Food Delivery Distractor 2**<br>*"Track my DoorDash dinner order confirmation and food delivery receipt."* | `doordash_order_tracker` | `gusto_payroll_stubs`<br>❌ **FAIL** (Recency Lock) | `doordash_dinner_order_search`<br>❌ **FAIL** (Duplicate) | **`doordash_order_tracker`**<br>✅ **PASS** (Conf: 74%) |
+| **T18** | **Cloud Distractor**<br>*"Search emails for my monthly Google Cloud Platform GCP project billing statement and Cloud Run invoices."* | `gcp_cloud_billing` | `gusto_payroll_stubs`<br>❌ **FAIL** (Recency Lock) | `gcp_cloud_billing_search`<br>❌ **FAIL** (Duplicate) | **`gcp_cloud_billing`**<br>✅ **PASS** (Conf: 75%) |
+| **T19** | **Airline Distractor**<br>*"Find my Delta Air Lines flight boarding pass and seat upgrade confirmation email."* | `delta_flight_tracker` | `gusto_payroll_stubs`<br>❌ **FAIL** (Recency Lock) | `delta_flight_confirmation_search`<br>❌ **FAIL** (Duplicate) | **`delta_flight_tracker`**<br>✅ **PASS** (Conf: 74%) |
+| **T20** | **E-Commerce Distractor**<br>*"Search my inbox for my recent Apple Store hardware purchase receipt and AppleCare warranty."* | `apple_store_receipts` | `lyft_transit_receipts`<br>❌ **FAIL** (Recency Lock) | `apple_store_receipt_search`<br>❌ **FAIL** (Duplicate) | **`apple_store_receipts`**<br>✅ **PASS** (Conf: 73%) |
+| **T21** | **Healthcare Specialty**<br>*"Find my upcoming dental cleaning appointment reminder and dentist office instructions."* | `dental_cleaning_scheduler` | `lyft_transit_receipts`<br>❌ **FAIL** (Recency Lock) | `dental_appointment_search`<br>❌ **FAIL** (Duplicate) | **`dental_cleaning_scheduler`**<br>✅ **PASS** (Conf: 74%) |
+| **T22** | **Utilities Distractor**<br>*"Check my emails for my monthly ConEd natural gas utility statement and billing balance."* | `coned_gas_statements` | `dental_cleaning_scheduler`<br>❌ **FAIL** (Recency Lock) | `coned_gas_statement_search`<br>❌ **FAIL** (Duplicate) | **`coned_gas_statements`**<br>✅ **PASS** (Conf: 74%) |
+| **T23** | **Banking Distractor**<br>*"Check my emails for my American Express Amex credit card monthly statement and membership reward points."* | `amex_rewards_monitor` | `coned_gas_statements`<br>❌ **FAIL** (Recency Lock) | `amex_statement_rewards_search`<br>❌ **FAIL** (Duplicate) | `amex_membership_rewards`<br>⚠️ **NEAR_MATCH** (Conf: 71%) |
+| **T24** | **Issue Tracker Distractor**<br>*"Did someone assign or update a bug ticket on my Linear issue tracker today?"* | `linear_issue_tracker` | `coned_gas_statements`<br>❌ **FAIL** (Recency Lock) | `linear_issue_tracker`<br>✅ **PASS** | `linear_issue_activity`<br>⚠️ **NEAR_MATCH** (Conf: 100%) |
+| **T25** | **Travel & Lodging**<br>*"Find my Airbnb vacation rental confirmation and host check-in instructions for this weekend."* | `airbnb_reservation_assistant` | `amex_membership_rewards`<br>❌ **FAIL** (Recency Lock) | `airbnb_reservation_search`<br>❌ **FAIL** (Duplicate) | **`airbnb_reservation_assistant`**<br>✅ **PASS** (Conf: 75%) |
+| **T26** | **Meetings & Video**<br>*"Search for the cloud recording link and automated transcript from yesterday's Zoom team meeting."* | `zoom_meeting_recordings` | `amex_membership_rewards`<br>❌ **FAIL** (Recency Lock) | `zoom_meeting_recording_transcript_search`<br>❌ **FAIL** (Duplicate) | **`zoom_meeting_recordings`**<br>✅ **PASS** (Conf: 71%) |
+| **T27** | **HR & Tax Statements**<br>*"Search my emails for my annual ADP W-2 tax form and wage statement for filing taxes."* | `adp_w2_tax_forms` | `amex_membership_rewards`<br>❌ **FAIL** (Recency Lock) | `adp_w2_tax_form_search`<br>❌ **FAIL** (Duplicate) | `adp_tax_w2_statements`<br>⚠️ **NEAR_MATCH** (Conf: 73%) |
+| **T28** | **Streaming Distractor**<br>*"Find my monthly YouTube Premium family plan streaming membership billing receipt."* | `youtube_premium_receipts` | `amex_membership_rewards`<br>❌ **FAIL** (Recency Lock) | `youtube_premium_family_receipt`<br>❌ **FAIL** (Duplicate) | **`youtube_premium_receipts`**<br>✅ **PASS** (Conf: 58%) |
+| **T29** | **Education & Learning**<br>*"Find my Coursera machine learning course certificate completion confirmation."* | `coursera_course_certificates` | `amex_membership_rewards`<br>❌ **FAIL** (Recency Lock) | `coursera_certificate_search`<br>❌ **FAIL** (Duplicate) | **`coursera_course_certificates`**<br>✅ **PASS** (Conf: 74%) |
+| **T30** | **Novel Domain 2**<br>*"Check my inbox for my automobile mechanic repair estimate and transmission service invoice from Firestone."* | `CREATE_NEW`<br>*(Novel Domain)* | `amex_membership_rewards`<br>❌ **FAIL** (Recency Lock) | `firestone_repair_invoice_search`<br>✅ **PASS** (Created New) | **`firestone_auto_service_records`**<br>✅ **PASS** (Created New) |
 
 ---
 
 ## Milestone Visual Evidence
 
-Screenshots captured from the automated Playwright run across milestone turns:
+Screenshots captured from the automated Playwright run across milestone turns showing clean dialogue, live agent inspector state, and zero API quota errors:
 
 ### Turn 1: Initial Rideshare Transit Dispatch
 Baseline and JEV correctly identify `uber_ride_receipts`, while Deterministic triggers a spurious duplicate creation.
 ![Turn 1 Screenshot](docs/assets/eval_100_turn_1.png)
 
 ### Turn 5: The Emergence of Baseline Recency Lock
-While JEV accurately routes to `netflix_subscription_manager`, Baseline remains rigidly locked to `aws_cloud_billing` from Turn 3.
+While JEV accurately routes to `netflix_subscription_manager`, Baseline remains locked to `united_flight_concierge` from Turn 4.
 ![Turn 5 Screenshot](docs/assets/eval_100_turn_5.png)
 
 ### Turn 10: E-Commerce & Attention Dispersion
-JEV routes to `amazon_delivery_tracker` with 75% confidence. Baseline repeats the Chase banking agent from Turn 9.
+JEV routes to `amazon_delivery_tracker` with 75% confidence. Baseline is trapped in a 7-turn lock on `netflix_subscription_manager`.
 ![Turn 10 Screenshot](docs/assets/eval_100_turn_10.png)
 
 ### Turn 15: Clean Novel Domain Fallback (Veterinary Care)
-When tested with an unseeded domain (Chewy pet records), all 100 JEV cards score high risk, triggering clean **Option B: CREATE_NEW** fallback.
+When tested with an unseeded domain (Chewy pet records), all 100 JEV cards score high risk, triggering clean **Option B: CREATE_NEW** fallback (`chewy_pet_records`).
 ![Turn 15 Screenshot](docs/assets/eval_100_turn_15.png)
 
 ### Turn 20: Hardware E-Commerce Disambiguation
-JEV disambiguates `apple_store_receipts` from `amazon_delivery_tracker` cleanly with 73% confidence, while Baseline remains trapped in Recency Lock.
+JEV disambiguates `apple_store_receipts` from `amazon_delivery_tracker` cleanly with 73% confidence, while Baseline is locked on `lyft_transit_receipts`.
 ![Turn 20 Screenshot](docs/assets/eval_100_turn_20.png)
 
 ### Turn 25: Travel Lodging Disambiguation
-JEV routes to `airbnb_reservation_assistant` with 74% confidence. Deterministic locks onto `linear_issue_tracker` from Turn 24.
+JEV routes to `airbnb_reservation_assistant` with 75% confidence. Baseline is locked on `amex_membership_rewards`.
 ![Turn 25 Screenshot](docs/assets/eval_100_turn_25.png)
 
 ### Turn 30: Final Automotive Novel Domain Fallback
-On the 30th turn, JEV identifies Firestone auto repair as an unrepresented capability and executes Option B `CREATE_NEW` with 100% confidence.
+On the 30th turn, JEV identifies Firestone auto repair as an unrepresented capability and executes Option B `CREATE_NEW` with 100% confidence (`firestone_auto_service_records`).
 ![Turn 30 Screenshot](docs/assets/eval_100_turn_30.png)
 
 ---
