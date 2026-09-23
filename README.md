@@ -8,6 +8,15 @@ In this repository, I built an end-to-end evaluation lab and production-grade so
 
 ![30-Turn Benchmark Milestone](docs/assets/eval_100_turn_30.png)
 
+> [!IMPORTANT]
+> ### Take-Home Assignment Deliverable Mapping
+> 
+> * **1. The Broader Problem of Agent Overload**: Detailed in [The Agent Overload Problem](#the-agent-overload-problem), [Empirical Root-Cause: The Multi-Turn Recency Lock](#why-roster-breadth-causes-recency-lock-the-multi-turn-trap), and [Baseline Degradation Sweep](#baseline-degradation-sweep-where-prompt-engineering-fails). Explores roster breadth, context depth, token explosion, and conversational attention failure.
+> * **2. Coded Solutions**: Implemented and documented across [Three Routing Approaches Compared](#coded-solution-three-routing-approaches-compared), [Bounded Execution Context](#1-bounded-execution-agent-context-depth), and [TypeSafe JEV Activity Card Architecture](#3-enhanced-typesafe-jev-semantic-mapreduce).
+> * **3. Test Cases & Evaluators**: Detailed in [Test Cases & Evaluators: Methodology & Verification](#test-cases--evaluators-methodology--verification). Includes **753 automated unit/integration tests**, **135 web contract tests**, headless offline evaluators (`evals/runner.py`), and live Playwright-driven multi-turn evaluation benchmarks (`scripts/run_100_agent_30turn_eval.js`).
+> * **4. How I Assessed Performance**: Scored on selection accuracy, domain reuse, novel domain fallback, roster inflation/duplicate bloat, token cost, end-to-end latency, and live visual inspector state in [Scorecard](#executive-summary--scorecard), [30-Turn Multi-Domain Stress Test Matrix](#30-turn-multi-domain-stress-test-matrix), and [Milestone Visual Evidence](#milestone-visual-evidence).
+> * **5. My Own Thinking (Unaddressed Gaps & Solutions)**: Explored in [My Own Thinking: Gaps in Multi-Agent Systems & Production Solutions](#my-own-thinking-gaps-in-multi-agent-systems--production-solutions), addressing agent lifecycle decay/pruning, dynamic agent contract enforcement, cross-agent blackboard state transfer, capability shadowing, and two-stage hybrid retrieval.
+
 ---
 
 ## Executive Summary & Scorecard
@@ -384,34 +393,156 @@ node scripts/run_100_agent_30turn_eval.js
 ```bash
 cd agent-overload-evaluation-lab
 
-# Python unit & execution tests (66 passed)
+# 1. Targeted execution & routing tests (56 passed in 1.05s)
 .venv/bin/pytest server/tests/services/execution/ server/tests/routes/test_agent_inspector.py
 
-# Web UI contract & inspector tests (135 passed)
+# 2. Complete server test suite (753 passed in 33.8s)
+.venv/bin/pytest server/tests --ignore=server/tests/evals/live_lab/test_baseline_launcher.py
+
+# 3. Web UI contract & live inspector tests (135 passed in 3.6s)
 npm test --prefix web
 npm run typecheck --prefix web
 ```
 
 ---
 
-## Ideal Production Architecture (Future Work)
+## Test Cases & Evaluators: Methodology & Verification
 
-While running 100 parallel calls to TypeSafe JEV provides high accuracy at half a cent per turn, for scaling to **1,000+ agents**, I designed an optimized **Two-Stage Hybrid Architecture**:
+A core requirement of this evaluation was demonstrating **how I tested the agent** and **how I assessed whether it was actually working well**.
 
-```
-User Query
-    │
-    ▼
-[ Stage 1: Fast BM25 / Embedding Filter ]  ──> Filters 1,000 agents down to Top 10-15 candidates in <5ms.
-    │
-    ▼
-[ Stage 2: TypeSafe JEV Map/Reduce ]       ──> Parallel semantic evaluation over Top 10 cards in <80ms.
-    │                                          Scores Affinity, Continuity, and Risk.
-    ▼
-[ Winner Selection / Safe Creation ]       ──> 95%+ Accuracy, <100ms Latency, $0.0005 (1/20th cent) cost!
-```
+### 1. Test Cases Suite (Automated Offline Verification)
+I built and maintained a two-tier automated testing pyramid with **888 total passing tests**:
 
-This hybrid model marries the zero-token speed of lexical candidate pre-filtering with the semantic disambiguation power and transcript independence of TypeSafe JEV.
+* **Backend Unit & Contract Tests (753 passing tests in `server/tests/`)**:
+  - `test_bounded_history.py`: Verifies that interaction context is strictly bounded to $k=6$ turns and 4,000 characters without leaking raw execution logs into routing prompts.
+  - `test_candidate_prompt.py`: Ensures candidate agent XML prompts correctly encode capabilities, constraints, and past execution summaries.
+  - `test_activity_card.py` & `test_directory.py`: Validates Pydantic schema serialization, deserialization, and filesystem persistence for `AgentActivityCard`.
+  - `test_jev_client.py` & `test_jev_router.py`: Tests the TypeSafe JEV client protocol, mock classification harnesses, and Map/Reduce composite score computation ($0.5 \text{Affinity} + 0.3 \text{Continuity} - 0.4 \text{Risk}$).
+  - `test_retrieval.py` & `test_routing.py`: Validates deterministic trigram and token Jaccard similarity scoring, threshold enforcement, and disambiguation margins.
+  - `test_agent_dispatch.py` & `test_agent_routing_flow.py`: Verifies end-to-end delegation, execution agent tool calling, and response synthesis.
+
+* **Frontend UI & Contract Tests (135 passing tests in `web/`)**:
+  - `lib/lab/schema.test.ts`: Verifies TypeScript runtime schemas for routing telemetry, candidate scores, and cost tracking.
+  - `components/chat/AgentInspectorPanel.test.tsx`: Verifies real-time inspector rendering of candidate cards, affinity bars, and risk alerts.
+  - `components/lab/EvidencePanels.test.tsx` & `PreflightPanel.test.tsx`: Validates preflight diagnostics, server readiness probes, and side-by-side scorecard diffing.
+
+### 2. Evaluator Framework (`evals/`)
+To evaluate agent selection independently of subjective manual chat, I developed a programmatic evaluation harness:
+* **`evals/schema.py`**: Defines typed evaluation schemas including `RoutingCase`, `CandidateInventory`, `RoutingDecision`, and `EvaluationMetrics`.
+* **`evals/metrics.py`**: Computes macro-averaged and per-turn metrics:
+  - **Selection Accuracy**: $\frac{\text{Correct Invocations}}{\text{Total Turns}}$
+  - **Novel Domain Precision**: Precision in choosing Option B (`CREATE_NEW`) when no existing agent has capability coverage.
+  - **Roster Inflation Factor**: $\frac{\Delta \text{Roster Size}}{\text{Novel Domains Introduced}}$ (measures duplicate pollution).
+  - **Cost per Routing Turn**: Exact dollar spend on routing prompt tokens.
+* **`evals/agent_routing_cases.jsonl`**: A codified corpus of 40 multi-domain evaluation cases with expected targets, distractor domains, and ambiguity tags.
+
+### 3. Live End-to-End Multi-Turn Evaluator (`scripts/run_100_agent_30turn_eval.js`)
+To assess whether the agent was *actually working well* in production-grade conversational conditions, unit tests alone were insufficient. I wrote an automated Chromium Playwright evaluation harness that:
+1. Connects to the live Next.js Tri-Chat frontend (`http://127.0.0.1:3000`).
+2. Iterates through 30 real-world user queries spanning 20 distinct domains.
+3. Submits queries simultaneously across all 3 systems (Baseline `:8001`, Deterministic `:8002`, and TypeSafe JEV `:8002`).
+4. Awaits live streaming responses, inspects agent dispatch logs, and extracts the selected execution agent.
+5. Captures visual screenshot evidence (`docs/assets/eval_100_turn_*.png`) and records complete telemetry into `docs/assets/eval_100_30turns_report.json`.
+
+### 4. How I Assessed Performance
+I evaluated the systems across six quantitative and qualitative axes:
+1. **Accuracy**: Did the router invoke the ground-truth agent?
+2. **Domain Reuse**: When queried on a domain already present in the 100-agent roster, did it reuse the existing agent or hallucinate a duplicate?
+3. **Novel Domain Fallback**: When given an unseeded domain (Turn 15 Chewy, Turn 30 Firestone), did it safely trigger Option B (`CREATE_NEW`)?
+4. **Roster Inflation**: Did the system keep the agent roster clean, or did it inflate the catalog with redundant duplicates?
+5. **Cost Efficiency**: How many tokens and dollars did each routing decision cost?
+6. **Conversational Resilience**: Did the system resist "Recency Lock" and conversational inertia across extended turns?
+
+---
+
+## My Own Thinking: Gaps in Multi-Agent Systems & Production Solutions
+
+Beyond the baseline evaluation, my research into the agent overload problem revealed five critical architectural gaps that exist in current multi-agent systems. Here is how I would solve each in code:
+
+### 1. Agent Lifecycle Management & Garbage Collection (Tombstoning & Decay)
+* **The Gap**: In systems that support dynamic agent creation (`CREATE_NEW`), rosters grow monotonically. Most created agents are ephemeral (e.g. *"Search for that one flight receipt from last summer"*). As the roster reaches hundreds or thousands of agents, stale agents pollute the retrieval index and increase the probability of false-positive candidate collisions.
+* **Code Solution**: Implement an **LRU & Access-Frequency Decay Model** on the `AgentActivityCard`:
+  ```python
+  class AgentLifecycleState(str, Enum):
+      ACTIVE = "active"
+      DORMANT = "dormant"
+      ARCHIVED = "archived"
+
+  def compute_agent_utility(card: AgentActivityCard, current_time: datetime) -> float:
+      days_since_last_use = (current_time - card.last_executed_at).days
+      recency_weight = math.exp(-0.05 * days_since_last_use)
+      frequency_weight = math.log1p(card.execution_count)
+      return 0.7 * recency_weight + 0.3 * frequency_weight
+  ```
+  Agents with utility below a threshold are transitioned to `ARCHIVED` (tombstoned). Archived agents are removed from the active candidate search space and only re-hydrated if a query fails to match all active agents.
+
+### 2. Contract Enforcement & Schema Sandboxes for Dynamically Synthesized Agents
+* **The Gap**: When an interaction agent creates a new execution agent on the fly, it typically writes an unstructured natural language prompt. Over time, prompt drift causes execution agents to format responses inconsistently, misuse tools, or fail silently.
+* **Code Solution**: Strict **Pydantic Schema Contract Validation** at agent synthesis time:
+  ```python
+  class SynthesizedAgentContract(BaseModel):
+      agent_name: str = Field(regex=r"^[a-z0-9_]{3,40}$")
+      capability_description: str = Field(min_length=20, max_length=200)
+      allowed_tools: List[str]
+      input_schema: Dict[str, Any]
+      output_schema: Dict[str, Any]
+      safety_constraints: List[str]
+
+  def validate_new_agent(definition: str) -> SynthesizedAgentContract:
+      # Enforce typed schema before persisting to disk or registering in directory
+      return SynthesizedAgentContract.model_validate_json(definition)
+  ```
+  Every new execution agent must declare a strict typed schema and permission boundary before being admitted to the catalog.
+
+### 3. Cross-Agent Shared State & Context Transfer (The Blackboard Pattern)
+* **The Gap**: Execution agents operate in total isolation. If `flight_booking_agent` extracts travel dates (*"Oct 12 to Oct 18 in San Francisco"*), the subsequent `hotel_reservation_agent` has zero awareness of this discovery, forcing the interaction agent to re-prompt or asking the user to repeat themselves.
+* **Code Solution**: A typed **Context Blackboard (Shared Memory Bus)**:
+  ```python
+  class BlackboardFact(BaseModel):
+      domain: str
+      key: str
+      value: Any
+      source_agent: str
+      confidence: float
+      timestamp: datetime
+
+  class SharedContextBlackboard:
+      def post_fact(self, fact: BlackboardFact) -> None: ...
+      def query_facts(self, domain: str) -> List[BlackboardFact]: ...
+  ```
+  When an execution agent terminates, it emits structured fact artifacts to the blackboard. The router passes relevant blackboard facts into the candidate agent's bounded context.
+
+### 4. Capability Shadowing & Adversarial Agent Hijacking
+* **The Gap**: If an agent is dynamically created with an overly broad description (e.g. `financial_account_manager`), it can "shadow" more specific, security-critical agents (e.g. `chase_bank_statements` or `irs_tax_documents`), intercepting sensitive user queries.
+* **Code Solution**: **Orthogonality & Shadowing Verification**:
+  ```python
+  def verify_agent_orthogonality(new_card: AgentActivityCard, existing_cards: List[AgentActivityCard]) -> bool:
+      for card in existing_cards:
+          overlap = compute_semantic_overlap(new_card.capabilities, card.capabilities)
+          if overlap > 0.65:
+              raise CapabilityShadowingError(
+                  f"New agent '{new_card.name}' overlaps ({overlap:.2f}) with existing '{card.name}'."
+                  " Recommend sub-namespacing or capability merging instead of creation."
+              )
+      return True
+  ```
+
+### 5. Hierarchical Two-Stage Retrieval (Scale to 1,000+ Agents)
+* **The Gap**: While running 100 parallel calls to TypeSafe JEV provides high accuracy at half a cent per turn, scaling to **1,000+ or 10,000+ agents** requires sub-linear retrieval complexity to avoid latency fanout.
+* **Code Solution**: The **Two-Stage Hybrid Architecture**:
+  ```
+  User Query
+      │
+      ▼
+  [ Stage 1: Fast BM25 / Sparse Embedding Filter ]  ──> Filters 1,000 agents to Top 10-15 candidates in <5ms.
+      │
+      ▼
+  [ Stage 2: TypeSafe JEV Map/Reduce ]              ──> Parallel semantic evaluation over Top 10 cards in <80ms.
+      │                                                 Scores Affinity, Continuity, and Risk.
+      ▼
+  [ Winner Selection / Safe Creation ]              ──> 95%+ Accuracy, <100ms Latency, $0.0005 (1/20th cent) cost!
+  ```
+  This architecture provides the ideal balance: zero-token lexical speed for initial candidate reduction, followed by System 1 semantic disambiguation and transcript-independent Option B fallback.
 
 ---
 

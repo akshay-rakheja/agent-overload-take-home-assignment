@@ -110,6 +110,15 @@ def test_lab_settings_parse_environment_without_changing_model_defaults(monkeypa
     monkeypatch.setenv("OPENPOKE_LAB_ENABLED", "true")
     monkeypatch.setenv("OPENPOKE_LAB_COMPOSIO_USER_ID", "opaque-env-user")
     monkeypatch.setenv("OPENPOKE_HOST", "127.0.0.1")
+    monkeypatch.delenv("OPENPOKE_LAB_MODEL", raising=False)
+    monkeypatch.delenv("OPENPOKE_INTERACTION_MODEL", raising=False)
+    monkeypatch.delenv("OPENPOKE_INTERACTION_AGENT_MODEL", raising=False)
+    monkeypatch.delenv("OPENPOKE_EXECUTION_MODEL", raising=False)
+    monkeypatch.delenv("OPENPOKE_EXECUTION_AGENT_MODEL", raising=False)
+    monkeypatch.delenv("OPENPOKE_EMAIL_SEARCH_MODEL", raising=False)
+    monkeypatch.delenv("OPENPOKE_EXECUTION_AGENT_SEARCH_MODEL", raising=False)
+    monkeypatch.delenv("OPENPOKE_SUMMARIZER_MODEL", raising=False)
+    monkeypatch.delenv("OPENPOKE_EMAIL_CLASSIFIER_MODEL", raising=False)
 
     settings = Settings(server_host="127.0.0.1")
 
