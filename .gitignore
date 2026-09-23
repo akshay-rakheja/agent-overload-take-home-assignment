@@ -49,3 +49,6 @@ server/plans/
 .lab/
 test-results/
 web/test-results/
+
+# Local interview notes
+docs/demo-script.md
